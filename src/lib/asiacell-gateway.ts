@@ -1,5 +1,7 @@
 import { db } from "./db";
 import { randomUUID } from "crypto";
+import fetch, { Response as FetchResponse } from "node-fetch";
+import { HttpsProxyAgent } from "https-proxy-agent";
 
 export const AC_API = "https://odpapp.asiacell.com";
 export const AC_API_KEY = "1ccbc4c913bc4ce785a0a2de444aa0d6";
@@ -80,28 +82,35 @@ export function loginHeaders(deviceId: string): Record<string, string> {
   return { ...BASE_HEADERS, Deviceid: deviceId };
 }
 
+function getProxyUrl(): string | undefined {
+  // Single proxy URL
+  if (process.env.ASIACELL_PROXY_URL) return process.env.ASIACELL_PROXY_URL;
+
+  // Rotating proxy list (comma separated)
+  const list = process.env.ASIACELL_PROXIES;
+  if (list) {
+    const proxies = list.split(",").map((p) => p.trim()).filter(Boolean);
+    if (proxies.length > 0) {
+      return proxies[Math.floor(Math.random() * proxies.length)];
+    }
+  }
+  return undefined;
+}
+
 export async function asiacellFetch(
   url: string,
   options: RequestInit,
   headers: Record<string, string>
-): Promise<{ response: Response; text: string; json: any | null }> {
-  const proxyUrl = process.env.ASIACELL_PROXY_URL;
+): Promise<{ response: FetchResponse; text: string; json: any | null }> {
+  const proxyUrl = getProxyUrl();
 
   console.log(`[Asiacell Request] ${options.method || "GET"} ${url}`);
   console.log(`[Asiacell Headers]`, JSON.stringify(headers, null, 2));
   if (options.body) console.log(`[Asiacell Body]`, options.body);
-  if (proxyUrl) console.log(`[Asiacell Proxy] Using proxy: ${proxyUrl}`);
+  if (proxyUrl) console.log(`[Asiacell Proxy] Using proxy: ${proxyUrl.replace(/:\/\/[^@]+@/, "://***@")}`);
 
-  let response: Response;
-  if (proxyUrl) {
-    response = await fetch(proxyUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, method: options.method || "GET", headers, body: options.body }),
-    });
-  } else {
-    response = await fetch(url, { ...options, headers });
-  }
+  const agent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+  const response = await fetch(url, { ...options, headers, agent } as any);
 
   const text = await response.text();
 
@@ -122,7 +131,7 @@ export async function retryAsiacellFetch(
   url: string,
   options: RequestInit,
   headers: Record<string, string>
-): Promise<{ response: Response; text: string; json: any | null }> {
+): Promise<{ response: FetchResponse; text: string; json: any | null }> {
   let result = await asiacellFetch(url, options, headers);
 
   if (!result.json) {
