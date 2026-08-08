@@ -145,4 +145,33 @@ export async function initDb() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS tickets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      description TEXT NOT NULL,
+      order_id TEXT,
+      status TEXT DEFAULT 'open',
+      admin_reply TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS ticket_replies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id INTEGER NOT NULL,
+      user_id INTEGER,
+      is_admin INTEGER DEFAULT 0,
+      message TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
 }

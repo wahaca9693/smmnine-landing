@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import Link from "next/link";
-import { Shield, Plus, Minus, AlertCircle, Smartphone, Users, Palette } from "lucide-react";
+import { Shield, Plus, Minus, AlertCircle, Smartphone, Users, Palette, MessageSquare } from "lucide-react";
 
 export default function AdminPage() {
   const [authorized, setAuthorized] = useState<boolean | null>(null);
@@ -76,6 +76,19 @@ export default function AdminPage() {
           <div>
             <div className="font-bold text-white">إعدادات آسياسيل</div>
             <div className="text-xs text-zinc-500">ربط رقم المتجر وفحص التحويلات</div>
+          </div>
+        </Link>
+
+        <Link
+          href="/admin/tickets"
+          className="flex items-center gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)] p-5 transition hover:border-[var(--color-primary)]/30"
+        >
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface)] text-[var(--color-primary)]">
+            <MessageSquare size={24} />
+          </span>
+          <div>
+            <div className="font-bold text-white">تذاكر الدعم</div>
+            <div className="text-xs text-zinc-500">عرض وإدارة تذاكر المستخدمين</div>
           </div>
         </Link>
 
