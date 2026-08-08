@@ -9,19 +9,27 @@ import { ArrowRight, Package, RefreshCw, Eye, X } from "lucide-react";
 const statusAr: Record<string, string> = {
   Pending: "معلق",
   "In progress": "قيد التنفيذ",
+  Processing: "قيد التنفيذ",
   Partial: "جزئي",
   Completed: "مكتمل",
   Canceled: "ملغي",
+  Cancelled: "ملغي",
   Fail: "فاشل",
+  Failed: "فاشل",
+  Refunded: "مسترد",
 };
 
 const statusColors: Record<string, string> = {
   Pending: "text-amber-400 bg-amber-400/10",
   "In progress": "text-blue-400 bg-blue-400/10",
+  Processing: "text-blue-400 bg-blue-400/10",
   Partial: "text-orange-400 bg-orange-400/10",
   Completed: "text-green-400 bg-green-400/10",
   Canceled: "text-red-400 bg-red-400/10",
+  Cancelled: "text-red-400 bg-red-400/10",
   Fail: "text-red-500 bg-red-500/10",
+  Failed: "text-red-500 bg-red-500/10",
+  Refunded: "text-zinc-400 bg-zinc-400/10",
 };
 
 export default function UserOrdersAdminPage() {

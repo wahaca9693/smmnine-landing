@@ -4,13 +4,17 @@ import { db } from "@/lib/db";
 import { getOrderStatus } from "@/lib/follower";
 
 const statusMap: Record<string, string> = {
-  Pending: "قيد الانتظار",
+  Pending: "معلق",
   "In progress": "قيد التنفيذ",
+  Processing: "قيد التنفيذ",
   Completed: "مكتمل",
+  Complete: "مكتمل",
   Partial: "جزئي",
   Canceled: "ملغي",
+  Cancelled: "ملغي",
   Cancel: "ملغي",
   Fail: "فاشل",
+  Failed: "فاشل",
   Refunded: "مسترد",
 };
 
@@ -34,15 +38,19 @@ export async function POST(request: Request) {
     }
 
     const status = await getOrderStatus(String(order.smmnine_order_id));
+    const rawStatus = String(status.status || "").trim();
+    // Normalize status casing
+    const normalizedStatus = rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1).toLowerCase();
 
     await db.execute({
       sql: "UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-      args: [status.status, orderId],
+      args: [normalizedStatus || rawStatus, orderId],
     });
 
     return NextResponse.json({
       ...status,
-      status_ar: statusMap[status.status] || status.status,
+      status: normalizedStatus || rawStatus,
+      status_ar: statusMap[normalizedStatus] || statusMap[rawStatus] || rawStatus,
     });
   } catch (err: any) {
     console.error("Order status error:", err);

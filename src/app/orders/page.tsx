@@ -7,27 +7,36 @@ import { Search, ShoppingCart, RefreshCw, Eye, X, Link2, Package } from "lucide-
 const filters = [
   { id: "all", label: "الكل" },
   { id: "Pending", label: "معلق" },
-  { id: "In progress", label: "جزئي" },
-  { id: "Partial", label: "تنفيذ" },
+  { id: "In progress", label: "قيد التنفيذ" },
+  { id: "Partial", label: "جزئي" },
   { id: "Completed", label: "مكتمل" },
+  { id: "Canceled", label: "ملغي" },
 ];
 
 const statusColors: Record<string, string> = {
   Pending: "text-amber-400 bg-amber-400/10 border-amber-400/20",
   "In progress": "text-blue-400 bg-blue-400/10 border-blue-400/20",
+  Processing: "text-blue-400 bg-blue-400/10 border-blue-400/20",
   Partial: "text-orange-400 bg-orange-400/10 border-orange-400/20",
   Completed: "text-green-400 bg-green-400/10 border-green-400/20",
   Canceled: "text-red-400 bg-red-400/10 border-red-400/20",
+  Cancelled: "text-red-400 bg-red-400/10 border-red-400/20",
   Fail: "text-red-500 bg-red-500/10 border-red-500/20",
+  Failed: "text-red-500 bg-red-500/10 border-red-500/20",
+  Refunded: "text-zinc-400 bg-zinc-400/10 border-zinc-400/20",
 };
 
 const statusAr: Record<string, string> = {
   Pending: "معلق",
   "In progress": "قيد التنفيذ",
+  Processing: "قيد التنفيذ",
   Partial: "جزئي",
   Completed: "مكتمل",
   Canceled: "ملغي",
+  Cancelled: "ملغي",
   Fail: "فاشل",
+  Failed: "فاشل",
+  Refunded: "مسترد",
 };
 
 export default function OrdersPage() {
@@ -47,9 +56,32 @@ export default function OrdersPage() {
     setLoading(false);
   };
 
+  const refreshActiveOrders = async () => {
+    const activeOrders = orders.filter(
+      (o) => !["Completed", "Canceled", "Cancelled", "Fail", "Failed", "Refunded"].includes(o.status)
+    );
+    for (const order of activeOrders) {
+      try {
+        await fetch("/api/orders/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId: order.id }),
+        });
+      } catch (e) {}
+    }
+    if (activeOrders.length > 0) fetchOrders();
+  };
+
   useEffect(() => {
     fetchOrders();
   }, [filter]);
+
+  useEffect(() => {
+    if (orders.length === 0) return;
+    refreshActiveOrders();
+    const interval = setInterval(refreshActiveOrders, 30000);
+    return () => clearInterval(interval);
+  }, [orders.length, filter]);
 
   const checkStatus = async (order: any) => {
     setSelectedOrder(order);
