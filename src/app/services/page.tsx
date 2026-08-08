@@ -119,6 +119,28 @@ export default function ServicesPage() {
     });
   }, [services, guaranteedPlatform]);
 
+  const guaranteedServicesByType = useMemo(() => {
+    const map: Record<string, any[]> = {};
+    guaranteedServices.forEach((s) => {
+      const type = s.serviceType || "other";
+      if (!map[type]) map[type] = [];
+      map[type].push(s);
+    });
+    return map;
+  }, [guaranteedServices]);
+
+  const guaranteedTypes = useMemo(() => {
+    return Object.keys(guaranteedServicesByType).sort((a, b) => {
+      const order = ["followers", "likes", "views", "comments", "shares", "saves", "stories", "reels", "live", "other"];
+      const ia = order.indexOf(a);
+      const ib = order.indexOf(b);
+      if (ia === -1 && ib === -1) return a.localeCompare(b);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+  }, [guaranteedServicesByType]);
+
   const toggleCategory = (cat: string) => {
     setExpandedCategories((prev) => ({ ...prev, [cat]: !prev[cat] }));
   };
@@ -316,7 +338,7 @@ export default function ServicesPage() {
                   </div>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <button
                     onClick={() => setGuaranteedStep("platform")}
                     className="text-sm font-bold text-green-400 hover:underline"
@@ -330,43 +352,57 @@ export default function ServicesPage() {
                       <p>لا توجد خدمات مضمونة لهذه المنصة حالياً</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {guaranteedServices.map((s) => {
-                        const { badges } = detectGuarantees(s.name);
+                    <div className="space-y-6">
+                      {guaranteedTypes.map((type) => {
+                        const typeServices = guaranteedServicesByType[type];
                         return (
-                          <div key={s.service} className="rounded-2xl border border-green-500/20 bg-green-500/5 p-4">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex-1">
-                                <div className="font-bold text-white">#{s.service}</div>
-                                <div className="mt-1 text-sm text-zinc-300 leading-relaxed">{s.name}</div>
-                                <div className="mt-2 flex flex-wrap gap-1.5">
-                                  {badges.map((badge, idx) => {
-                                    const Icon = badge.icon;
-                                    return (
-                                      <span key={idx} className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold ${badge.color}`}>
-                                        <Icon size={10} /> {badge.label}
-                                      </span>
-                                    );
-                                  })}
+                          <div key={type} className="space-y-3">
+                            <div className="flex items-center gap-2">
+                              <span className="h-px flex-1 bg-[var(--color-border)]" />
+                              <span className="rounded-full bg-green-500/10 px-3 py-1 text-xs font-black text-green-400">
+                                {serviceTypeLabels[type] || type} ({typeServices.length})
+                              </span>
+                              <span className="h-px flex-1 bg-[var(--color-border)]" />
+                            </div>
+                            {typeServices.map((s) => {
+                              const { badges } = detectGuarantees(s.name);
+                              return (
+                                <div key={s.service} className="rounded-2xl border border-green-500/20 bg-green-500/5 p-4">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="flex-1">
+                                      <div className="font-bold text-white">#{s.service}</div>
+                                      <div className="mt-1 text-sm text-zinc-300 leading-relaxed">{s.name}</div>
+                                      <div className="mt-2 flex flex-wrap gap-1.5">
+                                        {badges.map((badge, idx) => {
+                                          const Icon = badge.icon;
+                                          return (
+                                            <span key={idx} className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold ${badge.color}`}>
+                                              <Icon size={10} /> {badge.label}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                    <div className="text-left">
+                                      <div className="text-lg font-black text-[var(--color-primary)]">${Number(s.rate).toFixed(5)}</div>
+                                      <div className="text-xs text-zinc-500">لكل 1000</div>
+                                    </div>
+                                  </div>
+                                  <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
+                                    <span>min: {s.min}</span>
+                                    <span>max: {s.max}</span>
+                                  </div>
+                                  <Link
+                                    href={`/orders/new?service=${s.service}`}
+                                    onClick={() => setShowGuaranteed(false)}
+                                    className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green-600 to-emerald-500 py-2.5 text-sm font-bold text-white"
+                                  >
+                                    <ShoppingCart size={16} />
+                                    اطلب هذه الخدمة
+                                  </Link>
                                 </div>
-                              </div>
-                              <div className="text-left">
-                                <div className="text-lg font-black text-[var(--color-primary)]">${Number(s.rate).toFixed(5)}</div>
-                                <div className="text-xs text-zinc-500">لكل 1000</div>
-                              </div>
-                            </div>
-                            <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
-                              <span>min: {s.min}</span>
-                              <span>max: {s.max}</span>
-                            </div>
-                            <Link
-                              href={`/orders/new?service=${s.service}`}
-                              onClick={() => setShowGuaranteed(false)}
-                              className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green-600 to-emerald-500 py-2.5 text-sm font-bold text-white"
-                            >
-                              <ShoppingCart size={16} />
-                              اطلب هذه الخدمة
-                            </Link>
+                              );
+                            })}
                           </div>
                         );
                       })}
