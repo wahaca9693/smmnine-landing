@@ -151,6 +151,19 @@ export async function retryAsiacellFetch(
   return result;
 }
 
+export function extractAsiacellError(data: any): string {
+  if (!data) return "فشل الاتصال بآسيا سيل";
+  if (data.message) return data.message;
+  if (data.nextAction) {
+    try {
+      const url = new URL(data.nextAction, "https://example.com");
+      const msg = url.searchParams.get("msg");
+      if (msg) return decodeURIComponent(msg).replace(/\+/g, " ");
+    } catch {}
+  }
+  return "فشلت العملية";
+}
+
 export function isSuccessResponse(data: any): boolean {
   if (!data) return false;
   if (data.success === true) return true;
@@ -390,7 +403,7 @@ export async function topupCard(userId: number, sessionId: string | undefined, v
   }
 
   if (!isSuccessResponse(topupData)) {
-    return { success: false, message: topupData.message || "فشل شحن الكارت - تأكد من الرقم" };
+    return { success: false, message: extractAsiacellError(topupData) || "فشل شحن الكارت - تأكد من الرقم" };
   }
 
   const finalAmount = extractTopupAmount(topupData);
@@ -430,7 +443,7 @@ export async function startTransfer(
   }
 
   if (!isSuccessResponse(data)) {
-    return { success: false, message: data.message || data.error || "فشل بدء التحويل" };
+    return { success: false, message: extractAsiacellError(data) || "فشل بدء التحويل" };
   }
 
   const transferPid = data.PID || data.pid || "";
@@ -463,7 +476,7 @@ export async function confirmTransfer(userId: number, sessionId: string, otp: st
   }
 
   if (!isSuccessResponse(data)) {
-    return { success: false, message: data.message || data.error || "فشل تأكيد التحويل" };
+    return { success: false, message: extractAsiacellError(data) || "فشل تأكيد التحويل" };
   }
 
   await creditUser(userId, session.amount, "asiacell", `تحويل رصيد آسياسيل بقيمة ${session.amount}`, `transfer_${session.phone}_${Date.now()}`);
