@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import {
   AC_API,
   getHeaders,
+  getTopupHeaders,
   getStoreSettings,
   extractTopupAmount,
   iqdToUsd,
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "رقم آسياسيل يجب أن يكون 07XXXXXXXXX" }, { status: 400 });
       }
       const deviceId = randomUUID();
-      const r = await fetch(`${AC_API}/api/v1/login?lang=en`, {
+      const r = await fetch(`${AC_API}/api/v1/login?lang=ar`, {
         method: "POST",
         headers: getHeaders(deviceId),
         body: JSON.stringify({ captchaCode: "", username: phone }),
@@ -78,10 +79,10 @@ export async function POST(request: Request) {
     if (action === "verify-otp") {
       const session = await getCustomerSession(body.sessionId);
       if (!session) return NextResponse.json({ error: "الجلسة منتهية" }, { status: 400 });
-      const r = await fetch(`${AC_API}/api/v1/smsvalidation?lang=en`, {
+      const r = await fetch(`${AC_API}/api/v1/smsvalidation?lang=ar`, {
         method: "POST",
         headers: getHeaders(session.device_id),
-        body: JSON.stringify({ PID: session.pid, passcode: body.otp, token: "" }),
+        body: JSON.stringify({ PID: session.pid, passcode: body.otp }),
       });
       const { json: data, text } = await parseExternalResponse(r);
       if (!data) {
@@ -108,7 +109,7 @@ export async function POST(request: Request) {
 
       const r = await fetch(`${AC_API}/api/v1/top-up?lang=ar&theme=avocado`, {
         method: "POST",
-        headers: getHeaders(session.device_id, session.access_token),
+        headers: getTopupHeaders(session.device_id, session.access_token),
         body: JSON.stringify({ msisdn: "", rechargeType: 1, voucher }),
       });
       const { json: topupData, text: topupText } = await parseExternalResponse(r);

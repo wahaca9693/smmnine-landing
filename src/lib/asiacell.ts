@@ -7,33 +7,54 @@ export function randomApiKey() {
   return randomBytes(16).toString("hex"); // 32 hex chars
 }
 
+// Headers matching the working Express gateway (asiacell.js)
 export function baseHeaders() {
   return {
-    "User-Agent": "okhttp/5.0.0-alpha.2",
-    Connection: "Keep-Alive",
-    "Accept-Encoding": "gzip",
-    "X-ODP-API-KEY": randomApiKey(),
-    "Cache-Control": "no-cache",
-    "X-OS-Version": "11",
-    "X-Device-Type": "[Android][realme][RMX3834 11][TIRAMISU][HMS][4.3.7:90000325]",
-    "X-ODP-APP-VERSION": "4.3.7",
-    "X-FROM-APP": "odp",
-    "X-ODP-CHANNEL": "mobile",
-    "X-SCREEN-TYPE": "false",
-    "Content-Type": "application/json; charset=UTF-8",
     Host: "odpapp.asiacell.com",
+    "X-Odp-Api-Key": randomApiKey(),
+    "Cache-Control": "no-cache",
+    "X-Os-Version": "9",
+    "X-Device-Type": "[Android][google][G011A 9][P][HMS][4.2.1:90000263]",
+    "X-Odp-App-Version": "4.2.1",
+    "X-From-App": "odp",
+    "X-Odp-Channel": "mobile",
+    "X-Screen-Type": "false",
+    "Content-Type": "application/json; charset=UTF-8",
+    "User-Agent": "okhttp/5.0.0-alpha.2",
+    Connection: "keep-alive",
   };
 }
 
+// General authenticated headers (login, verify, transfer, records, balance)
 export function getHeaders(deviceId: string, accessToken?: string | null) {
   const headers: Record<string, string> = {
     ...baseHeaders(),
-    DeviceID: deviceId,
+    Deviceid: deviceId,
   };
   if (accessToken) {
     headers.Authorization = `Bearer ${accessToken}`;
+    headers["X-Screen-Type"] = "MOBILE";
   }
   return headers;
+}
+
+// Top-up authenticated headers: NO X-Odp-Api-Key (exactly like working Asia.py/asiacell.js)
+export function getTopupHeaders(deviceId: string, accessToken: string) {
+  return {
+    Host: "odpapp.asiacell.com",
+    "Cache-Control": "no-cache",
+    Deviceid: deviceId,
+    "X-Os-Version": "9",
+    "X-Device-Type": "[Android][google][G011A 9][P][HMS][4.2.1:90000263]",
+    "X-Odp-App-Version": "4.2.1",
+    "X-From-App": "odp",
+    "X-Odp-Channel": "mobile",
+    "X-Screen-Type": "MOBILE",
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json; charset=UTF-8",
+    "User-Agent": "okhttp/5.0.0-alpha.2",
+    Connection: "keep-alive",
+  };
 }
 
 export interface StoreSettings {
