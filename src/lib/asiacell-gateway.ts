@@ -85,11 +85,24 @@ export async function asiacellFetch(
   options: RequestInit,
   headers: Record<string, string>
 ): Promise<{ response: Response; text: string; json: any | null }> {
+  const proxyUrl = process.env.ASIACELL_PROXY_URL;
+
   console.log(`[Asiacell Request] ${options.method || "GET"} ${url}`);
   console.log(`[Asiacell Headers]`, JSON.stringify(headers, null, 2));
   if (options.body) console.log(`[Asiacell Body]`, options.body);
+  if (proxyUrl) console.log(`[Asiacell Proxy] Using proxy: ${proxyUrl}`);
 
-  const response = await fetch(url, { ...options, headers });
+  let response: Response;
+  if (proxyUrl) {
+    response = await fetch(proxyUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, method: options.method || "GET", headers, body: options.body }),
+    });
+  } else {
+    response = await fetch(url, { ...options, headers });
+  }
+
   const text = await response.text();
 
   console.log(`[Asiacell Response] ${response.status} ${url}`);
