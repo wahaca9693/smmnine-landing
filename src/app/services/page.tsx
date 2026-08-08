@@ -110,7 +110,11 @@ export default function ServicesPage() {
                     : "border-[var(--color-border)] bg-[var(--color-card)] hover:border-[var(--color-primary)]/30"
                 }`}
               >
-                <PlatformIcon name={p.id} className="h-8 w-8 text-white" />
+                <PlatformIcon
+                  name={p.id}
+                  className={`h-8 w-8 ${active ? "platform-icon-animated-active" : "text-white"}`}
+                  animated={!active}
+                />
                 <span className="mt-2 text-[10px] font-bold text-zinc-300">{p.name}</span>
               </button>
             );

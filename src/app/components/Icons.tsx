@@ -51,7 +51,16 @@ export const platformIcons: Record<string, React.ReactNode> = {
   ),
 };
 
-export const PlatformIcon = ({ name, className = "h-8 w-8" }: { name: string; className?: string }) => {
+export const PlatformIcon = ({
+  name,
+  className = "h-8 w-8",
+  animated = false,
+}: {
+  name: string;
+  className?: string;
+  animated?: boolean;
+}) => {
   const icon = platformIcons[name] || platformIcons.other;
-  return <span className={className}>{icon}</span>;
+  const animatedClass = animated ? "platform-icon-animated" : "";
+  return <span className={`${className} ${animatedClass}`}>{icon}</span>;
 };
