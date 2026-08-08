@@ -21,6 +21,21 @@ export default function AsiacellDepositPage() {
   const [credited, setCredited] = useState(0);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [exchangeRate, setExchangeRate] = useState(1666);
+
+  useEffect(() => {
+    fetch("/api/payments/asiacell")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.exchange_rate) setExchangeRate(Number(data.exchange_rate));
+      })
+      .catch(() => {});
+  }, []);
+
+  const iqdToUsd = (iqd: number) => {
+    if (!iqd || !exchangeRate || exchangeRate <= 0) return 0;
+    return iqd / exchangeRate;
+  };
 
   const login = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -272,6 +287,7 @@ export default function AsiacellDepositPage() {
                   <Check size={48} className="mx-auto mb-3 text-green-400" />
                   <h3 className="text-xl font-black text-white">تم الشحن بنجاح</h3>
                   <p className="mt-2 text-green-400">تم إضافة {credited.toLocaleString()} رصيد لحسابك</p>
+                  <p className="text-xs text-zinc-400">≈ ${iqdToUsd(credited).toFixed(4)}</p>
                   <button onClick={() => router.push("/services")} className="mt-4 w-full rounded-xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] py-3 font-bold text-white">
                     تصفح الخدمات
                   </button>
@@ -327,7 +343,7 @@ export default function AsiacellDepositPage() {
               {step === 3 && (
                 <form onSubmit={startTransfer} className="space-y-4">
                   <h3 className="font-black text-white">اختر مبلغ التحويل</h3>
-                  <p className="text-xs text-zinc-400">المبلغ سيتم تحويله من رقمك إلى رقم المتجر، ثم يُضاف لرصيدك.</p>
+                  <p className="text-xs text-zinc-400">اكتب المبلغ بالدينار العراقي (IQD) وسنحسب لك قيمته بالدولار تلقائياً.</p>
                   <div className="flex overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
                     <span className="flex items-center justify-center bg-[var(--color-primary)]/10 px-4 font-black text-[var(--color-primary)]">IQD</span>
                     <input
@@ -340,9 +356,25 @@ export default function AsiacellDepositPage() {
                     />
                   </div>
                   {parseInt(transferAmount || "0", 10) > 0 && (
-                    <div className="rounded-xl bg-[var(--color-primary)]/10 p-3 text-center">
-                      <div className="text-sm text-zinc-400">سيتم إضافة لرصيدك:</div>
-                      <div className="text-xl font-black text-[var(--color-primary)]">{parseInt(transferAmount, 10).toLocaleString()} رصيد</div>
+                    <div className="rounded-xl border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/10 p-4 space-y-2 text-center">
+                      <div className="text-sm text-zinc-400">تفاصيل التحويل:</div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-zinc-400">المبلغ بالدينار:</span>
+                        <span className="font-bold text-white">{parseInt(transferAmount, 10).toLocaleString()} د.ع</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-zinc-400">القيمة بالدولار:</span>
+                        <span className="font-bold text-[var(--color-primary)]">${iqdToUsd(parseInt(transferAmount, 10)).toFixed(4)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-zinc-400">سعر الصرف:</span>
+                        <span className="font-bold text-white">1$ = {exchangeRate.toLocaleString()} د.ع</span>
+                      </div>
+                      <div className="border-t border-[var(--color-border)] pt-2">
+                        <div className="text-sm text-zinc-400">سيتم إضافة لرصيدك في الموقع:</div>
+                        <div className="text-xl font-black text-[var(--color-primary)]">{parseInt(transferAmount, 10).toLocaleString()} رصيد</div>
+                        <div className="text-xs text-zinc-500">≈ ${iqdToUsd(parseInt(transferAmount, 10)).toFixed(4)}</div>
+                      </div>
                     </div>
                   )}
                   <button
@@ -359,6 +391,11 @@ export default function AsiacellDepositPage() {
                 <form onSubmit={confirmTransfer} className="space-y-4">
                   <h3 className="font-black text-white">تأكيد التحويل</h3>
                   <p className="text-xs text-zinc-400">أدخل رمز التأكيد الذي وصلك من آسياسيل لإتمام التحويل إلى رقم المتجر.</p>
+                  <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-center">
+                    <div className="text-sm text-zinc-400">مبلغ التحويل:</div>
+                    <div className="text-lg font-black text-white">{parseInt(transferAmount || "0", 10).toLocaleString()} د.ع</div>
+                    <div className="text-sm font-bold text-[var(--color-primary)]">≈ ${iqdToUsd(parseInt(transferAmount || "0", 10)).toFixed(4)}</div>
+                  </div>
                   <input
                     type="text"
                     value={transferOtp}
@@ -390,6 +427,7 @@ export default function AsiacellDepositPage() {
                   <Check size={48} className="mx-auto mb-3 text-green-400" />
                   <h3 className="text-xl font-black text-white">تم التحويل بنجاح</h3>
                   <p className="mt-2 text-green-400">تم إضافة {credited.toLocaleString()} رصيد لحسابك</p>
+                  <p className="text-xs text-zinc-400">≈ ${iqdToUsd(credited).toFixed(4)}</p>
                   <button onClick={() => router.push("/services")} className="mt-4 w-full rounded-xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] py-3 font-bold text-white">
                     تصفح الخدمات
                   </button>
