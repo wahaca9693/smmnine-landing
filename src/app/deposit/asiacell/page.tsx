@@ -17,21 +17,10 @@ export default function AsiacellDepositPage() {
   const [transferOtp, setTransferOtp] = useState("");
   const [voucher, setVoucher] = useState("");
   const [sessionId, setSessionId] = useState("");
-  const [exchangeRate, setExchangeRate] = useState(1666);
   const [transferAmount, setTransferAmount] = useState("");
   const [credited, setCredited] = useState(0);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/payments/asiacell")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.exchange_rate) setExchangeRate(data.exchange_rate);
-      });
-  }, []);
-
-  const estimatedUSD = (iqd: number) => (iqd > 0 ? Math.floor((iqd / exchangeRate) * 100) / 100 : 0);
 
   const login = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -282,7 +271,7 @@ export default function AsiacellDepositPage() {
                 <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-6 text-center">
                   <Check size={48} className="mx-auto mb-3 text-green-400" />
                   <h3 className="text-xl font-black text-white">تم الشحن بنجاح</h3>
-                  <p className="mt-2 text-green-400">تم إضافة ${credited.toFixed(4)} لرصيدك</p>
+                  <p className="mt-2 text-green-400">تم إضافة {credited.toLocaleString()} رصيد لحسابك</p>
                   <button onClick={() => router.push("/services")} className="mt-4 w-full rounded-xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] py-3 font-bold text-white">
                     تصفح الخدمات
                   </button>
@@ -352,8 +341,8 @@ export default function AsiacellDepositPage() {
                   </div>
                   {parseInt(transferAmount || "0", 10) > 0 && (
                     <div className="rounded-xl bg-[var(--color-primary)]/10 p-3 text-center">
-                      <div className="text-sm text-zinc-400">ستحصل على تقريباً:</div>
-                      <div className="text-xl font-black text-[var(--color-primary)]">≈ $ {estimatedUSD(parseInt(transferAmount, 10)).toFixed(4)}</div>
+                      <div className="text-sm text-zinc-400">سيتم إضافة لرصيدك:</div>
+                      <div className="text-xl font-black text-[var(--color-primary)]">{parseInt(transferAmount, 10).toLocaleString()} رصيد</div>
                     </div>
                   )}
                   <button
@@ -400,7 +389,7 @@ export default function AsiacellDepositPage() {
                 <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-6 text-center">
                   <Check size={48} className="mx-auto mb-3 text-green-400" />
                   <h3 className="text-xl font-black text-white">تم التحويل بنجاح</h3>
-                  <p className="mt-2 text-green-400">تم إضافة ${credited.toFixed(4)} لرصيدك</p>
+                  <p className="mt-2 text-green-400">تم إضافة {credited.toLocaleString()} رصيد لحسابك</p>
                   <button onClick={() => router.push("/services")} className="mt-4 w-full rounded-xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] py-3 font-bold text-white">
                     تصفح الخدمات
                   </button>

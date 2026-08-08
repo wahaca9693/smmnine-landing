@@ -4,9 +4,9 @@ import {
   AC_API,
   getHeaders,
   getTopupHeaders,
-  getStoreSettings,
+  getAdminRow,
   extractTopupAmount,
-  iqdToUsd,
+  isSuccessResponse,
   creditUser,
   cleanPhone,
   createCustomerSession,
@@ -29,11 +29,12 @@ async function parseExternalResponse(r: Response) {
 export async function GET() {
   try {
     await requireAuth();
-    const settings = await getStoreSettings();
+    const admin = await getAdminRow();
     return NextResponse.json({
-      connected: !!settings.store_phone,
-      store_phone: settings.store_phone,
-      exchange_rate: settings.exchange_rate,
+      connected: !!admin?.store_phone || !!admin?.phone,
+      admin_connected: !!admin?.authenticated,
+      store_phone: admin?.store_phone || admin?.phone || "",
+      exchange_rate: admin?.exchange_rate || 1666,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 401 });
@@ -45,14 +46,7 @@ export async function POST(request: Request) {
     const userSession = await requireAuth();
     const body = await request.json();
     const action = body.action;
-    const settings = await getStoreSettings();
-
-    if (action === "estimate") {
-      const iqd = parseInt(body.amount, 10);
-      if (!iqd || iqd <= 0) return NextResponse.json({ error: "مبلغ غير صالح" }, { status: 400 });
-      const usd = iqdToUsd(iqd, settings.exchange_rate);
-      return NextResponse.json({ iqd, usd, exchange_rate: settings.exchange_rate });
-    }
+    const admin = await getAdminRow();
 
     if (action === "login") {
       const phone = cleanPhone(body.phone || "");
@@ -99,9 +93,13 @@ export async function POST(request: Request) {
 
     if (action === "topup") {
       const session = await getCustomerSession(body.sessionId);
-      if (!session || !session.access_token) {
-        return NextResponse.json({ error: "الجلسة منتهية أو لم يتم التحقق" }, { status: 400 });
+      const effectiveToken = session?.access_token || admin?.access_token || "";
+      const effectiveDeviceId = session?.device_id || admin?.device_id || "";
+
+      if (!effectiveToken || !effectiveDeviceId) {
+        return NextResponse.json({ error: "بوابة آسياسيل غير متصلة - تواصل مع الإدارة" }, { status: 400 });
       }
+
       const voucher = String(body.voucher || "").trim();
       if (!voucher || voucher.length < 4) {
         return NextResponse.json({ error: "رقم الكارت مطلوب" }, { status: 400 });
@@ -109,7 +107,7 @@ export async function POST(request: Request) {
 
       const r = await fetch(`${AC_API}/api/v1/top-up?lang=ar&theme=avocado`, {
         method: "POST",
-        headers: getTopupHeaders(session.device_id, session.access_token),
+        headers: getTopupHeaders(effectiveDeviceId, effectiveToken),
         body: JSON.stringify({ msisdn: "", rechargeType: 1, voucher }),
       });
       const { json: topupData, text: topupText } = await parseExternalResponse(r);
@@ -119,21 +117,21 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "رد غير متوقع من Asiacell - حاول مرة أخرى" }, { status: 502 });
       }
 
-      if (!topupData.success) {
+      if (!isSuccessResponse(topupData)) {
         return NextResponse.json({ success: false, message: topupData.message || "فشل شحن الكارت - تأكد من الرقم" });
       }
 
-      const amountIQD = extractTopupAmount(topupData);
-      if (!amountIQD || amountIQD <= 0) {
+      const finalAmount = extractTopupAmount(topupData);
+      if (!finalAmount || finalAmount <= 0) {
         return NextResponse.json({ success: false, message: "تم شحن الكارت لكن لم يتم تحديد المبلغ - تواصل مع الإدارة" });
       }
 
-      const creditAmount = iqdToUsd(amountIQD, settings.exchange_rate);
+      const creditAmount = finalAmount;
       if (creditAmount > 0) {
-        await creditUser(userSession.userId!, creditAmount, "asiacell", `شحن كرت آسياسيل بقيمة ${amountIQD} د.ع`, `card_${voucher.slice(-4)}_${Date.now()}`);
+        await creditUser(userSession.userId!, creditAmount, "asiacell", `شحن كرت آسياسيل بقيمة ${finalAmount}`, `card_${voucher.slice(-4)}_${Date.now()}`);
       }
-      await deleteCustomerSession(session.id);
-      return NextResponse.json({ success: true, amountIQD, credited: creditAmount, message: `تم شحن الكرت وإضافة $${creditAmount} لرصيدك` });
+      if (session) await deleteCustomerSession(session.id);
+      return NextResponse.json({ success: true, amountIQD: finalAmount, credited: creditAmount, message: `تم شحن الكرت وإضافة ${creditAmount} لرصيدك` });
     }
 
     if (action === "transfer") {
@@ -141,7 +139,8 @@ export async function POST(request: Request) {
       if (!session || !session.access_token) {
         return NextResponse.json({ error: "الجلسة منتهية أو لم يتم التحقق" }, { status: 400 });
       }
-      if (!settings.store_phone) {
+      const storePhone = admin?.store_phone || admin?.phone;
+      if (!storePhone) {
         return NextResponse.json({ error: "رقم المتجر غير مضبوط - تواصل مع الإدارة" }, { status: 400 });
       }
       const amountIQD = parseInt(body.amount, 10);
@@ -152,7 +151,7 @@ export async function POST(request: Request) {
       const r = await fetch(`${AC_API}/api/v1/credit-transfer/start?lang=ar`, {
         method: "POST",
         headers: getHeaders(session.device_id, session.access_token),
-        body: JSON.stringify({ amount: amountIQD, receiverMsisdn: settings.store_phone }),
+        body: JSON.stringify({ amount: amountIQD, receiverMsisdn: storePhone }),
       });
       const { json: data, text } = await parseExternalResponse(r);
       console.log("[Asiacell Transfer Start]", JSON.stringify(data || text.slice(0, 200)));
@@ -161,11 +160,15 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "رد غير متوقع من Asiacell - ربما الموقع يواجه ضغطاً. حاول مرة أخرى." }, { status: 502 });
       }
 
+      if (!isSuccessResponse(data)) {
+        return NextResponse.json({ success: false, message: data.message || data.error || "فشل بدء التحويل" });
+      }
+
       const transferPid = data.PID || data.pid || "";
       if (!transferPid) {
         return NextResponse.json({
           success: false,
-          message: data.message || data.error || "فشل بدء التحويل",
+          message: data.message || data.error || "فشل بدء التحويل - لم يتم الحصول على PID",
           response: data,
         });
       }
@@ -173,7 +176,7 @@ export async function POST(request: Request) {
       await updateCustomerSession(session.id, { transfer_pid: transferPid, amount: amountIQD, step: "awaiting_transfer_otp" });
       return NextResponse.json({
         success: true,
-        message: "تم بدء التحويل. أدخل رمز التأكيد الذي وصلك من آسيا سيل.",
+        message: data.message || "تم بدء التحويل. أدخل رمز التأكيد الذي وصلك من آسيا سيل.",
         response: data,
       });
     }
@@ -198,16 +201,17 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "رد غير متوقع من Asiacell - حاول مرة أخرى" }, { status: 502 });
       }
 
-      if (!data.success) {
+      const transactionCompleted = isSuccessResponse(data);
+      if (!transactionCompleted) {
         return NextResponse.json({ success: false, message: data.message || data.error || "فشل تأكيد التحويل" });
       }
 
-      const creditAmount = iqdToUsd(session.amount, settings.exchange_rate);
+      const creditAmount = session.amount;
       if (creditAmount > 0) {
-        await creditUser(userSession.userId!, creditAmount, "asiacell", `تحويل رصيد آسياسيل بقيمة ${session.amount} د.ع`, `transfer_${session.phone}_${Date.now()}`);
+        await creditUser(userSession.userId!, creditAmount, "asiacell", `تحويل رصيد آسياسيل بقيمة ${session.amount}`, `transfer_${session.phone}_${Date.now()}`);
       }
       await deleteCustomerSession(session.id);
-      return NextResponse.json({ success: true, credited: creditAmount, message: "تم التحويل بنجاح" });
+      return NextResponse.json({ success: true, credited: creditAmount, message: `تم التحويل بنجاح! تمت إضافة ${creditAmount} لرصيدك.` });
     }
 
     if (action === "resend") {

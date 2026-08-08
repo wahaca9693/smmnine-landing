@@ -7,11 +7,14 @@ export function randomApiKey() {
   return randomBytes(16).toString("hex"); // 32 hex chars
 }
 
-// Headers matching the working Express gateway (asiacell.js)
+// Fixed API key from the working gateway
+const AC_API_KEY = "1ccbc4c913bc4ce785a0a2de444aa0d6";
+
+// Base headers matching the 100% working gateway (asia.txt)
 export function baseHeaders() {
   return {
     Host: "odpapp.asiacell.com",
-    "X-Odp-Api-Key": randomApiKey(),
+    "X-Odp-Api-Key": AC_API_KEY,
     "Cache-Control": "no-cache",
     "X-Os-Version": "9",
     "X-Device-Type": "[Android][google][G011A 9][P][HMS][4.2.1:90000263]",
@@ -25,7 +28,7 @@ export function baseHeaders() {
   };
 }
 
-// General authenticated headers (login, verify, transfer, records, balance)
+// General authenticated headers
 export function getHeaders(deviceId: string, accessToken?: string | null) {
   const headers: Record<string, string> = {
     ...baseHeaders(),
@@ -38,7 +41,7 @@ export function getHeaders(deviceId: string, accessToken?: string | null) {
   return headers;
 }
 
-// Top-up authenticated headers: NO X-Odp-Api-Key (exactly like working Asia.py/asiacell.js)
+// Top-up authenticated headers: NO X-Odp-Api-Key (exactly like working gateway)
 export function getTopupHeaders(deviceId: string, accessToken: string) {
   return {
     Host: "odpapp.asiacell.com",
@@ -57,10 +60,16 @@ export function getTopupHeaders(deviceId: string, accessToken: string) {
   };
 }
 
-export interface StoreSettings {
+export interface AdminSession {
+  id: number;
   phone: string;
-  store_phone: string;
+  device_id: string;
+  access_token: string;
+  pid: string;
+  authenticated: number;
   exchange_rate: number;
+  store_phone: string;
+  updated_at: string;
 }
 
 export interface CustomerSession {
@@ -81,23 +90,33 @@ export function cleanPhone(phone: string) {
   return phone.replace(/[^0-9]/g, "");
 }
 
-export async function getStoreSettings(): Promise<StoreSettings> {
+export async function getAdminRow(): Promise<AdminSession | null> {
   const result = await db.execute("SELECT * FROM asiacell_admin WHERE id = 1");
-  const row = (result.rows[0] || {}) as any;
+  const row = result.rows[0] as any;
+  if (!row) return null;
   return {
-    phone: row.phone || "",
-    store_phone: row.store_phone || row.phone || "",
-    exchange_rate: Number(row.exchange_rate || 1666),
-  };
+    ...row,
+    id: Number(row.id),
+    authenticated: Number(row.authenticated),
+    exchange_rate: Number(row.exchange_rate),
+  } as AdminSession;
 }
 
-export async function setStoreSettings(data: Partial<StoreSettings>) {
-  const existing = await db.execute("SELECT id FROM asiacell_admin WHERE id = 1");
-  if (existing.rows.length === 0) {
+export async function setAdminRow(data: Partial<AdminSession>) {
+  const existing = await getAdminRow();
+  if (!existing) {
     await db.execute({
-      sql: `INSERT INTO asiacell_admin (id, phone, store_phone, exchange_rate)
-            VALUES (1, ?, ?, ?)`,
-      args: [data.phone || "", data.store_phone || data.phone || "", data.exchange_rate ?? 1666],
+      sql: `INSERT INTO asiacell_admin (id, phone, device_id, access_token, pid, authenticated, exchange_rate, store_phone)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        data.phone || "",
+        data.device_id || "",
+        data.access_token || "",
+        data.pid || "",
+        data.authenticated ?? 0,
+        data.exchange_rate ?? 1666,
+        data.store_phone || data.phone || "",
+      ],
     });
   } else {
     const fields: string[] = [];
@@ -157,15 +176,15 @@ export async function deleteCustomerSession(id: string) {
   await db.execute({ sql: "DELETE FROM asiacell_sessions WHERE id = ?", args: [id] });
 }
 
-export async function creditUser(userId: number, amountUSD: number, method: string, description: string, paymentId: string) {
+export async function creditUser(userId: number, amount: number, method: string, description: string, paymentId: string) {
   await db.execute({
     sql: "UPDATE users SET balance = balance + ? WHERE id = ?",
-    args: [amountUSD, userId],
+    args: [amount, userId],
   });
   await db.execute({
     sql: `INSERT INTO transactions (user_id, type, amount, status, description, method)
           VALUES (?, 'deposit', ?, 'completed', ?, ?)`,
-    args: [userId, amountUSD, description, method],
+    args: [userId, amount, description, method],
   });
 }
 
@@ -182,8 +201,12 @@ export function extractTopupAmount(data: any): number {
   return 0;
 }
 
-export function iqdToUsd(iqd: number, rate: number) {
-  return Math.floor((iqd / rate) * 100) / 100;
+export function isSuccessResponse(data: any): boolean {
+  if (!data) return false;
+  if (data.success === true) return true;
+  const msg = String(data.message || "").toLowerCase();
+  if (msg.includes("نجاح") || msg.includes("تمت") || msg.includes("success")) return true;
+  return false;
 }
 
 export async function setUserVerifiedPhone(userId: number, phone: string) {
@@ -191,4 +214,82 @@ export async function setUserVerifiedPhone(userId: number, phone: string) {
     sql: "UPDATE users SET verified_phone = ? WHERE id = ?",
     args: [cleanPhone(phone), userId],
   });
+}
+
+// Processed transfer records to avoid double-crediting
+const processedTransfers = new Set<string>();
+
+export async function checkRecordsAndCredit() {
+  const admin = await getAdminRow();
+  if (!admin?.authenticated || !admin.access_token) {
+    return { checked: false, reason: "Admin not authenticated" };
+  }
+
+  try {
+    const headers = {
+      ...baseHeaders(),
+      Deviceid: admin.device_id,
+      Authorization: `Bearer ${admin.access_token}`,
+      "X-Screen-Type": "MOBILE",
+    };
+
+    const r = await fetch(`${AC_API}/api/v1/cdr/detail?type=sms&page=1&limit=50&lang=ar&theme=avocado`, { headers });
+    const text = await r.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      console.error("[Asiacell Records] Non-JSON:", text.slice(0, 200));
+      return { checked: false, error: "Non-JSON response" };
+    }
+
+    console.log(`[Asiacell Records] Fetched ${Array.isArray(data?.data) ? data.data.length : 0} records`);
+
+    if (!data?.data || !Array.isArray(data.data)) {
+      if (data?.status === 401 || String(data?.message || "").toLowerCase().includes("unauthorized")) {
+        await setAdminRow({ authenticated: 0 });
+        console.log("[Asiacell Records] Token expired, admin needs to re-authenticate");
+      }
+      return { checked: true, processed: 0, error: "No records data" };
+    }
+
+    let processed = 0;
+    for (const record of data.data) {
+      const recordId = record.id || record.transactionId || `${record.date}_${record.otherParty}`;
+      if (processedTransfers.has(recordId)) continue;
+
+      const msg = record.message || record.description || record.text || "";
+      const sender = record.otherParty || record.from || record.number || "";
+      const amountMatch = String(msg).match(/(\d+)/);
+      const isTransfer =
+        String(msg).includes("تحويل") ||
+        String(msg).includes("رصيد") ||
+        String(msg).toLowerCase().includes("transfer") ||
+        String(msg).toLowerCase().includes("balance");
+
+      if (isTransfer && amountMatch && sender) {
+        const amount = parseInt(amountMatch[1]);
+        if (amount > 0) {
+          const cleanSender = cleanPhone(sender);
+          const result = await db.execute({
+            sql: "SELECT id, username, balance FROM users WHERE verified_phone = ? OR verified_phone LIKE ?",
+            args: [cleanSender, `%${cleanSender.slice(-10)}`],
+          });
+
+          if (result.rows.length > 0) {
+            const user = result.rows[0] as any;
+            await creditUser(Number(user.id), amount, "asiacell", `تحويل وارد من ${sender} بقيمة ${amount}`, recordId);
+            console.log(`[Asiacell Records] Auto-credited ${amount} to ${user.username} from ${sender}`);
+            processed++;
+          }
+        }
+      }
+      processedTransfers.add(recordId);
+    }
+
+    return { checked: true, processed, total: data.data.length };
+  } catch (err: any) {
+    console.error("[Asiacell Records] Error:", err.message);
+    return { checked: false, error: err.message };
+  }
 }
