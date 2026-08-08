@@ -82,16 +82,22 @@ export function loginHeaders(deviceId: string): Record<string, string> {
   return { ...BASE_HEADERS, Deviceid: deviceId };
 }
 
+function normalizeProxyUrl(proxy: string): string {
+  const trimmed = proxy.trim();
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+  return `http://${trimmed}`;
+}
+
 function getProxyUrl(): string | undefined {
   // Single proxy URL
-  if (process.env.ASIACELL_PROXY_URL) return process.env.ASIACELL_PROXY_URL;
+  if (process.env.ASIACELL_PROXY_URL) return normalizeProxyUrl(process.env.ASIACELL_PROXY_URL);
 
   // Rotating proxy list (comma separated)
   const list = process.env.ASIACELL_PROXIES;
   if (list) {
     const proxies = list.split(",").map((p) => p.trim()).filter(Boolean);
     if (proxies.length > 0) {
-      return proxies[Math.floor(Math.random() * proxies.length)];
+      return normalizeProxyUrl(proxies[Math.floor(Math.random() * proxies.length)]);
     }
   }
   return undefined;
