@@ -13,8 +13,8 @@ const tajawal = Tajawal({
 });
 
 export const metadata: Metadata = {
-  title: "Follower - لوحة التحكم",
-  description: "لوحة تحكم Follower لخدمات السوشيال ميديا",
+  title: "Follower",
+  description: "Follower - خدمات السوشيال ميديا",
 };
 
 export default async function RootLayout({
