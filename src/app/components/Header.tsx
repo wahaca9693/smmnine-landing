@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Menu, User, Bell, Zap, X } from "lucide-react";
+import { Menu, User, Bell, X } from "lucide-react";
+import Image from "next/image";
 import { useLanguage } from "./LanguageProvider";
 
 interface HeaderProps {
@@ -38,9 +39,11 @@ export default function Header({ onMenuClick, user, unreadNotifications = 0 }: H
     <header className="sticky top-0 z-50 flex h-[60px] items-center justify-between bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] px-4 shadow-lg">
       {/* Logo on the right (RTL visual left) */}
       <div className="flex items-center gap-2">
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20 text-white">
-          <Zap size={22} fill="currentColor" />
-        </span>
+        <img
+          src="/logo.gif"
+          alt="Follower"
+          className="h-10 w-10 rounded-xl object-cover"
+        />
         <span className="text-xl font-black text-white">Follower</span>
       </div>
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Zap, Eye, EyeOff, Mail, User, Lock, Shield, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Mail, User, Lock, Shield, Loader2 } from "lucide-react";
 import Link from "next/link";
 
 export default function LoginPage() {
@@ -84,9 +84,11 @@ export default function LoginPage() {
   if (showSplash) {
     return (
       <div className="flex h-screen flex-col items-center justify-center bg-[var(--color-bg)]">
-        <div className="flex h-24 w-24 animate-pulse items-center justify-center rounded-3xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] text-white shadow-2xl shadow-orange-500/30">
-          <Zap size={48} fill="currentColor" />
-        </div>
+        <img
+          src="/logo.gif"
+          alt="Follower"
+          className="h-24 w-24 rounded-3xl object-cover shadow-2xl shadow-orange-500/30"
+        />
         <h1 className="mt-6 text-3xl font-black text-white">Follower</h1>
         <p className="mt-2 text-sm text-zinc-500">جاري التحميل...</p>
       </div>
@@ -96,9 +98,11 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[var(--color-bg)] px-5 py-8">
       <div className="mb-8 flex items-center gap-3">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] text-white shadow-lg shadow-orange-500/30">
-          <Zap size={30} fill="currentColor" />
-        </span>
+        <img
+          src="/logo.gif"
+          alt="Follower"
+          className="h-14 w-14 rounded-2xl object-cover shadow-lg shadow-orange-500/30"
+        />
         <span className="text-3xl font-black text-white">Follower</span>
       </div>
 
