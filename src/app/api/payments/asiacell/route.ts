@@ -17,13 +17,54 @@ import {
 } from "@/lib/asiacell";
 import { randomUUID } from "crypto";
 
-async function parseExternalResponse(r: Response) {
-  const text = await r.text();
-  try {
-    return { text, json: JSON.parse(text), ok: r.ok };
-  } catch {
-    return { text, json: null, ok: r.ok };
+async function asiacellFetch(url: string, options: RequestInit, deviceId: string, accessToken?: string | null, customHeaders?: Record<string, string>, retries = 1): Promise<{ response: Response; text: string; json: any | null }> {
+  let headers: Record<string, string>;
+  if (customHeaders) {
+    headers = { ...customHeaders };
+  } else {
+    headers = accessToken ? getHeaders(deviceId, accessToken) : getHeaders(deviceId);
   }
+
+  console.log(`[Asiacell Request] ${options.method || "GET"} ${url}`);
+  console.log(`[Asiacell Headers]`, JSON.stringify(headers, null, 2));
+  if (options.body) console.log(`[Asiacell Body]`, options.body);
+
+  const response = await fetch(url, { ...options, headers });
+  const text = await response.text();
+
+  console.log(`[Asiacell Response] ${response.status} ${url}`);
+  console.log(`[Asiacell Response Text]`, text.slice(0, 1000));
+
+  let json: any = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = null;
+  }
+
+  if (!json && retries > 0) {
+    console.log(`[Asiacell Retry] HTML/non-JSON response, retrying without Host header...`);
+    const retryHeaders: Record<string, string> = { ...headers };
+    delete retryHeaders.Host;
+    retryHeaders.Accept = "application/json";
+
+    const retryResponse = await fetch(url, { ...options, headers: retryHeaders });
+    const retryText = await retryResponse.text();
+
+    console.log(`[Asiacell Retry Response] ${retryResponse.status}`);
+    console.log(`[Asiacell Retry Response Text]`, retryText.slice(0, 1000));
+
+    let retryJson: any = null;
+    try {
+      retryJson = JSON.parse(retryText);
+    } catch {
+      retryJson = null;
+    }
+
+    return { response: retryResponse, text: retryText, json: retryJson };
+  }
+
+  return { response, text, json };
 }
 
 export async function GET() {
@@ -54,12 +95,11 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "رقم آسياسيل يجب أن يكون 07XXXXXXXXX" }, { status: 400 });
       }
       const deviceId = randomUUID();
-      const r = await fetch(`${AC_API}/api/v1/login?lang=ar`, {
-        method: "POST",
-        headers: getHeaders(deviceId),
-        body: JSON.stringify({ captchaCode: "", username: phone }),
-      });
-      const { json: data, text } = await parseExternalResponse(r);
+      const { json: data, text } = await asiacellFetch(
+        `${AC_API}/api/v1/login?lang=ar`,
+        { method: "POST", body: JSON.stringify({ captchaCode: "", username: phone }) },
+        deviceId
+      );
       if (!data) {
         console.error("[Asiacell Login] Non-JSON:", text.slice(0, 200));
         return NextResponse.json({ error: "رد غير متوقع من Asiacell - حاول مرة أخرى" }, { status: 502 });
@@ -73,12 +113,11 @@ export async function POST(request: Request) {
     if (action === "verify-otp") {
       const session = await getCustomerSession(body.sessionId);
       if (!session) return NextResponse.json({ error: "الجلسة منتهية" }, { status: 400 });
-      const r = await fetch(`${AC_API}/api/v1/smsvalidation?lang=ar`, {
-        method: "POST",
-        headers: getHeaders(session.device_id),
-        body: JSON.stringify({ PID: session.pid, passcode: body.otp }),
-      });
-      const { json: data, text } = await parseExternalResponse(r);
+      const { json: data, text } = await asiacellFetch(
+        `${AC_API}/api/v1/smsvalidation?lang=ar`,
+        { method: "POST", body: JSON.stringify({ PID: session.pid, passcode: body.otp }) },
+        session.device_id
+      );
       if (!data) {
         console.error("[Asiacell Verify] Non-JSON:", text.slice(0, 200));
         return NextResponse.json({ error: "رد غير متوقع من Asiacell - حاول مرة أخرى" }, { status: 502 });
@@ -105,13 +144,13 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "رقم الكارت مطلوب" }, { status: 400 });
       }
 
-      const r = await fetch(`${AC_API}/api/v1/top-up?lang=ar&theme=avocado`, {
-        method: "POST",
-        headers: getTopupHeaders(effectiveDeviceId, effectiveToken),
-        body: JSON.stringify({ msisdn: "", rechargeType: 1, voucher }),
-      });
-      const { json: topupData, text: topupText } = await parseExternalResponse(r);
-      console.log("[Asiacell TopUp]", JSON.stringify(topupData || topupText.slice(0, 200)));
+      const { json: topupData, text: topupText } = await asiacellFetch(
+        `${AC_API}/api/v1/top-up?lang=ar&theme=avocado`,
+        { method: "POST", body: JSON.stringify({ msisdn: "", rechargeType: 1, voucher }) },
+        effectiveDeviceId,
+        undefined,
+        getTopupHeaders(effectiveDeviceId, effectiveToken)
+      );
 
       if (!topupData) {
         return NextResponse.json({ error: "رد غير متوقع من Asiacell - حاول مرة أخرى" }, { status: 502 });
@@ -148,15 +187,15 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "الحد الأدنى للتحويل 250 د.ع" }, { status: 400 });
       }
 
-      const r = await fetch(`${AC_API}/api/v1/credit-transfer/start?lang=ar`, {
-        method: "POST",
-        headers: getHeaders(session.device_id, session.access_token),
-        body: JSON.stringify({ amount: amountIQD, receiverMsisdn: storePhone }),
-      });
-      const { json: data, text } = await parseExternalResponse(r);
-      console.log("[Asiacell Transfer Start]", JSON.stringify(data || text.slice(0, 200)));
+      const { json: data, text } = await asiacellFetch(
+        `${AC_API}/api/v1/credit-transfer/start?lang=ar`,
+        { method: "POST", body: JSON.stringify({ amount: amountIQD, receiverMsisdn: storePhone }) },
+        session.device_id,
+        session.access_token
+      );
 
       if (!data) {
+        console.error("[Asiacell Transfer Start] Non-JSON:", text.slice(0, 200));
         return NextResponse.json({ error: "رد غير متوقع من Asiacell - ربما الموقع يواجه ضغطاً. حاول مرة أخرى." }, { status: 502 });
       }
 
@@ -189,15 +228,15 @@ export async function POST(request: Request) {
       const otp = String(body.otp || "").trim();
       if (!otp) return NextResponse.json({ error: "رمز التأكيد مطلوب" }, { status: 400 });
 
-      const r = await fetch(`${AC_API}/api/v1/credit-transfer/do-transfer?lang=ar`, {
-        method: "POST",
-        headers: getHeaders(session.device_id, session.access_token),
-        body: JSON.stringify({ PID: session.transfer_pid, passcode: otp }),
-      });
-      const { json: data, text } = await parseExternalResponse(r);
-      console.log("[Asiacell Transfer Confirm]", JSON.stringify(data || text.slice(0, 200)));
+      const { json: data, text } = await asiacellFetch(
+        `${AC_API}/api/v1/credit-transfer/do-transfer?lang=ar`,
+        { method: "POST", body: JSON.stringify({ PID: session.transfer_pid, passcode: otp }) },
+        session.device_id,
+        session.access_token
+      );
 
       if (!data) {
+        console.error("[Asiacell Transfer Confirm] Non-JSON:", text.slice(0, 200));
         return NextResponse.json({ error: "رد غير متوقع من Asiacell - حاول مرة أخرى" }, { status: 502 });
       }
 
@@ -219,13 +258,14 @@ export async function POST(request: Request) {
       if (!session || !session.access_token || !session.transfer_pid) {
         return NextResponse.json({ error: "الجلسة منتهية أو لم يتم بدء التحويل" }, { status: 400 });
       }
-      const r = await fetch(`${AC_API}/api/v1/credit-transfer/do-transfer?lang=ar`, {
-        method: "POST",
-        headers: getHeaders(session.device_id, session.access_token),
-        body: JSON.stringify({ PID: session.transfer_pid, passcode: "" }),
-      });
-      const { json: data, text } = await parseExternalResponse(r);
+      const { json: data, text } = await asiacellFetch(
+        `${AC_API}/api/v1/credit-transfer/do-transfer?lang=ar`,
+        { method: "POST", body: JSON.stringify({ PID: session.transfer_pid, passcode: "" }) },
+        session.device_id,
+        session.access_token
+      );
       if (!data) {
+        console.error("[Asiacell Resend] Non-JSON:", text.slice(0, 200));
         return NextResponse.json({ error: "رد غير متوقع من Asiacell" }, { status: 502 });
       }
       return NextResponse.json({ success: true, message: data.message || "تم إعادة إرسال الرمز" });
