@@ -1,23 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
-import {
-  AC_API,
-  getHeaders,
-  cleanPhone,
-  getAdminRow,
-  setAdminRow,
-  checkRecordsAndCredit,
-} from "@/lib/asiacell";
-import { randomUUID } from "crypto";
-
-async function parseExternalResponse(r: Response) {
-  const text = await r.text();
-  try {
-    return { text, json: JSON.parse(text), ok: r.ok };
-  } catch {
-    return { text, json: null, ok: r.ok };
-  }
-}
+import { getAdminRow, adminLogin, adminVerify, adminLogout, setAdminRow, checkRecordsAndCredit, cleanPhone } from "@/lib/asiacell-gateway";
 
 export async function GET() {
   try {
@@ -41,49 +24,17 @@ export async function POST(request: Request) {
     const action = body.action;
 
     if (action === "login") {
-      const phone = cleanPhone(body.phone || "");
-      if (!/^07\d{9}$/.test(phone)) {
-        return NextResponse.json({ error: "رقم آسياسيل يجب أن يكون 07XXXXXXXXX" }, { status: 400 });
-      }
-      const deviceId = randomUUID();
-      const r = await fetch(`${AC_API}/api/v1/login?lang=ar`, {
-        method: "POST",
-        headers: getHeaders(deviceId),
-        body: JSON.stringify({ captchaCode: "", username: phone }),
-      });
-      const { json: data, text } = await parseExternalResponse(r);
-      if (!data) {
-        console.error("[Asiacell Admin Login] Non-JSON:", text.slice(0, 200));
-        return NextResponse.json({ error: "رد غير متوقع من Asiacell" }, { status: 502 });
-      }
-      const pidMatch = (data.nextUrl || "").match(/PID=([^&]+)/);
-      const pid = pidMatch ? pidMatch[1] : "";
-      await setAdminRow({ phone, device_id: deviceId, access_token: "", pid, authenticated: 0, store_phone: phone });
-      return NextResponse.json({ success: true, message: data.message || "تم إرسال رمز التحقق" });
+      const result = await adminLogin(body.phone);
+      return NextResponse.json(result);
     }
 
     if (action === "verify") {
-      const admin = await getAdminRow();
-      if (!admin) return NextResponse.json({ error: "قم بتسجيل الدخول أولاً" }, { status: 400 });
-      const r = await fetch(`${AC_API}/api/v1/smsvalidation?lang=ar`, {
-        method: "POST",
-        headers: getHeaders(admin.device_id),
-        body: JSON.stringify({ PID: admin.pid, passcode: body.otp }),
-      });
-      const { json: data, text } = await parseExternalResponse(r);
-      if (!data) {
-        console.error("[Asiacell Admin Verify] Non-JSON:", text.slice(0, 200));
-        return NextResponse.json({ error: "رد غير متوقع من Asiacell" }, { status: 502 });
-      }
-      if (data.access_token) {
-        await setAdminRow({ access_token: data.access_token, authenticated: 1 });
-        return NextResponse.json({ success: true, message: "تم ربط البوابة بنجاح" });
-      }
-      return NextResponse.json({ success: false, message: data.message || "رمز التحقق غير صحيح" });
+      const result = await adminVerify(body.otp);
+      return NextResponse.json(result);
     }
 
     if (action === "logout") {
-      await setAdminRow({ phone: "", device_id: "", access_token: "", pid: "", authenticated: 0, store_phone: "" });
+      await adminLogout();
       return NextResponse.json({ success: true });
     }
 
