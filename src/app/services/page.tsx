@@ -72,6 +72,7 @@ export default function ServicesPage() {
   const [showGuaranteed, setShowGuaranteed] = useState(false);
   const [guaranteedStep, setGuaranteedStep] = useState<"platform" | "services">("platform");
   const [guaranteedPlatform, setGuaranteedPlatform] = useState<string | null>(null);
+  const [guaranteedTypeFilter, setGuaranteedTypeFilter] = useState<string>("all");
 
   useEffect(() => {
     fetch("/api/services")
@@ -141,6 +142,13 @@ export default function ServicesPage() {
     });
   }, [guaranteedServicesByType]);
 
+  const filteredGuaranteedServicesByType = useMemo(() => {
+    if (guaranteedTypeFilter === "all") return guaranteedServicesByType;
+    const type = guaranteedTypeFilter;
+    if (!guaranteedServicesByType[type]) return {};
+    return { [type]: guaranteedServicesByType[type] };
+  }, [guaranteedServicesByType, guaranteedTypeFilter]);
+
   const toggleCategory = (cat: string) => {
     setExpandedCategories((prev) => ({ ...prev, [cat]: !prev[cat] }));
   };
@@ -153,6 +161,7 @@ export default function ServicesPage() {
 
   const selectGuaranteedPlatform = (platformId: string) => {
     setGuaranteedPlatform(platformId);
+    setGuaranteedTypeFilter("all");
     setGuaranteedStep("services");
   };
 
@@ -352,60 +361,88 @@ export default function ServicesPage() {
                       <p>لا توجد خدمات مضمونة لهذه المنصة حالياً</p>
                     </div>
                   ) : (
-                    <div className="space-y-6">
-                      {guaranteedTypes.map((type) => {
-                        const typeServices = guaranteedServicesByType[type];
-                        return (
-                          <div key={type} className="space-y-3">
-                            <div className="flex items-center gap-2">
-                              <span className="h-px flex-1 bg-[var(--color-border)]" />
-                              <span className="rounded-full bg-green-500/10 px-3 py-1 text-xs font-black text-green-400">
-                                {serviceTypeLabels[type] || type} ({typeServices.length})
-                              </span>
-                              <span className="h-px flex-1 bg-[var(--color-border)]" />
-                            </div>
-                            {typeServices.map((s) => {
-                              const { badges } = detectGuarantees(s.name);
-                              return (
-                                <div key={s.service} className="rounded-2xl border border-green-500/20 bg-green-500/5 p-4">
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="flex-1">
-                                      <div className="font-bold text-white">#{s.service}</div>
-                                      <div className="mt-1 text-sm text-zinc-300 leading-relaxed">{s.name}</div>
-                                      <div className="mt-2 flex flex-wrap gap-1.5">
-                                        {badges.map((badge, idx) => {
-                                          const Icon = badge.icon;
-                                          return (
-                                            <span key={idx} className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold ${badge.color}`}>
-                                              <Icon size={10} /> {badge.label}
-                                            </span>
-                                          );
-                                        })}
+                    <div className="space-y-4">
+                      {/* Type filter buttons */}
+                      <div className="flex gap-2 overflow-x-auto pb-1">
+                        <button
+                          onClick={() => setGuaranteedTypeFilter("all")}
+                          className={`shrink-0 rounded-full px-4 py-2 text-xs font-bold transition ${
+                            guaranteedTypeFilter === "all"
+                              ? "bg-gradient-to-r from-green-600 to-emerald-500 text-white"
+                              : "bg-[var(--color-surface)] text-zinc-400 border border-[var(--color-border)]"
+                          }`}
+                        >
+                          الكل
+                        </button>
+                        {guaranteedTypes.map((type) => (
+                          <button
+                            key={type}
+                            onClick={() => setGuaranteedTypeFilter(type)}
+                            className={`shrink-0 rounded-full px-4 py-2 text-xs font-bold transition ${
+                              guaranteedTypeFilter === type
+                                ? "bg-gradient-to-r from-green-600 to-emerald-500 text-white"
+                                : "bg-[var(--color-surface)] text-zinc-400 border border-[var(--color-border)]"
+                            }`}
+                          >
+                            {serviceTypeLabels[type] || type}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="space-y-6">
+                        {Object.entries(filteredGuaranteedServicesByType).map(([type, typeServices]) => {
+                          return (
+                            <div key={type} className="space-y-3">
+                              <div className="flex items-center gap-2">
+                                <span className="h-px flex-1 bg-[var(--color-border)]" />
+                                <span className="rounded-full bg-green-500/10 px-3 py-1 text-xs font-black text-green-400">
+                                  {serviceTypeLabels[type] || type} ({typeServices.length})
+                                </span>
+                                <span className="h-px flex-1 bg-[var(--color-border)]" />
+                              </div>
+                              {typeServices.map((s) => {
+                                const { badges } = detectGuarantees(s.name);
+                                return (
+                                  <div key={s.service} className="rounded-2xl border border-green-500/20 bg-green-500/5 p-4">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="flex-1">
+                                        <div className="font-bold text-white">#{s.service}</div>
+                                        <div className="mt-1 text-sm text-zinc-300 leading-relaxed">{s.name}</div>
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                          {badges.map((badge, idx) => {
+                                            const Icon = badge.icon;
+                                            return (
+                                              <span key={idx} className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold ${badge.color}`}>
+                                                <Icon size={10} /> {badge.label}
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                      <div className="text-left">
+                                        <div className="text-lg font-black text-[var(--color-primary)]">${Number(s.rate).toFixed(5)}</div>
+                                        <div className="text-xs text-zinc-500">لكل 1000</div>
                                       </div>
                                     </div>
-                                    <div className="text-left">
-                                      <div className="text-lg font-black text-[var(--color-primary)]">${Number(s.rate).toFixed(5)}</div>
-                                      <div className="text-xs text-zinc-500">لكل 1000</div>
+                                    <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
+                                      <span>min: {s.min}</span>
+                                      <span>max: {s.max}</span>
                                     </div>
+                                    <Link
+                                      href={`/orders/new?service=${s.service}`}
+                                      onClick={() => setShowGuaranteed(false)}
+                                      className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green-600 to-emerald-500 py-2.5 text-sm font-bold text-white"
+                                    >
+                                      <ShoppingCart size={16} />
+                                      اطلب هذه الخدمة
+                                    </Link>
                                   </div>
-                                  <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
-                                    <span>min: {s.min}</span>
-                                    <span>max: {s.max}</span>
-                                  </div>
-                                  <Link
-                                    href={`/orders/new?service=${s.service}`}
-                                    onClick={() => setShowGuaranteed(false)}
-                                    className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green-600 to-emerald-500 py-2.5 text-sm font-bold text-white"
-                                  >
-                                    <ShoppingCart size={16} />
-                                    اطلب هذه الخدمة
-                                  </Link>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })}
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
