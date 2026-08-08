@@ -41,7 +41,7 @@ export default function Header({ onMenuClick, user, unreadNotifications = 0 }: H
         <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20 text-white">
           <Zap size={22} fill="currentColor" />
         </span>
-        <span className="text-xl font-black text-white">SmmNine</span>
+        <span className="text-xl font-black text-white">Follower</span>
       </div>
 
       {/* Icons on the left (RTL visual right) */}

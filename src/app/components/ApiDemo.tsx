@@ -223,7 +223,7 @@ export default function ApiDemo() {
             واجهة برمجة التطبيقات
           </div>
           <h2 className="mb-3 text-[clamp(1.7rem,3vw,2.4rem)] font-black text-[#0a2463]">
-            متصل مباشرة بسيرفرات SmmNine
+            متصل مباشرة بسيرفرات Follower
           </h2>
           <p className="mx-auto max-w-[650px] text-base text-[#6b7280]">
             جلب كامل للخدمات والسيرفرات مع إمكانية إنشاء الطلبات، متابعتها، إعادة التعبئة، والإلغاء.

@@ -53,7 +53,7 @@ export default function Features() {
       <div className="mx-auto max-w-[1100px]">
         <div className="mb-12 text-center">
           <h2 className="mb-3 text-[clamp(1.7rem,3vw,2.4rem)] font-black text-[#0a2463]">
-            لماذا تختار SmmNine؟
+            لماذا تختار Follower؟
           </h2>
           <p className="mx-auto max-w-[500px] text-base text-[#6b7280]">
             نوفر لك كل ما تحتاجه لتنمية حسابك بأمان وسرعة

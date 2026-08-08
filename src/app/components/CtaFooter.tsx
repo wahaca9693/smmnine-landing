@@ -13,9 +13,7 @@ export default function CtaFooter() {
           انضم لآلاف المستخدمين وابدأ رحلتك معنا اليوم
         </p>
         <a
-          href="https://smmnine.com/register"
-          target="_blank"
-          rel="noreferrer"
+          href="/login"
           className="group inline-flex h-[52px] items-center gap-2 rounded-full bg-white px-8 text-base font-extrabold text-[#1565c0] shadow-lg transition-all hover:-translate-y-0.5 hover:bg-[#e8f0fe]"
         >
           إنشاء حساب مجاني

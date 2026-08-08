@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServices } from "@/lib/smmnine";
+import { getServices } from "@/lib/follower";
 import { detectPlatform, detectServiceType } from "@/lib/platform-mapping";
 
 const platforms = [

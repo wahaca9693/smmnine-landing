@@ -18,7 +18,7 @@ interface ThemeContextType {
 }
 
 const defaultSettings: SiteSettings = {
-  siteName: "SmmNine",
+  siteName: "Follower",
   primaryColor: "var(--color-primary)",
   backgroundColor: "var(--color-bg)",
   cardColor: "var(--color-card)",

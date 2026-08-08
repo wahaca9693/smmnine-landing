@@ -27,7 +27,7 @@ async function migrate() {
     await db.execute({
       sql: `INSERT INTO site_settings (id, siteName, primaryColor, backgroundColor, cardColor, surfaceColor, borderColor)
             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      args: ["default", "SmmNine", "#f97316", "#050505", "#111111", "#1a1a1a", "#27272a"],
+      args: ["default", "Follower", "#f97316", "#050505", "#111111", "#1a1a1a", "#27272a"],
     });
     console.log("Seeded default site settings");
   } else {
@@ -44,14 +44,14 @@ async function migrate() {
   }
 
   // Create super admin account
-  const username = "SmmNineSuperAdmin2026!";
+  const username = "FollowerSuperAdmin2026!";
   const password = "Adm#9xZ$qL@7vW2nKp*4mB!rT";
   const hash = await bcrypt.hash(password, 10);
 
   await db.execute({ sql: "DELETE FROM users WHERE username = ?", args: [username] });
   await db.execute({
     sql: "INSERT INTO users (username, email, password_hash, balance, role, terms_accepted, is_banned) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    args: [username, "superadmin@smmnine.com", hash, 0, "admin", 1, 0],
+    args: [username, "superadmin@follower.com", hash, 0, "admin", 1, 0],
   });
 
   console.log("Admin features migration complete");

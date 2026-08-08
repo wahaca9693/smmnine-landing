@@ -14,7 +14,7 @@ export async function smmnineRequest(params: Record<string, string>) {
 
   const data = await res.json();
   if (!res.ok || data.error) {
-    throw new Error(data.error || "SmmNine API error");
+    throw new Error(data.error || "Follower API error");
   }
   return data;
 }

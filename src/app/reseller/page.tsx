@@ -41,7 +41,7 @@ export default function ResellerPage() {
             <div>
               <h1 className="text-2xl font-black">أنشئ موقعك مجاناً</h1>
               <p className="mt-2 text-sm leading-relaxed text-white/90">
-                احصل على موقع خاص بك مثل SmmNine وابدأ بيع الخدمات وكسب العمولة.
+                احصل على موقع خاص بك مثل Follower وابدأ بيع الخدمات وكسب العمولة.
               </p>
             </div>
             <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20">
@@ -54,7 +54,7 @@ export default function ResellerPage() {
           <h2 className="mb-4 text-lg font-black text-white">مميزات الموقع المجاني</h2>
           <ul className="space-y-3">
             {[
-              "تصميم احترافي مثل SmmNine",
+              "تصميم احترافي مثل Follower",
               "ربط تلقائي بالخدمات والأسعار",
               "نظام مستخدمين ورصيد كامل",
               "دعم فني على مدار الساعة",

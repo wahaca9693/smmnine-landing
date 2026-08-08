@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getOrderStatus } from "@/lib/smmnine";
+import { getOrderStatus } from "@/lib/follower";
 
 const statusMap: Record<string, string> = {
   Pending: "قيد الانتظار",

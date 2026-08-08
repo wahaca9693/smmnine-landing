@@ -13,8 +13,8 @@ const tajawal = Tajawal({
 });
 
 export const metadata: Metadata = {
-  title: "SmmNine - لوحة التحكم",
-  description: "لوحة تحكم SmmNine لخدمات السوشيال ميديا",
+  title: "Follower - لوحة التحكم",
+  description: "لوحة تحكم Follower لخدمات السوشيال ميديا",
 };
 
 export default async function RootLayout({
@@ -23,7 +23,7 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const cookieStore = await cookies();
-  const savedLocale = cookieStore.get("smmnine-locale")?.value;
+  const savedLocale = cookieStore.get("follower-locale")?.value;
   const initialLocale: Locale = savedLocale === "en" ? "en" : "ar";
 
   return (

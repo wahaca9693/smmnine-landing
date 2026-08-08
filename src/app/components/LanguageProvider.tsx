@@ -13,7 +13,7 @@ interface LanguageContextType {
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
-const COOKIE_NAME = "smmnine-locale";
+const COOKIE_NAME = "follower-locale";
 
 function getCookie(name: string) {
   if (typeof document === "undefined") return null;

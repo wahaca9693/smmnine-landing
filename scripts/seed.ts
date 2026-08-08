@@ -10,11 +10,11 @@ async function seed() {
   try {
     await db.execute({
       sql: "INSERT OR IGNORE INTO users (username, email, password_hash, balance, role, terms_accepted) VALUES (?, ?, ?, ?, ?, ?)",
-      args: ["admin", "admin@smmnine.com", adminPassword, 1000, "admin", 1],
+      args: ["admin", "admin@follower.com", adminPassword, 1000, "admin", 1],
     });
     await db.execute({
       sql: "INSERT OR IGNORE INTO users (username, email, password_hash, balance, role, terms_accepted) VALUES (?, ?, ?, ?, ?, ?)",
-      args: ["koooookook1", "user@smmnine.com", userPassword, 1.1727, "user", 1],
+      args: ["koooookook1", "user@follower.com", userPassword, 1.1727, "user", 1],
     });
   } catch (e) {
     console.error(e);

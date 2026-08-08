@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { createOrder, getServices } from "@/lib/smmnine";
+import { createOrder, getServices } from "@/lib/follower";
 
 export async function POST(request: Request) {
   try {
@@ -39,11 +39,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "رصيد غير كافٍ" }, { status: 400 });
     }
 
-    // Create order in SmmNine
+    // Create order in Follower
     const smmnineResult = await createOrder(String(serviceId), link, String(quantity));
 
     if (!smmnineResult.order) {
-      return NextResponse.json({ error: "فشل إنشاء الطلب في SmmNine" }, { status: 500 });
+      return NextResponse.json({ error: "فشل إنشاء الطلب في Follower" }, { status: 500 });
     }
 
     // Deduct balance

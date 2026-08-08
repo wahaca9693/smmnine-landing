@@ -87,7 +87,7 @@ export default function LoginPage() {
         <div className="flex h-24 w-24 animate-pulse items-center justify-center rounded-3xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] text-white shadow-2xl shadow-orange-500/30">
           <Zap size={48} fill="currentColor" />
         </div>
-        <h1 className="mt-6 text-3xl font-black text-white">SmmNine</h1>
+        <h1 className="mt-6 text-3xl font-black text-white">Follower</h1>
         <p className="mt-2 text-sm text-zinc-500">جاري التحميل...</p>
       </div>
     );
@@ -99,7 +99,7 @@ export default function LoginPage() {
         <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] text-white shadow-lg shadow-orange-500/30">
           <Zap size={30} fill="currentColor" />
         </span>
-        <span className="text-3xl font-black text-white">SmmNine</span>
+        <span className="text-3xl font-black text-white">Follower</span>
       </div>
 
       <div className="w-full max-w-sm rounded-3xl border border-[var(--color-border)] bg-[var(--color-card)] p-6 shadow-2xl">

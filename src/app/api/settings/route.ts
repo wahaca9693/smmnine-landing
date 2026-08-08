@@ -18,7 +18,7 @@ export async function GET() {
     if (!settings.cardColor) settings.cardColor = "var(--color-card)";
     if (!settings.surfaceColor) settings.surfaceColor = "var(--color-surface)";
     if (!settings.borderColor) settings.borderColor = "var(--color-border)";
-    if (!settings.siteName) settings.siteName = "SmmNine";
+    if (!settings.siteName) settings.siteName = "Follower";
     return NextResponse.json({ settings });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

@@ -144,18 +144,14 @@ export default function Hero() {
           style={{ animationDelay: "0.26s" }}
         >
           <a
-            href="https://smmnine.com/register"
-            target="_blank"
-            rel="noreferrer"
+            href="/login"
             className="group inline-flex h-[52px] items-center gap-2 rounded-full bg-white px-8 text-base font-extrabold text-[#1565c0] shadow-[0_8px_24px_rgba(255,255,255,0.25)] transition-all hover:-translate-y-0.5 hover:bg-[#e8f0fe] hover:shadow-[0_12px_32px_rgba(255,255,255,0.3)]"
           >
             ابدأ الآن مجاناً
             <ArrowLeft size={18} className="transition-transform group-hover:-translate-x-1" />
           </a>
           <a
-            href="https://smmnine.com/login"
-            target="_blank"
-            rel="noreferrer"
+            href="/login"
             className="inline-flex h-[52px] items-center justify-center rounded-full border-2 border-white/40 bg-white/10 px-8 text-base font-extrabold text-white transition-all hover:-translate-y-0.5 hover:bg-white/20"
           >
             تسجيل الدخول

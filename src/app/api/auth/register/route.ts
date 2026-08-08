@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     // Welcome notification
     await db.execute({
       sql: "INSERT INTO notifications (user_id, title, body) VALUES (?, ?, ?)",
-      args: [userId, "مرحباً بك!", "تم إنشاء حسابك بنجاح في SmmNine. اقرأ شروط الاستخدام قبل الطلب."],
+      args: [userId, "مرحباً بك!", "تم إنشاء حسابك بنجاح في Follower. اقرأ شروط الاستخدام قبل الطلب."],
     });
 
     const session = await getSession();
