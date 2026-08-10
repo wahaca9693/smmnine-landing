@@ -13,8 +13,26 @@ const tajawal = Tajawal({
 });
 
 export const metadata: Metadata = {
-  title: "Follower",
+  metadataBase: new URL("https://follower-ty.duckdns.org"),
+  title: { default: "Follower", template: "%s | Follower" },
   description: "Follower - خدمات السوشيال ميديا",
+  icons: {
+    icon: "/logo-icon.png",
+    shortcut: "/logo-icon.png",
+    apple: "/logo-icon.png",
+  },
+  openGraph: {
+    title: "Follower",
+    description: "Follower - خدمات السوشيال ميديا",
+    images: ["/og-image.png"],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Follower",
+    description: "Follower - خدمات السوشيال ميديا",
+    images: ["/og-image.png"],
+  },
 };
 
 export default async function RootLayout({
