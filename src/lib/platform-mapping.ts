@@ -1,6 +1,6 @@
 export const platformKeywords: Record<string, string[]> = {
-  instagram: ["instagram", "انستغرام", "انستقرام", "insta"],
   tiktok: ["tiktok", "تيك توك", "ticktok", "tic tok"],
+  instagram: ["instagram", "انستغرام", "انستقرام", "insta"],
   facebook: ["facebook", "فيسبوك", "fb"],
   youtube: ["youtube", "يوتيوب", "يوتوب", "yt"],
   twitter: ["twitter", "تويتر", "x / twitter", "x/twitter"],
@@ -12,6 +12,7 @@ export const platformKeywords: Record<string, string[]> = {
   spotify: ["spotify", "سبوتيفاي"],
   threads: ["threads", "ثريدز"],
   kuaishou: ["kuaishou", "كواي"],
+
   likee: ["likee", "كيك"],
 };
 

@@ -1,6 +1,26 @@
 import { NextResponse } from "next/server";
 import { getServices } from "@/lib/follower";
 import { detectPlatform, detectServiceType } from "@/lib/platform-mapping";
+import { db, initDb } from "@/lib/db";
+
+async function getProviderServices(): Promise<any[]> {
+  try {
+    await initDb();
+    const rows = await db.execute({
+      sql: `SELECT ps.remote_service_id AS service, ps.name, ps.type, ps.sell_rate AS rate, ps.min, ps.max,
+                   CASE WHEN ps.category <> '' THEN ps.category ELSE COALESCE(p.notes, 'عام') END AS category, 0 AS refill,
+                   p.id AS provider_id, p.name AS provider_name, ps.is_new AS is_new, ps.id AS local_id
+            FROM provider_services ps
+            JOIN providers p ON p.id = ps.provider_id
+            WHERE p.is_active = 1 AND ps.is_active = 1
+            ORDER BY p.id, ps.remote_service_id`,
+      args: [],
+    });
+    return rows.rows as any[];
+  } catch {
+    return [];
+  }
+}
 
 const platforms = [
   { id: "facebook", name: "فيسبوك", color: "#1877F2" },
@@ -24,19 +44,39 @@ const platforms = [
 export async function GET() {
   try {
     const services = await getServices();
-    const enrichedServices = services.map((s: any) => ({
+    const providerServices = await getProviderServices();
+
+    // دمج خدمات المزودين الخارجيين مع الخدمات المحلية
+    const providerMapped = providerServices.map((s: any) => ({
       ...s,
-      platform: detectPlatform(s.category || "", s.name || ""),
-      serviceType: detectServiceType(s.name || ""),
+      service: String(s.service),
+      remote_service_id: String(s.service),
+      rate: String(s.rate),
+      min: String(s.min),
+      max: String(s.max),
+      refill: false,
+      source: "provider",
+      provider_id: s.provider_id,
+      provider_name: s.provider_name,
+      is_new: Number(s.is_new) === 1,
+    }));
+    const merged = [...services, ...providerMapped];
+
+    const enrichedServices = merged.map((s: any) => ({
+      ...s,
+      platform: s.platform || detectPlatform(s.category || "", s.name || ""),
+      serviceType: s.serviceType || detectServiceType(s.name || ""),
+      name: s.provider_name ? `${s.name} [مزود: ${s.provider_name}]` : s.name,
+      is_new: !!s.is_new,
     }));
 
-    const categories = [...new Set(services.map((s: any) => s.category || "عام"))].sort();
+    const categories = [...new Set(merged.map((s: any) => s.category || "عام"))].sort();
 
     return NextResponse.json({
       services: enrichedServices,
       categories,
       platforms,
-      count: services.length,
+      count: merged.length,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

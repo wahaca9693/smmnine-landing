@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
-import { Search, Layers, ChevronDown, ChevronUp, ShoppingCart, ShieldCheck, X, Sparkles, Zap, Infinity, RefreshCw } from "lucide-react";
+import { Modal } from "../components/Modal";
+import { Search, Layers, ChevronDown, ChevronUp, ShoppingCart, ShieldCheck, Sparkles, Zap, Infinity, RefreshCw } from "lucide-react";
 import { PlatformIcon } from "../components/Icons";
 import Link from "next/link";
 
@@ -91,6 +92,12 @@ export default function ServicesPage() {
       const matchesType = selectedType === "all" ? true : s.serviceType === selectedType;
       const matchesSearch = s.name.toLowerCase().includes(search.toLowerCase()) || String(s.service).includes(search);
       return matchesPlatform && matchesType && matchesSearch;
+    }).sort((a, b) => {
+      // الخدمات الجديدة (وسم "جديد" / تحديث) تظهر أولًا دائمًا
+      const aNew = !!(a as any).is_new ? 1 : 0;
+      const bNew = !!(b as any).is_new ? 1 : 0;
+      if (aNew !== bNew) return bNew - aNew;
+      return String(a.service).localeCompare(String(b.service));
     });
   }, [services, selectedPlatform, selectedType, search]);
 
@@ -169,13 +176,28 @@ export default function ServicesPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-4">
-        <h1 className="text-2xl font-black text-white">الخدمات</h1>
+      <div className="relative space-y-5">
+        {/* رأس الصفحة بتدرج متوهج */}
+        <div className="relative overflow-hidden rounded-3xl border border-[var(--color-primary)]/20 bg-gradient-to-br from-[var(--color-card)] via-[var(--color-surface)] to-[var(--color-card)] p-5 shadow-[0_0_60px_-20px_var(--color-primary)]">
+          <div className="pointer-events-none absolute inset-0 bg-grid opacity-60" />
+          <div className="pointer-events-none absolute -top-16 -left-16 h-48 w-48 rounded-full bg-[var(--color-primary)]/10 blur-3xl" />
+          <div className="relative flex items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-black text-gradient-luxe">الخدمات</h1>
+              <p className="mt-1 text-xs text-zinc-400">اختر منصتك واعثر على الخدمة المثالية لنمو حسابك</p>
+            </div>
+            <div className="hidden sm:flex animate-float items-center gap-2 rounded-full border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 px-4 py-2 text-xs font-bold text-[var(--color-primary-light)]">
+              <Sparkles size={14} className="sparkle-star" />
+              <span>{filteredServices.length} خدمة متاحة</span>
+            </div>
+          </div>
+          <div className="divider-glow mt-4" />
+        </div>
 
         {/* Guaranteed services button */}
         <button
           onClick={openGuaranteed}
-          className="group relative w-full overflow-hidden rounded-2xl bg-gradient-to-r from-green-600 via-emerald-500 to-green-600 p-4 text-white shadow-lg shadow-green-500/20 transition hover:shadow-green-500/30"
+          className="card-luxe card-lift group relative w-full overflow-hidden rounded-2xl p-4 text-white"
         >
           <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjIiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4xKSIvPjwvc3ZnPg==')] opacity-30" />
           <div className="relative flex items-center justify-between">
@@ -192,20 +214,23 @@ export default function ServicesPage() {
           </div>
         </button>
 
-        {/* Platform grid */}
-        <div className="grid grid-cols-4 gap-3">
-          {platformOrder.map((p) => {
-            const active = selectedPlatform === p.id;
-            return (
-              <button
-                key={p.id}
-                onClick={() => { setSelectedPlatform(p.id); setSelectedType("all"); }}
-                className={`flex flex-col items-center justify-center rounded-2xl border p-3 transition aspect-square ${
-                  active
-                    ? "border-[var(--color-primary)] bg-[var(--color-primary)]/10"
-                    : "border-[var(--color-border)] bg-[var(--color-card)] hover:border-[var(--color-primary)]/30"
-                }`}
-              >
+        {/* Platform grid — بطاقات منصات فاخرة */}
+        <div className="relative">
+          <div className="pointer-events-none absolute -top-6 inset-x-0 h-24 bg-[var(--color-primary)]/8 blur-2xl" />
+          <div className="grid grid-cols-4 gap-2 sm:gap-3">
+            {platformOrder.map((p) => {
+              const active = selectedPlatform === p.id;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => { setSelectedPlatform(p.id); setSelectedType("all"); }}
+                  className={`card-luxe group relative flex flex-col items-center justify-center rounded-2xl border p-3 aspect-square ${
+                    active
+                      ? "border-[var(--color-primary)]/70 bg-[var(--color-primary)]/10 shadow-[0_0_32px_-6px_var(--color-primary)]"
+                      : ""
+                  }`}
+                >
+                  {active && <div className="pointer-events-none absolute top-1.5 left-1.5 h-2 w-2 rounded-full bg-[var(--color-primary)] shadow-[0_0_8px_2px_var(--color-primary)] sparkle-star" />}
                 <PlatformIcon
                   name={p.id}
                   className={`h-8 w-8 ${active ? "platform-icon-animated-active" : "text-white"}`}
@@ -215,6 +240,7 @@ export default function ServicesPage() {
               </button>
             );
           })}
+          </div>
         </div>
 
         {/* Service type filter */}
@@ -235,14 +261,15 @@ export default function ServicesPage() {
         </div>
 
         {/* Search bar */}
-        <div className="relative">
-          <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+        <div className="relative group">
+          <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-r from-transparent via-[var(--color-primary)]/10 to-transparent opacity-0 group-focus-within:opacity-100 transition-opacity" />
+          <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-[var(--color-primary)] transition-colors" size={18} />
           <input
             type="text"
             placeholder="ابحث عن خدمة بالاسم..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)] py-3.5 pr-12 pl-4 text-sm text-white outline-none focus:border-[var(--color-primary)]"
+            className="input-luxe w-full rounded-2xl py-3.5 pr-12 pl-4 text-sm text-white"
           />
         </div>
 
@@ -263,35 +290,45 @@ export default function ServicesPage() {
               {Object.entries(servicesByCategory).map(([category, items]) => {
                 const expanded = expandedCategories[category];
                 return (
-                  <div key={category} className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)] overflow-hidden">
+                  <div key={category} className="card-luxe rounded-2xl border overflow-hidden">
                     <button
                       onClick={() => toggleCategory(category)}
-                      className="flex w-full items-center justify-between p-4"
+                      className="group flex w-full items-center justify-between p-4"
                     >
                       <span className="font-bold text-white text-right line-clamp-1">{category}</span>
-                      {expanded ? <ChevronUp size={18} className="text-zinc-400" /> : <ChevronDown size={18} className="text-zinc-400" />}
+                      <span className="rounded-full border border-[var(--color-primary)]/25 bg-[var(--color-primary)]/10 px-2.5 py-0.5 text-[10px] font-black text-[var(--color-primary-light)] group-hover:border-[var(--color-primary)]/50 transition">
+                        {items.length}
+                      </span>
+                      {expanded ? <ChevronUp size={18} className="text-[var(--color-primary)]" /> : <ChevronDown size={18} className="text-zinc-400" />}
                     </button>
                     {expanded && (
-                      <div className="border-t border-[var(--color-border)]">
+                      <div className="border-t border-[var(--color-primary)]/10">
                         {items.map((s) => (
-                          <div key={s.service} className="p-4 border-b border-[var(--color-border)] last:border-0">
+                          <div key={s.service} className="p-4 border-b border-[var(--color-primary)]/8 last:border-0">
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex-1">
-                                <div className="font-black text-white">#{s.service}</div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-gradient-luxe text-sm font-black">#{s.service}</span>
+                                  {(s as any).is_new && (
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-2 py-0.5 text-[9px] font-black text-black shadow-[0_0_12px_-2px_#f59e0b]">
+                                      <Sparkles size={9} /> جديد
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="mt-1 text-sm text-zinc-400 leading-relaxed">{s.name}</div>
+                                <div className="mt-2 flex gap-2 text-[10px] text-zinc-500">
+                                  <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">min: {s.min}</span>
+                                  <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">max: {s.max}</span>
+                                </div>
                               </div>
                               <div className="text-left">
-                                <div className="text-lg font-black text-[var(--color-primary)]">${Number(s.rate).toFixed(5)}</div>
+                                <div className="text-lg font-black text-gradient-luxe">${Number(s.rate).toFixed(5)}</div>
                                 <div className="text-xs text-zinc-500">لكل 1000</div>
                               </div>
                             </div>
-                            <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
-                              <span>min: {s.min}</span>
-                              <span>max: {s.max}</span>
-                            </div>
                             <Link
                               href={`/orders/new?service=${s.service}`}
-                              className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] py-2 text-sm font-bold text-white"
+                              className="btn-glow-pulse mt-3 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] py-2 text-sm font-bold text-white transition hover:brightness-110"
                             >
                               <ShoppingCart size={16} />
                               اطلب هذه الخدمة
@@ -308,27 +345,14 @@ export default function ServicesPage() {
         </div>
 
         {/* Guaranteed Services Modal */}
-        {showGuaranteed && (
-          <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/80 p-0 sm:items-center sm:p-4 animate-fadeIn">
-            <div className="relative w-full max-w-md rounded-t-3xl bg-[var(--color-card)] p-5 shadow-2xl sm:rounded-3xl animate-slideUp max-h-[90vh] overflow-auto">
-              <button
-                onClick={() => setShowGuaranteed(false)}
-                className="absolute left-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-[var(--color-surface)] text-zinc-400"
-              >
-                <X size={18} />
-              </button>
-
-              <div className="mb-4 flex items-center gap-3 border-b border-[var(--color-border)] pb-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-green-500/10 text-green-400">
-                  <ShieldCheck size={22} />
-                </span>
-                <div>
-                  <h2 className="text-lg font-black text-white">الخدمات المضمونة</h2>
-                  <p className="text-xs text-zinc-400">
-                    {guaranteedStep === "platform" ? "اختر المنصة" : `خدمات مضمونة لـ ${platformOrder.find((p) => p.id === guaranteedPlatform)?.name}`}
-                  </p>
-                </div>
-              </div>
+        <Modal
+          open={showGuaranteed}
+          onClose={() => setShowGuaranteed(false)}
+          icon={<ShieldCheck size={22} className="text-white" />}
+          title="الخدمات المضمونة"
+          subtitle={guaranteedStep === "platform" ? "اختر المنصة" : `خدمات مضمونة لـ ${platformOrder.find((p) => p.id === guaranteedPlatform)?.name}`}
+          zIndex={100}
+        >
 
               {guaranteedStep === "platform" ? (
                 <div className="space-y-3">
@@ -338,7 +362,7 @@ export default function ServicesPage() {
                       <button
                         key={p.id}
                         onClick={() => selectGuaranteedPlatform(p.id)}
-                        className="flex flex-col items-center justify-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 transition hover:border-green-500/30 hover:bg-green-500/5"
+                        className="flex flex-col items-center justify-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 transition hover:border-[var(--color-success)]/30 hover:bg-[var(--color-success)]/5"
                       >
                         <PlatformIcon name={p.id} className="h-7 w-7 text-white" animated />
                         <span className="mt-2 text-[10px] font-bold text-zinc-300">{p.name}</span>
@@ -355,8 +379,8 @@ export default function ServicesPage() {
                     ← تغيير المنصة
                   </button>
 
-                  {guaranteedServices.length === 0 ? (
-                    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-8 text-center text-zinc-500">
+                      {guaranteedServices.length === 0 ? (
+                    <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]/70 p-8 text-center text-zinc-500">
                       <ShieldCheck size={48} className="mx-auto mb-3 opacity-30" />
                       <p>لا توجد خدمات مضمونة لهذه المنصة حالياً</p>
                     </div>
@@ -395,7 +419,7 @@ export default function ServicesPage() {
                             <div key={type} className="space-y-3">
                               <div className="flex items-center gap-2">
                                 <span className="h-px flex-1 bg-[var(--color-border)]" />
-                                <span className="rounded-full bg-green-500/10 px-3 py-1 text-xs font-black text-green-400">
+                                <span className="rounded-full bg-[var(--color-success)]/10 px-3 py-1 text-xs font-black text-[var(--color-success)]">
                                   {serviceTypeLabels[type] || type} ({typeServices.length})
                                 </span>
                                 <span className="h-px flex-1 bg-[var(--color-border)]" />
@@ -403,7 +427,7 @@ export default function ServicesPage() {
                               {typeServices.map((s) => {
                                 const { badges } = detectGuarantees(s.name);
                                 return (
-                                  <div key={s.service} className="rounded-2xl border border-green-500/20 bg-green-500/5 p-4">
+                                  <div key={s.service} className="rounded-2xl border border-[var(--color-success)]/20 bg-[var(--color-success)]/5 p-4">
                                     <div className="flex items-start justify-between gap-3">
                                       <div className="flex-1">
                                         <div className="font-bold text-white">#{s.service}</div>
@@ -447,9 +471,7 @@ export default function ServicesPage() {
                   )}
                 </div>
               )}
-            </div>
-          </div>
-        )}
+        </Modal>
       </div>
     </DashboardLayout>
   );

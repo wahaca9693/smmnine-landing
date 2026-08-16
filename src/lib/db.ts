@@ -1,9 +1,13 @@
 import { createClient } from "@libsql/client";
 
-const url = process.env.TURSO_DATABASE_URL;
+let url = process.env.TURSO_DATABASE_URL;
 const authToken = process.env.TURSO_AUTH_TOKEN;
 
-if (!url || !authToken) {
+if (process.env.USE_LOCAL_DB === "1") {
+  url = `file:${process.env.LOCAL_DB_PATH || "/tmp/follower-local.db"}`;
+}
+
+if (!url || (!authToken && process.env.USE_LOCAL_DB !== "1")) {
   throw new Error("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set");
 }
 
@@ -174,4 +178,126 @@ export async function initDb() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS site_settings (
+      id TEXT PRIMARY KEY,
+      siteName TEXT DEFAULT 'Follower',
+      primaryColor TEXT DEFAULT '#f97316',
+      backgroundColor TEXT DEFAULT '#050505',
+      cardColor TEXT DEFAULT '#111111',
+      surfaceColor TEXT DEFAULT '#1a1a1a',
+      borderColor TEXT DEFAULT '#27272a',
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await db.execute(`
+    INSERT OR IGNORE INTO site_settings (id)
+    VALUES ('default')
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS updates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      category TEXT DEFAULT 'update',
+      icon TEXT,
+      body TEXT NOT NULL,
+      is_pinned INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS service_requirements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category_pattern TEXT NOT NULL,
+      service_id INTEGER,
+      title TEXT NOT NULL,
+      description TEXT,
+      image_url TEXT,
+      image_file TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS providers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      api_url TEXT NOT NULL,
+      api_key TEXT NOT NULL,
+      balance TEXT,
+      balance_fetched_at DATETIME,
+      notes TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS provider_services (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider_id INTEGER NOT NULL,
+      remote_service_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      category TEXT,
+      rate REAL NOT NULL,
+      min REAL DEFAULT 0,
+      max REAL DEFAULT 0,
+      type TEXT,
+      markup_percent REAL DEFAULT 30,
+      sell_rate REAL,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+    )
+  `);
+
+  // عمود وسم "جديد" للخدمات المضافة حديثًا من المزودين
+  const colCheck = await db.execute({ sql: "PRAGMA table_info(provider_services)" });
+  if (!(colCheck.rows as any[]).some((c: any) => c.name === "is_new")) {
+    await db.execute(`ALTER TABLE provider_services ADD COLUMN is_new INTEGER DEFAULT 1`);
+  }
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS provider_order_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      local_order_id INTEGER,
+      provider_id INTEGER,
+      remote_order_id TEXT,
+      status TEXT DEFAULT 'pending',
+      error TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // مفاتيح API للمستخدمين (كل مستخدم يمكنه إنشاء مفتاح لاستخدام المنصة من موقعه/بوته)
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      api_key TEXT NOT NULL UNIQUE,
+      name TEXT DEFAULT 'مفتاحي الرئيسي',
+      requests_count INTEGER DEFAULT 0,
+      last_used_at DATETIME,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // توسعة ترقية آمنة: أعمدة ألوان إضافية للثيم المتقدم
+  for (const col of [
+    "secondaryColor TEXT DEFAULT '#fbbf24'",
+    "primaryLight TEXT DEFAULT '#fdba74'",
+  ]) {
+    try {
+      await db.execute(`ALTER TABLE site_settings ADD COLUMN ${col}`);
+    } catch {
+      // العمود موجود مسبقًا — تخطى
+    }
+  }
 }
