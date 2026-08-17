@@ -23,6 +23,8 @@ export async function initDb() {
       balance REAL DEFAULT 0,
       role TEXT DEFAULT 'user',
       terms_accepted INTEGER DEFAULT 0,
+      is_banned INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);

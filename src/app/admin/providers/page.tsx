@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Server,
@@ -16,6 +16,14 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
+  ListChecks,
+  PenLine,
+  Zap,
+  Search,
+  Eye,
+  EyeOff,
+  X,
+  Link2,
 } from "lucide-react";
 
 interface Provider {
@@ -43,98 +51,109 @@ interface ProviderService {
   markup_percent: number;
   sell_rate: number;
   is_active: number;
+  is_new?: number;
 }
 
+/* ══════════ صف الخدمة: بطاقة أفقية واحدة مضغوطة ══════════ */
 interface ServiceRowProps {
   s: ProviderService;
-  onUpdate: (id: number, markup: number) => void;
-  onToggle: (id: number, is_active: number) => void;
+  onNameSave: (id: number, name: string) => void;
+  onMarkup: (id: number, markup: number) => void;
+  onToggle: (id: number) => void;
   onDelete: (id: number) => void;
 }
 
-function ServiceRow({ s, onUpdate, onToggle, onDelete }: ServiceRowProps) {
+function ServiceRow({ s, onNameSave, onMarkup, onToggle, onDelete }: ServiceRowProps) {
   const [name, setName] = useState(s.name);
+  const [mark, setMark] = useState(String(s.markup_percent));
+  const [dirtyName, setDirtyName] = useState(false);
   const [savingName, setSavingName] = useState(false);
-  const saveName = async () => {
-    if (name.trim() === s.name) return;
+
+  const commitName = async () => {
+    const n = name.trim();
+    if (!n || n === s.name || savingName) { if (n !== s.name) setName(s.name); setDirtyName(false); return; }
     setSavingName(true);
     const res = await fetch("/api/admin/providers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "rename-service", id: s.id, name: name.trim() }),
+      body: JSON.stringify({ action: "rename-service", id: s.id, name: n }),
     });
     setSavingName(false);
-    if (!res.ok) setName(s.name);
+    if (res.ok) onNameSave(s.id, n);
+    else setName(s.name);
+    setDirtyName(false);
   };
-  const clearNewBadge = async () => {
-    await fetch("/api/admin/providers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "clear-new-badge", id: s.id }),
-    });
-    load(); // تحديث القائمة من الأدمن
+
+  const commitMarkup = () => {
+    const v = Number(mark);
+    if (!isNaN(v) && v >= 0 && v !== s.markup_percent) onMarkup(s.id, v);
+    else setMark(String(s.markup_percent));
   };
+
+  const isNew = Number((s as any).is_new) === 1;
+
   return (
-    <div className={`grid grid-cols-[36px_1fr_64px_70px_80px_76px] gap-1.5 border-t border-[var(--color-border)]/50 bg-[var(--color-surface)]/40 px-3 py-2.5 text-xs ${!s.is_active ? "opacity-60" : ""}`}>
-      <span className="font-bold text-zinc-500">{s.remote_service_id}</span>
-      <div className="min-w-0">
+    <div className={`mx-2.5 my-1.5 rounded-2xl border bg-[var(--color-surface-2)] px-3 py-3 transition ${s.is_active ? "border-[var(--color-gold)]/25" : "border-red-500/20 opacity-70"}`}>
+      {/* السطر الأول: الرقم + الاسم القابل للتعديل + وسم جديد */}
+      <div className="flex items-center gap-1.5">
+        <span className="shrink-0 rounded-lg border border-[var(--color-gold)]/30 bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] font-black text-[var(--color-gold-bright)]">#{s.remote_service_id}</span>
         <input
           value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={saveName}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-            if (e.key === "Escape") { setName(s.name); (e.target as HTMLInputElement).blur(); }
-          }}
-          className="w-full truncate rounded-lg border border-transparent bg-transparent px-1 py-0.5 text-[12px] font-bold text-white outline-none transition focus:border-[var(--color-primary)]/50"
+          onChange={(e) => { setName(e.target.value); setDirtyName(true); }}
+          onBlur={commitName}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { setName(s.name); setDirtyName(false); (e.target as HTMLInputElement).blur(); } }}
+          className="min-w-0 flex-1 rounded-lg bg-transparent px-1.5 py-0.5 text-[13px] font-black text-white outline-none transition focus:bg-[var(--color-surface-3)]"
           title="اضغط لتعديل اسم الخدمة — التغيير يظهر فورًا عند كل المستخدمين"
         />
-        {name !== s.name && <span className="text-[9px] font-black text-amber-400">● غير محفوظ</span>}
-        <div className="truncate text-[10px] text-zinc-500">{s.category || s.type || "عام"} · min {s.min} · max {s.max} · لكل 1000</div>
+        {dirtyName && <span className="shrink-0 text-[9px] font-black text-amber-400">●</span>}
+        {isNew && <span className="shrink-0 rounded-full bg-gradient-to-r from-[var(--color-gold-bright)] to-[var(--color-gold)] px-2 py-0.5 text-[9px] font-black text-black">جديد</span>}
       </div>
-      {Number((s as any).is_new) === 1 && (
-        <span
-          onClick={clearNewBadge}
-          title="إزالة وسم الجديد"
-          className="flex cursor-pointer items-center justify-center rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-1.5 text-[8px] font-black text-black shadow-[0_0_10px_-3px_#f59e0b]"
-        >
-          جديد
-        </span>
-      )}
-      <div className="text-center">
-        <div className="text-zinc-500">${s.rate}</div>
-        <div className="text-[9px] text-zinc-600">تكلفة</div>
+
+      {/* السطر الثاني: التصنيف + الكميات */}
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-400">
+        <span className="rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 font-bold text-[var(--color-gold-pale)]">{s.category || s.type || "عام"}</span>
+        <span>الحد الأدنى {s.min.toLocaleString("en-US")}</span>
+        <span>·</span>
+        <span>الأقصى {s.max.toLocaleString("en-US")}</span>
       </div>
-      <div className="text-center">
-        <div className="font-black text-[var(--color-primary)]">${s.sell_rate}</div>
-        <div className="text-[9px] text-zinc-600">سعر العرض</div>
+
+      {/* السطر الثالث: الأسعار + هامش الربح */}
+      <div className="mt-2 grid grid-cols-3 items-center gap-1.5">
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-3)] px-2 py-1.5 text-center">
+          <div className="text-[8.5px] font-bold text-zinc-500">التكلفة /1000</div>
+          <div className="text-[12px] font-black text-white">${Number(s.rate).toFixed(3)}</div>
+        </div>
+        <div className="rounded-xl border border-[var(--color-gold)]/35 bg-gradient-to-b from-[var(--color-gold)]/15 to-transparent px-2 py-1.5 text-center">
+          <div className="text-[8.5px] font-bold text-[var(--color-gold-pale)]">سعر العرض</div>
+          <div className="text-[12px] font-black text-[var(--color-gold-bright)]">${Number(s.sell_rate).toFixed(3)}</div>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="shrink-0 text-[9px] font-black text-zinc-400">ربح%</span>
+          <input
+            type="number"
+            value={mark}
+            onChange={(e) => setMark(e.target.value)}
+            onBlur={commitMarkup}
+            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+            className="h-8 w-full rounded-lg border border-[var(--color-gold)]/30 bg-[var(--color-surface)] px-1 text-center text-[12px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)]"
+          />
+        </div>
       </div>
-      <div className="flex items-center gap-1">
-        <input
-          type="number"
-          defaultValue={s.markup_percent}
-          onBlur={(e) => {
-            const v = Number(e.target.value);
-            if (!isNaN(v) && v !== s.markup_percent) onUpdate(s.id, v);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          }}
-          className="w-12 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-1.5 py-1 text-white"
-        />
-      </div>
-      <div className="flex items-center justify-end gap-1">
+
+      {/* السطر الرابع: الأزرار المتساوية */}
+      <div className="mt-2 flex items-center gap-1.5">
         <button
-          onClick={() => onToggle(s.id, s.is_active)}
-          title={s.is_active ? "إيقاف الخدمة (تخفى عن المستخدمين)" : "إعادة الخدمة (تظهر للمستخدمين)"}
-          className="transition hover:scale-110"
+          onClick={() => onToggle(s.id)}
+          className={`flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border text-[11px] font-black transition active:scale-[0.97] ${s.is_active ? "border-green-500/30 bg-green-500/10 text-green-400" : "border-zinc-700 bg-[var(--color-surface)] text-zinc-400"}`}
+          title={s.is_active ? "إيقاف الخدمة (تخفى عن المستخدمين)" : "إعادة تفعيل الخدمة"}
         >
-          {s.is_active ? <ToggleRight size={18} className="text-green-400" /> : <ToggleLeft size={18} className="text-zinc-500" />}
+          {s.is_active ? <ToggleRight size={15} /> : <ToggleLeft size={15} />}
+          {s.is_active ? "مفعّلة" : "موقوفة"}
         </button>
         <button
           onClick={() => onDelete(s.id)}
+          className="flex h-9 w-10 items-center justify-center rounded-xl border border-red-500/30 bg-[var(--color-surface)] text-red-400/80 transition hover:text-red-400 active:scale-[0.97]"
           title="حذف الخدمة نهائيًا (تعود عند المزامنة التالية)"
-          className="text-zinc-500 transition hover:text-red-400"
         >
           <Trash2 size={15} />
         </button>
@@ -143,6 +162,395 @@ function ServiceRow({ s, onUpdate, onToggle, onDelete }: ServiceRowProps) {
   );
 }
 
+/* ══════════ صف خدمة المودال (استعراض/إضافة) ══════════ */
+interface PreviewServiceRowProps {
+  s: any;
+  previewing: number;
+  services: ProviderService[];
+  globalMarkup: number;
+  onAdd: () => void;
+  onSaved: (msg: string) => void;
+  onError: (msg: string) => void;
+  onRefresh: () => void;
+}
+
+function PreviewServiceRow({ s, previewing, services, globalMarkup, onAdd, onSaved, onError, onRefresh }: PreviewServiceRowProps) {
+  // الخدمة المضافة محليًا (نطابقها بـ provider_id + remote_service_id)
+  const local = useMemo(
+    () => services.find((l) => l.provider_id === previewing && String(l.remote_service_id) === String(s.service)),
+    [services, previewing, s.service]
+  );
+  const isAdded = Boolean(s.added) || Boolean(local);
+
+  const [name, setName] = useState(s.name || "");
+  const [mark, setMark] = useState(String(globalMarkup));
+  const [dirtyName, setDirtyName] = useState(false);
+  const [dirtyMark, setDirtyMark] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [adding, setAdding] = useState(false);
+
+  // عند إضافة الخدمة من الصف نضيفها أولًا ثم نحدّث اسمها وهامشها المحفوظين محليًا
+  const commitEdits = async () => {
+    if (!local) return;
+    setSaving(true);
+    try {
+      const n = name.trim();
+      if (dirtyName && n && n !== local.name) {
+        const r = await fetch("/api/admin/providers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "rename-service", id: local.id, name: n }),
+        });
+        if (r.ok) onSaved("حُفظ الاسم: " + n);
+      }
+      const v = Number(mark);
+      if (dirtyMark && !isNaN(v) && v >= 0 && v !== local.markup_percent) {
+        const r = await fetch("/api/admin/providers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "update-service", id: local.id, markup_percent: v }),
+        });
+        if (r.ok) onSaved("حُفظ سعر العرض: " + v + "% فوق التكلفة");
+      }
+      setDirtyName(false);
+      setDirtyMark(false);
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleHide = async () => {
+    if (!local || toggling || saving) return;
+    setToggling(true);
+    try {
+      const newActive = local.is_active ? 0 : 1;
+      const r = await fetch("/api/admin/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update-service", id: local.id, is_active: newActive }),
+      });
+      if (r.ok) {
+        onSaved(newActive ? "أُعيدت الخدمة للعرض — ظاهرة للمستخدمين" : "أُخفيت الخدمة — غائبة عن كل المستخدمين");
+        onRefresh();
+      } else { onError("تعذر إخفاء الخدمة"); }
+    } finally {
+      setToggling(false);
+    }
+  };
+
+  const cost = Number(s.rate) || 0;
+  const showRate = (cost * (1 + (local ? local.markup_percent : globalMarkup) / 100));
+
+  return (
+    <div className={`rounded-xl border p-2.5 text-[11px] transition ${isAdded ? "border-green-500/30 bg-green-500/5" : "border-[var(--color-gold)]/15 bg-[var(--color-surface-2)]"}`}>
+      {/* السطر الأول: الرقم + التصنيف + النوع */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="rounded border border-[var(--color-gold)]/30 bg-[var(--color-surface-3)] px-1 py-0.5 text-[9px] font-black text-[var(--color-gold-bright)]">#{s.service}</span>
+        <span className="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[9px] text-zinc-400">{s.category || "عام"}</span>
+        {s.type && <span className="rounded-full bg-[var(--color-gold)]/10 px-1.5 py-0.5 text-[9px] text-[var(--color-gold-pale)]">{s.type}</span>}
+        <span className="text-[9px] text-zinc-600">min {Number(s.min).toLocaleString("en-US")} · max {Number(s.max).toLocaleString("en-US")}</span>
+      </div>
+      {/* السطر الثاني: الاسم القابل للتعديل */}
+      <div className="mt-1 flex items-center gap-1">
+        <input
+          value={name}
+          disabled={!isAdded || saving}
+          onChange={(e) => { setName(e.target.value); setDirtyName(true); }}
+          onBlur={commitEdits}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          className="min-w-0 flex-1 rounded-lg bg-transparent px-1.5 py-0.5 text-[11px] font-black text-white outline-none transition focus:bg-[var(--color-surface-3)] disabled:opacity-70"
+          placeholder="اسم الخدمة"
+          title="اضغط لتعديل الاسم — ثم اضغط Enter أو انقل التركيز للحفظ الفوري"
+        />
+        {dirtyName && !saving && <span className="shrink-0 text-[9px] font-black text-amber-400">●</span>}
+        {saving && <Loader2 className="animate-spin shrink-0 text-zinc-500" size={12} />}
+      </div>
+      {/* السطر الثالث: الأسعار + هامش الربح القابل للتعديل */}
+      <div className="mt-1 grid grid-cols-3 items-center gap-1.5">
+        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-3)] px-1.5 py-1 text-center">
+          <div className="text-[7.5px] font-bold text-zinc-500">التكلفة /1000</div>
+          <div className="text-[10.5px] font-black text-white">${cost.toFixed(3)}</div>
+        </div>
+        <div className="rounded-lg border border-[var(--color-gold)]/35 bg-gradient-to-b from-[var(--color-gold)]/15 to-transparent px-1.5 py-1 text-center">
+          <div className="text-[7.5px] font-bold text-[var(--color-gold-pale)]">سعر العرض</div>
+          <div className="text-[10.5px] font-black text-[var(--color-gold-bright)]">${showRate.toFixed(3)}</div>
+        </div>
+        <div className="flex items-center gap-0.5">
+          <span className="shrink-0 text-[8px] font-black text-zinc-400">ربح%</span>
+          <input
+            type="number"
+            disabled={!isAdded || saving}
+            value={mark}
+            onChange={(e) => { setMark(e.target.value); setDirtyMark(true); }}
+            onBlur={commitEdits}
+            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+            className="h-7 w-full rounded-lg border border-[var(--color-gold)]/30 bg-[var(--color-surface)] px-1 text-center text-[10.5px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)] disabled:opacity-60"
+            title="غيّر نسبة الربح ثم اضغط Enter أو انقل التركيز ليُحفظ السعر فورًا"
+          />
+        </div>
+      </div>
+      {/* السطر الرابع: زر الإضافة أو الإضافة+الإخفاء */}
+      <div className="mt-1.5">
+        {!isAdded ? (
+          <button
+            onClick={() => { if (adding) return; setAdding(true); onAdd(); setAdding(false); }}
+            disabled={adding}
+            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-[var(--color-gold-bright)] to-[var(--color-gold)] text-[10.5px] font-black text-black shadow-[0_0_16px_-6px_rgba(255,215,0,0.5)] transition hover:brightness-110 active:scale-[0.97] disabled:opacity-60"
+          >
+            <Plus size={13} /> {adding ? "جاري الإضافة..." : "إضافة للعرض (تظهر فورًا عند الجميع)"}
+          </button>
+        ) : (
+          <button
+            onClick={toggleHide}
+            disabled={toggling || saving}
+            className={`flex h-7 w-full items-center justify-center gap-1.5 rounded-lg border text-[10px] font-black transition active:scale-[0.97] disabled:opacity-60 ${local && !local.is_active ? "border-[var(--color-gold)]/30 bg-[var(--color-surface)] text-[var(--color-gold-pale)]" : "border-green-500/30 bg-green-500/10 text-green-400"}`}
+          >
+            {toggling ? (
+              <Loader2 className="animate-spin" size={12} />
+            ) : local && !local.is_active ? (
+              <><Eye size={13} /> مخفية — اضغط لإعادة العرض عند كل المستخدمين</>
+            ) : (
+              <><EyeOff size={13} /> مضافة للعرض — اضغط للإخفاء عن كل المستخدمين</>
+            )}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════ بطاقة المزود ══════════ */
+interface ProviderCardProps {
+  p: Provider;
+  services: ProviderService[];
+  syncing: number | null;
+  globalMarkup: number;
+  onSync: (id: number) => void;
+  onToggleProvider: (id: number) => void;
+  onPreview: (id: number) => void;
+  onEdit: (p: Provider) => void;
+  onDeleteProvider: (id: number) => void;
+  onServiceAction: (id: number, is_active?: number) => void;
+  onMarkup: (id: number, markup: number) => void;
+  onRenameService: (id: number, name: string) => void;
+  onUpdateAll: (id: number) => void;
+}
+
+function ProviderCard(props: ProviderCardProps) {
+  const {
+    p, services, syncing, globalMarkup, onSync, onToggleProvider,
+    onPreview, onEdit, onDeleteProvider, onServiceAction, onMarkup, onRenameService, onUpdateAll,
+  } = props;
+
+  const [svcSearch, setSvcSearch] = useState("");
+  const [svcCat, setSvcCat] = useState<string>("الكل");
+  const [svcMode, setSvcMode] = useState<"active" | "paused">("active");
+  const [bulkMark, setBulkMark] = useState("");
+  const [deleted] = useState<Set<number>>(new Set());
+
+  const all = useMemo(() => services.filter((s) => s.provider_id === p.id && !deleted.has(s.id)), [services, p.id, deleted]);
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of all) set.add(s.category || s.type || "عام");
+    return ["الكل", ...[...set].sort()];
+  }, [all]);
+
+  const filtered = useMemo(() => {
+    const q = svcSearch.trim().toLowerCase();
+    return all
+      .filter((s) => (svcMode === "active" ? s.is_active : !s.is_active))
+      .filter((s) => svcCat === "الكل" || s.category === svcCat || s.type === svcCat)
+      .filter((s) => {
+        if (!q) return true;
+        const hay = `${s.name} ${s.remote_service_id} ${s.category} ${s.type}`.toLowerCase();
+        return hay.includes(q);
+      });
+  }, [all, svcSearch, svcCat, svcMode]);
+
+  const activeCount = all.filter((s) => s.is_active).length;
+  const pausedCount = all.length - activeCount;
+
+  const balanceOk = p.balance && p.balance !== "غير متاح" && p.balance !== "";
+
+  return (
+    <div className={`overflow-hidden rounded-3xl border border-[var(--color-gold)]/20 bg-[var(--color-surface)] shadow-[0_10px_40px_-18px_rgba(212,175,55,0.25)] transition ${p.is_active ? "" : "opacity-60"}`}>
+      {/* شريط العنوان */}
+      <div className="flex items-center gap-3 border-b border-[var(--color-gold)]/15 bg-gradient-to-r from-[var(--color-surface-2)] to-[var(--color-surface)] px-4 py-3">
+        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--color-gold-bright)] via-[var(--color-gold)] to-[var(--color-gold-deep)] text-black shadow-[0_0_20px_-6px_rgba(255,215,0,0.6)]">
+          <Server size={19} strokeWidth={2.5} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-[15px] font-black text-white">{p.name}</span>
+            <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8.5px] font-black ${p.is_active ? "bg-green-500/15 text-green-400" : "bg-zinc-700/50 text-zinc-400"}`}>{p.is_active ? "متصل" : "معطل"}</span>
+          </div>
+          <div className="truncate text-[10px] text-zinc-500">{p.api_url}</div>
+        </div>
+        <button
+          onClick={() => onToggleProvider(p.id)}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition active:scale-[0.95] ${p.is_active ? "border-green-500/35 bg-green-500/10 text-green-400" : "border-zinc-700 bg-[var(--color-surface-2)] text-zinc-500"}`}
+          title={p.is_active ? "تعطيل المزود" : "تفعيل المزود"}
+        >
+          {p.is_active ? <Power size={16} /> : <PowerOff size={16} />}
+        </button>
+      </div>
+
+      {/* معلومات الرصيد */}
+      {balanceOk ? (
+        <div className="flex items-center justify-between border-b border-[var(--color-gold)]/10 bg-gradient-to-r from-[var(--color-gold)]/10 to-transparent px-4 py-2">
+          <div className="flex items-center gap-1.5 text-[12px]">
+            <Wallet size={13} className="text-[var(--color-gold-bright)]" />
+            <span className="font-black text-white">رصيدك لدى المزود</span>
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <b className="text-[16px] font-black text-[var(--color-gold-bright)]">${p.balance}</b>
+            {p.balance_fetched_at && <span className="text-[9px] text-zinc-500">(محدث {new Date(p.balance_fetched_at).toLocaleTimeString("ar-EG")})</span>}
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 border-b border-red-500/15 bg-red-500/10 px-4 py-2 text-[11px] text-red-400">
+          <Wallet size={13} />
+          <span className="font-bold">تعذّر جلب الرصيد — تحقق من مفتاح API أو رابط المزود</span>
+        </div>
+      )}
+
+      {/* شريط الأزرار الموحد */}
+      <div className="grid grid-cols-3 gap-2 px-3 py-3">
+        <button
+          onClick={() => onPreview(p.id)}
+          className="flex h-10 items-center justify-center gap-1.5 rounded-xl border border-[var(--color-gold)]/40 bg-gradient-to-b from-[var(--color-gold)]/20 to-[var(--color-gold)]/5 text-[11px] font-black text-[var(--color-gold-bright)] transition hover:brightness-125 active:scale-[0.97]"
+          title="استعراض جميع خدمات المزود وإضافتها انتقائيًا"
+        >
+          <ListChecks size={14} /> عرض الخدمات
+        </button>
+        <button
+          onClick={() => onEdit(p)}
+          className="flex h-10 items-center justify-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[11px] font-black text-zinc-300 transition hover:border-[var(--color-gold)]/40 hover:text-[var(--color-gold-pale)] active:scale-[0.97]"
+          title="تعديل بيانات المزود"
+        >
+          <PenLine size={14} /> تعديل
+        </button>
+        <button
+          onClick={() => onDeleteProvider(p.id)}
+          className="flex h-10 items-center justify-center rounded-xl border border-red-500/30 bg-[var(--color-surface-2)] text-red-400/80 transition hover:text-red-400 active:scale-[0.97]"
+          title="حذف المزود وجميع خدماته"
+        >
+          <Trash2 size={15} />
+        </button>
+      </div>
+
+      {/* قسم الخدمات */}
+      <div className="border-t border-[var(--color-gold)]/10 bg-[var(--color-surface)] px-2 pb-4 pt-3">
+        {/* رأس قسم الخدمات */}
+        <div className="mb-2 flex items-center justify-between px-2.5">
+          <div className="flex items-center gap-2 text-[11px] font-black text-zinc-300">
+            <Activity size={13} className="text-[var(--color-gold-bright)]" />
+            خدمات المزود
+            <span className="rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 text-[10px] text-zinc-400">{all.length} خدمة</span>
+          </div>
+          <span className="text-[9.5px] text-zinc-500">مضافة {activeCount} · موقوفة {pausedCount}</span>
+        </div>
+
+        {/* البحث */}
+        <div className="relative px-2.5">
+          <Search size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+          <input
+            value={svcSearch}
+            onChange={(e) => setSvcSearch(e.target.value)}
+            placeholder="ابحث بالاسم أو رقم الخدمة..."
+            className="h-10 w-full rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-surface-2)] pr-9 pl-8 text-[12px] font-bold text-white placeholder:text-zinc-600 outline-none transition focus:border-[var(--color-gold)]/60"
+          />
+          {svcSearch && (
+            <button onClick={() => setSvcSearch("")} className="absolute left-2.5 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-zinc-500 transition hover:text-white">
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        {/* فلاتر التصنيفات */}
+        <div className="no-scrollbar mt-2 flex gap-1.5 overflow-x-auto px-2.5 pb-1">
+          {categories.map((c) => (
+            <button
+              key={c}
+              onClick={() => setSvcCat(c)}
+              className={`shrink-0 rounded-full border px-2.5 py-1 text-[10.5px] font-black transition active:scale-95 ${svcCat === c ? "border-[var(--color-gold)] bg-gradient-to-r from-[var(--color-gold)] to-[var(--color-gold-deep)] text-black" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-zinc-400"}`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+
+        {/* التبويب بين المفعلة والموقوفة */}
+        <div className="mt-2 flex items-center gap-1.5 px-2.5">
+          <button
+            onClick={() => setSvcMode("active")}
+            className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-xl border text-[11px] font-black transition active:scale-[0.97] ${svcMode === "active" ? "border-green-500/40 bg-green-500/10 text-green-400" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-zinc-500"}`}
+          >
+            <Eye size={13} /> المفعّلة {activeCount}
+          </button>
+          <button
+            onClick={() => setSvcMode("paused")}
+            className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-xl border text-[11px] font-black transition active:scale-[0.97] ${svcMode === "paused" ? "border-yellow-500/40 bg-yellow-500/10 text-yellow-400" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-zinc-500"}`}
+          >
+            <EyeOff size={13} /> الموقوفة {pausedCount}
+          </button>
+        </div>
+
+        {/* قائمة الخدمات */}
+        <div className="mt-2 max-h-[420px] overflow-y-auto rounded-2xl border border-[var(--color-gold)]/10 bg-[var(--color-surface)]">
+          {filtered.length === 0 && (
+            <div className="flex flex-col items-center gap-2 px-3 py-8 text-center text-[11px] text-zinc-500">
+              <Search size={22} className="text-zinc-600" />
+              {all.length === 0
+                ? "لا توجد خدمات بعد — اضغط «مزامنة جميع الخدمات» أو «عرض الخدمات» لإضافتها"
+                : "لا توجد خدمات مطابقة للبحث"}
+            </div>
+          )}
+          {filtered.map((s) => (
+            <ServiceRow
+              key={s.id}
+              s={s}
+              onNameSave={onRenameService}
+              onMarkup={onMarkup}
+              onToggle={onServiceAction}
+              onDelete={onServiceAction}
+            />
+          ))}
+        </div>
+
+        {/* هامش جماعي + مزامنة */}
+        <div className="mt-3 flex items-center gap-2 px-2.5">
+          <input
+            type="number"
+            placeholder="هامش %"
+            value={bulkMark}
+            onChange={(e) => setBulkMark(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && bulkMark) { onUpdateAll(p.id); setBulkMark(""); } }}
+            className="h-10 w-20 rounded-xl border border-[var(--color-gold)]/30 bg-[var(--color-surface-2)] px-2 text-center text-[12px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)]"
+          />
+          <button
+            onClick={() => { onUpdateAll(p.id); setBulkMark(""); }}
+            className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[11px] font-black text-zinc-300 transition hover:border-[var(--color-gold)]/40 hover:text-[var(--color-gold-pale)] active:scale-[0.97]"
+          >
+            <Zap size={14} /> تحديث أسعار الكل
+          </button>
+        </div>
+        <button
+          onClick={() => onSync(p.id)}
+          disabled={syncing === p.id}
+          className="mt-2 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[var(--color-gold-bright)] via-[var(--color-gold)] to-[var(--color-gold-deep)] px-4 text-[13px] font-black text-black shadow-[0_0_24px_-8px_rgba(255,215,0,0.5)] transition hover:brightness-110 active:scale-[0.98] disabled:opacity-50"
+        >
+          {syncing === p.id ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={15} />}
+          {syncing === p.id ? "جاري المزامنة..." : "مزامنة جميع الخدمات"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════ الصفحة الرئيسية ══════════ */
 export default function ProvidersPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [services, setServices] = useState<ProviderService[]>([]);
@@ -156,10 +564,17 @@ export default function ProvidersPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [result, setResult] = useState<{ message?: string; error?: string } | null>(null);
   const [deletedServiceIds, setDeletedServiceIds] = useState<Set<number>>(new Set());
-  const [previewing, setPreviewing] = useState<number | null>(null); // معرّف المزود المعروض خدماته
+  const [previewing, setPreviewing] = useState<number | null>(null);
   const [previewServices, setPreviewServices] = useState<any[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewSearch, setPreviewSearch] = useState("");
+  const [previewCat, setPreviewCat] = useState<string>("الكل");
+
+  const previewCats = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of previewServices) set.add(s.category || s.type || "عام");
+    return [...set].sort();
+  }, [previewServices]);
 
   const load = () => {
     fetch("/api/admin/providers")
@@ -175,7 +590,6 @@ export default function ProvidersPage() {
 
   useEffect(() => {
     load();
-    // تحديث تلقائي للأرصدة من سيرفرات المزودين عند فتح الصفحة
     refreshBalances();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -206,7 +620,9 @@ export default function ProvidersPage() {
     const data = await res.json();
     if (data.error) setResult({ error: data.error });
     else {
-      setResult({ message: `تم الحفظ بنجاح — تم فحص الاتصال والرصيد: ${data.balance || "لا يوجد"}` });
+      setResult({
+        message: `تم الربط بنجاح ✓ الاتصال سليم — الرصيد لدى المزود: $${Number(data.balance ?? 0).toFixed(2)} — اضغط «عرض الخدمات» لإضافة ما تعجبك انتقائيًا`,
+      });
       setShowForm(false);
       setEditing(null);
       setForm({ name: "", api_url: "", api_key: "", notes: "" });
@@ -254,22 +670,32 @@ export default function ProvidersPage() {
     load();
   };
 
+  const renameService = async (id: number, name: string) => {
+    const updated = services.map((s) => (s.id === id ? { ...s, name } : s));
+    setServices(updated);
+  };
+
   const updateServiceMarkup = async (id: number, markup: number) => {
-    await fetch("/api/admin/providers", {
+    const updated = services.map((s) => (s.id === id ? { ...s, markup_percent: markup, sell_rate: s.rate * (1 + markup / 100) } : s));
+    setServices(updated);
+    fetch("/api/admin/providers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "update-service", id, markup_percent: markup }),
     });
-    load();
   };
 
-  const toggleService = async (id: number, is_active: number) => {
+  const serviceAction = async (id: number) => {
+    const s = services.find((x) => x.id === id);
+    if (!s) return;
+    const deactivate = s.is_active ? 1 : 0; // 1 = حذف/إيقاف (نفس منطق الواجهة السابقة)
+    const updated = services.map((x) => (x.id === id ? { ...x, is_active: deactivate ? 0 : 1 } : x));
+    setServices(updated);
     await fetch("/api/admin/providers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "update-service", id, markup_percent: undefined as unknown as number, is_active: is_active ? 0 : 1 }),
+      body: JSON.stringify({ action: "update-service", id, markup_percent: undefined as unknown as number, is_active: deactivate }),
     });
-    load();
   };
 
   const deleteService = async (id: number) => {
@@ -282,7 +708,7 @@ export default function ProvidersPage() {
     const data = await res.json();
     if (data.ok) {
       setDeletedServiceIds((prev) => new Set([...prev, id]));
-      load();
+      setServices((prev) => prev.filter((s) => s.id !== id));
     } else {
       setResult({ error: data.error || "فشل حذف الخدمة" });
     }
@@ -297,19 +723,21 @@ export default function ProvidersPage() {
     load();
   };
 
-  const openPreview = async (providerId: number) => {
+  // إعادة تعيين الفلتر عند فتح مودال جديد (يضمن مودالًا واحدًا نظيفًا)
+  const openPreviewSafe = async (providerId: number) => {
+    if (previewing !== null && previewing !== providerId) setPreviewCat("الكل");
+    await openPreviewOrig(providerId);
+  };
+
+  const openPreviewOrig = async (providerId: number) => {
     setPreviewing(providerId);
     setPreviewLoading(true);
     setPreviewSearch("");
     try {
       const res = await fetch(`/api/admin/providers?mode=preview&providerId=${providerId}`);
       const data = await res.json();
-      if (res.ok) {
-        setPreviewServices(data.services || []);
-      } else {
-        setPreviewServices([]);
-        setResult({ error: data.error || "تعذر جلب الخدمات" });
-      }
+      if (res.ok) setPreviewServices(data.services || []);
+      else { setPreviewServices([]); setResult({ error: data.error || "تعذر جلب الخدمات" }); }
     } finally {
       setPreviewLoading(false);
     }
@@ -324,396 +752,237 @@ export default function ProvidersPage() {
     const data = await res.json();
     if (res.ok) {
       setResult({ message: "أُضيفت الخدمة — ظاهرة للمستخدمين الآن" });
-      openPreview(providerId); // تحديث الحالة (أُضيفت)
+      openPreviewSafe(providerId);
+      load();
     } else {
       setResult({ error: data.error || "تعذرت الإضافة" });
     }
   };
 
   return (
-    <div dir="rtl" className="min-h-screen bg-[#050505] p-4 pb-16">
-      <div className="mx-auto max-w-4xl space-y-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-[0_0_24px_-6px_#a855f7]">
-              <Server size={24} />
-            </span>
-            <div>
-              <h1 className="text-2xl font-black text-white">مزودو الخدمات</h1>
-              <div className="text-xs text-zinc-500">اربط مزودي SMM خارجيين واستورد خدماتهم تلقائيًا</div>
-            </div>
+    <div dir="rtl" className="min-h-screen bg-[#050505] pb-16">
+      <div className="mx-auto max-w-4xl space-y-4 p-3">
+        {/* ═══ رأس الصفحة ═══ */}
+        <div className="flex items-center gap-3">
+          <span className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--color-gold-bright)] via-[var(--color-gold)] to-[var(--color-gold-deep)] text-black shadow-[0_0_22px_-6px_rgba(255,215,0,0.6)]">
+            <Server size={20} strokeWidth={2.5} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-[18px] font-black text-gradient-luxe">مزودو الخدمات</h1>
+            <div className="text-[10.5px] text-zinc-500">اربط مزودي SMM خارجيين وأضِف خدماتهم انتقائيًا</div>
           </div>
-            <div className="flex items-center gap-2">
-            <button
-              onClick={refreshBalances}
-              disabled={refreshing}
-              className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-2.5 text-sm font-bold text-white transition hover:border-[var(--color-primary)]/40 disabled:opacity-50"
-              title="تحديث أرصدة جميع المزودين من سيرفراتهم"
-            >
-              {refreshing ? <Loader2 className="animate-spin" size={16} /> : <Wallet size={16} />}
-              <span className="hidden sm:inline">تحديث الأرصدة</span>
-            </button>
-            <Link href="/admin" className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-2.5 text-sm font-bold text-white transition hover:border-[var(--color-primary)]/40">
-              <ArrowLeft size={16} />
-              الرئيسية
-            </Link>
-            </div>
+          <button
+            onClick={refreshBalances}
+            disabled={refreshing}
+            className="flex h-10 items-center gap-1.5 rounded-xl border border-[var(--color-gold)]/35 bg-gradient-to-b from-[var(--color-gold)]/20 to-transparent px-3 text-[11px] font-black text-[var(--color-gold-bright)] transition hover:brightness-125 active:scale-[0.95] disabled:opacity-50"
+            title="تحديث أرصدة جميع المزودين من سيرفراتهم"
+          >
+            {refreshing ? <Loader2 className="animate-spin" size={14} /> : <Wallet size={14} />}
+            أرصدة
+          </button>
+          <Link
+            href="/admin"
+            className="flex h-10 items-center gap-1.5 rounded-xl border border-[var(--color-gold)]/30 bg-[var(--color-surface)] px-3 text-[11px] font-black text-zinc-300 transition hover:text-[var(--color-gold-pale)] active:scale-[0.95]"
+          >
+            <ArrowLeft size={14} /> الرئيسية
+          </Link>
         </div>
 
-        {/* هامش الربح العام */}
-        <div className="card-luxe rounded-3xl border p-5">
-          <div className="mb-3 flex items-center gap-3">
-            <Activity size={20} className="text-[var(--color-primary)]" />
-            <div className="font-black text-white">هامش الربح الافتراضي عند المزامنة</div>
-          </div>
-          <div className="flex items-center gap-3">
+        {/* ═══ هامش الربح العام ═══ */}
+        <div className="flex items-center gap-3 rounded-2xl border border-[var(--color-gold)]/20 bg-[var(--color-surface)] px-4 py-3">
+          <Activity size={16} className="shrink-0 text-[var(--color-gold-bright)]" />
+          <span className="shrink-0 text-[12px] font-black text-white">هامش الربح الافتراضي</span>
+          <div className="flex flex-1 items-center gap-2">
             <input
               type="number"
               value={globalMarkup}
               onChange={(e) => setGlobalMarkup(Number(e.target.value))}
-              className="input-luxe w-28 rounded-xl px-4 py-3 text-white"
+              className="h-9 w-20 rounded-lg border border-[var(--color-gold)]/30 bg-[var(--color-surface-2)] px-2 text-center text-[12px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)]"
             />
-            <span className="text-zinc-400">%</span>
-            <span className="text-xs text-zinc-500">يُضاف فوق سعر التكلفة (مثال: تكلفة $1.00 + هامش 30% = سعر البيع $1.30 لكل 1000)</span>
+            <span className="text-[11px] text-zinc-400">٪ يُضاف فوق التكلفة</span>
           </div>
         </div>
 
-        {/* نموذج إضافة/تعديل مزود */}
+        {/* ═══ زر إضافة المزود الموحّد (يظهر دائمًا أعلى القائمة) ═══ */}
+        <button
+          onClick={() => { setShowForm(true); setEditing(null); setForm({ name: "", api_url: "", api_key: "", notes: "" }); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[var(--color-gold-bright)] via-[var(--color-gold)] to-[var(--color-gold-deep)] text-[13px] font-black text-black shadow-[0_0_24px_-8px_rgba(255,215,0,0.5)] transition hover:brightness-110 active:scale-[0.98]"
+        >
+          <Plus size={16} /> {showForm ? "إخفاء نموذج الإضافة" : "إضافة مزود جديد"}
+        </button>
+
+        {/* ═══ نموذج إضافة/تعديل مزود (موحّد في مكان واحد أعلى القائمة) ═══ */}
         {showForm && (
-          <div className="card-luxe rounded-3xl border p-5">
-            <h2 className="mb-4 text-lg font-black text-gradient-luxe">{editing ? "تعديل مزود" : "إضافة مزود جديد"}</h2>
-            <form onSubmit={saveProvider} className="space-y-4">
+          <div className="rounded-3xl border border-[var(--color-gold)]/25 bg-[var(--color-surface)] p-4 shadow-[0_10px_40px_-18px_rgba(212,175,55,0.3)]">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[16px] font-black text-gradient-luxe">{editing ? `تعديل المزود: ${editing.name}` : "إضافة مزود جديد"}</h2>
+              <button onClick={() => { setShowForm(false); setEditing(null); }} className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] text-zinc-400 transition hover:text-white">
+                <X size={15} />
+              </button>
+            </div>
+            <form onSubmit={saveProvider} className="space-y-3">
               <div>
-                <label className="mb-1 block text-sm font-bold text-zinc-400">اسم المزود</label>
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="input-luxe w-full rounded-xl px-4 py-3 text-white"
-                  placeholder="مثال: JustAnotherPanel"
-                  required
-                />
+                <label className="mb-1 block text-[11px] font-bold text-zinc-400">اسم المزود</label>
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input-luxe h-10 w-full rounded-xl px-3 text-[13px] text-white" placeholder="مثال: JustAnotherPanel" required />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-bold text-zinc-400">رابط API</label>
-                <input
-                  value={form.api_url}
-                  onChange={(e) => setForm({ ...form, api_url: e.target.value })}
-                  className="input-luxe w-full rounded-xl px-4 py-3 text-white"
-                  placeholder="https://panel.example.com"
-                  required
-                />
+                <label className="mb-1 block text-[11px] font-bold text-zinc-400">رابط API</label>
+                <input value={form.api_url} onChange={(e) => setForm({ ...form, api_url: e.target.value })} className="input-luxe h-10 w-full rounded-xl px-3 text-[13px] text-white" placeholder="https://panel.example.com" required />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-bold text-zinc-400">مفتاح API</label>
-                <input
-                  value={form.api_key}
-                  onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-                  className="input-luxe w-full rounded-xl px-4 py-3 text-white"
-                  placeholder="key-xxxxxxxxxxxx"
-                  required
-                />
+                <label className="mb-1 block text-[11px] font-bold text-zinc-400">مفتاح API</label>
+                <input value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} className="input-luxe h-10 w-full rounded-xl px-3 text-[13px] text-white" placeholder="key-xxxxxxxxxxxx" required />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-bold text-zinc-400">ملاحظات (اختياري)</label>
-                <input
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  className="input-luxe w-full rounded-xl px-4 py-3 text-white"
-                  placeholder="مثال: مزود خدمات انستغرام"
-                />
+                <label className="mb-1 block text-[11px] font-bold text-zinc-400">ملاحظات (اختياري)</label>
+                <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="input-luxe h-10 w-full rounded-xl px-3 text-[13px] text-white" placeholder="مثال: مزود خدمات انستغرام" />
               </div>
               <div className="flex gap-2">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex-1 rounded-xl bg-gradient-to-r from-purple-500 to-purple-600 py-3 font-black text-white shadow-[0_0_28px_-8px_#a855f7] transition hover:opacity-90 disabled:opacity-50"
-                >
-                  {loading ? <Loader2 className="mx-auto animate-spin" /> : "حفظ وفحص الاتصال"}
+                <button type="submit" disabled={loading} className="btn-gold flex-1 rounded-xl py-2.5 text-[13px] disabled:opacity-50">
+                  {loading ? <Loader2 className="mx-auto animate-spin" size={16} /> : "حفظ وفحص الاتصال"}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowForm(false); setEditing(null); }}
-                  className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-3 font-bold text-zinc-300"
-                >
-                  إلغاء
-                </button>
+                <button type="button" onClick={() => { setShowForm(false); setEditing(null); }} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-5 py-2.5 text-[12px] font-bold text-zinc-300">إلغاء</button>
               </div>
-              <div className="rounded-xl bg-[var(--color-card)]/60 p-3 text-xs text-zinc-400 leading-relaxed">
-                يدعم النظام أي مزود يستخدم SMM Panel API القياسي (/api/v2) مثل JustAnotherPanel و SMMFollowers و SMMKings وغيرها.
-                عند الحفظ يتم اختبار الاتصال تلقائيًا، وعقب المزامنة تجلب جميع خدمات المزود وأسعاره وتعرضها هنا.
+              <div className="rounded-xl border border-[var(--color-gold)]/10 bg-[var(--color-surface-2)] p-2.5 text-[10.5px] leading-relaxed text-zinc-400">
+                يدعم النظام أي مزود يستخدم SMM Panel API القياسي (api/v2) مثل JustAnotherPanel و SMMFollowers و SMMKings. عند الحفظ يُختبر الاتصال تلقائيًا، وبعد المزامنة تُستورد خدمات المزود لتختار منها ما تريد.
               </div>
             </form>
           </div>
         )}
 
+        {/* ═══ رسالة النتيجة ═══ */}
         {result && (
-          <div className={`rounded-2xl border p-4 text-sm font-bold ${result.error ? "border-red-500/30 bg-red-500/10 text-red-400" : "border-green-500/30 bg-green-500/10 text-green-400"}`}>
-            {result.error || result.message}
+          <div className={`flex items-center gap-2 rounded-2xl border p-3 text-[12px] font-bold leading-relaxed ${result.error ? "border-red-500/30 bg-red-500/10 text-red-400" : "border-green-500/30 bg-green-500/10 text-green-400"}`}>
+            {result.error ? <XCircle size={16} className="shrink-0" /> : <CheckCircle2 size={16} className="shrink-0" />}
+            <span className="whitespace-pre-line">{result.error || result.message}</span>
           </div>
         )}
 
-        {/* قائمة المزودين */}
-        <div className="space-y-3">
-          {providers.map((p) => (
-            <div key={p.id} className={`card-luxe rounded-3xl border p-5 transition ${p.is_active ? "" : "opacity-60"}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-[0_0_24px_-6px_#a855f7]">
-                    <Server size={22} />
-                  </span>
-                  <div>
-                    <div className="font-black text-white">{p.name}</div>
-                    <div className="text-xs text-zinc-500 truncate max-w-[200px]">{p.api_url}</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => toggleProvider(p.id)}
-                    className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-zinc-400 transition hover:text-[var(--color-primary)]"
-                    title={p.is_active ? "تعطيل" : "تفعيل"}
-                  >
-                    {p.is_active ? <Power size={16} className="text-green-400" /> : <PowerOff size={16} />}
-                  </button>
-                  <button
-                    onClick={() => { setEditing(p); setForm({ name: p.name, api_url: p.api_url, api_key: p.api_key, notes: p.notes || "" }); setShowForm(true); }}
-                    className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs font-bold text-zinc-400 transition hover:text-[var(--color-primary)]"
-                  >
-                    تعديل
-                  </button>
-                  <button
-                    onClick={() => openPreview(p.id)}
-                    className="rounded-full border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 px-3 py-2 text-xs font-black text-[var(--color-primary)] transition hover:border-[var(--color-primary)]/60"
-                    title="استعراض جميع خدمات المزود من سيرفره — إضافة انتقائية دون مزامنة كاملة"
-                  >
-                    استعراض خدماته
-                  </button>
-                  <button
-                    onClick={() => deleteProvider(p.id)}
-                    className="rounded-full border border-red-500/20 bg-[var(--color-surface)] p-2 text-red-400/60 transition hover:text-red-400"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </div>
-
-              {p.balance && p.balance !== "غير متاح" && p.balance !== "" && (
-                <div className="mt-3 flex items-center justify-between rounded-xl border border-[var(--color-primary)]/15 bg-gradient-to-r from-[var(--color-primary)]/10 to-transparent px-3 py-2.5 text-xs">
-                  <div className="flex items-center gap-2">
-                    <Wallet size={14} className="text-[var(--color-primary)]" />
-                    <span className="font-black text-white">رصيدك لدى المزود:</span>
-                    <b className="text-lg text-[var(--color-primary)]">${p.balance}</b>
-                  </div>
-                  {p.balance_fetched_at && <span className="text-zinc-500 text-[10px]">(محدث {new Date(p.balance_fetched_at).toLocaleTimeString("ar-EG")})</span>}
-                </div>
-              )}
-              {p.balance === "غير متاح" || p.balance === "" ? (
-                <div className="mt-3 flex items-center gap-2 rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                  <Wallet size={13} />
-                  <span>تعذر جلب رصيد المزود — تحقق من المفتاح أو الاتصال</span>
-                </div>
-              ) : null}
-
-              {/* تصنيفات خدمات المزود */}
-              {(() => {
-                const svc = services.filter((s) => s.provider_id === p.id);
-                if (svc.length === 0) return null;
-                const groups = new Map<string, { count: number; name: string }>();
-                for (const s of svc) {
-                  const cat = (s.category || s.type || "أخرى").trim() || "أخرى";
-                  const g = groups.get(cat) || { count: 0, name: cat };
-                  g.count += 1;
-                  groups.set(cat, g);
-                }
-                return (
-                  <div className="mt-3">
-                    <div className="mb-1.5 text-[10px] font-bold tracking-wide text-zinc-500">نوع الخدمات المتوفرة ({svc.length} خدمة)</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[...groups.entries()].map(([cat, g]) => (
-                        <span key={cat} className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)]/80 px-2.5 py-1 text-[11px] font-bold text-zinc-300">
-                          {g.name} <b className="text-[var(--color-primary)]">{g.count}</b>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              <div className="mt-3 flex items-center gap-2">
-                <button
-                  onClick={() => openPreview(p.id)}
-                  disabled={previewing === p.id && previewLoading}
-                  className="rounded-xl border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 px-3 py-2 text-xs font-black text-[var(--color-primary)] transition hover:border-[var(--color-primary)]/60"
-                >
-                  استعراض خدماته
-                </button>
-                <input
-                  type="number"
-                  placeholder="هامش %"
-                  className="input-luxe w-20 rounded-xl px-3 py-2 text-sm text-white"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") updateAllProviderServices(p.id);
-                  }}
-                />
-                <button
-                  onClick={() => updateAllProviderServices(p.id)}
-                  className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs font-bold text-zinc-300 transition hover:border-[var(--color-primary)]/40 hover:text-[var(--color-primary)]"
-                >
-                  تحديث أسعار الكل
-                </button>
-                <button
-                  onClick={() => syncServices(p.id)}
-                  disabled={syncing === p.id}
-                  className="ml-auto flex items-center gap-2 rounded-xl bg-gradient-to-r from-purple-500 to-purple-600 px-4 py-2 text-sm font-black text-white shadow-[0_0_24px_-8px_#a855f7] transition hover:opacity-90 disabled:opacity-50"
-                >
-                  {syncing === p.id ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
-                  مزامنة الخدمات
-                </button>
-              </div>
-
-              {/* تبويبان: المضافة / الموقوفة */}
-              {(() => {
-                const all = services.filter((s) => s.provider_id === p.id && !deletedServiceIds.has(s.id));
-                const active = all.filter((s) => s.is_active);
-                const paused = all.filter((s) => !s.is_active);
-                return (
-                  <div className="mt-3 space-y-3">
-                    {/* الخدمات المضافة (ظاهرة للمستخدمين) */}
-                    <div>
-                      <div className="mb-1.5 flex items-center gap-2 text-[10px] font-black tracking-wide text-zinc-500">
-                        <span className="rounded-full bg-green-500/15 px-2 py-0.5 text-green-400">مضافة {active.length}</span>
-                        <span className="text-zinc-500">تظهر في موقعك وتُخصم بسعر عروضك، وخصم المزود يبقى بسعر التكلفة</span>
-                      </div>
-                      <div className="max-h-[320px] overflow-y-auto rounded-2xl border border-[var(--color-border)]">
-                        {active.length === 0 && (
-                          <div className="px-3 py-4 text-center text-xs text-zinc-500">لا توجد خدمات مضافة — اضغط مزامنة الخدمات لعرض جميع خدمات المزود</div>
-                        )}
-                        {active.map((s) => (
-                          <ServiceRow key={s.id} s={s} onUpdate={updateServiceMarkup} onToggle={toggleService} onDelete={deleteService} />
-                        ))}
-                      </div>
-                    </div>
-                    {/* الخدمات الموقوفة */}
-                    {paused.length > 0 && (
-                      <div>
-                        <div className="mb-1.5 flex items-center gap-2 text-[10px] font-black tracking-wide text-zinc-500">
-                          <span className="rounded-full bg-yellow-500/15 px-2 py-0.5 text-yellow-400">موقوفة {paused.length}</span>
-                          <span className="text-zinc-500">مخفية عن المستخدمين — أعد تفعيلها لتظهر مجددًا</span>
-                        </div>
-                        <div className="max-h-[200px] overflow-y-auto rounded-2xl border border-yellow-500/20">
-                          {paused.map((s) => (
-                            <ServiceRow key={s.id} s={s} onUpdate={updateServiceMarkup} onToggle={toggleService} onDelete={deleteService} />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
+        {/* ═══ قائمة المزودين: قسم مستقل لكل مزود ═══ */}
+        {providers.length === 0 && !showForm && (
+          <div className="flex flex-col items-center gap-3 rounded-3xl border border-dashed border-[var(--color-gold)]/25 bg-[var(--color-surface)] px-4 py-12 text-center">
+            <Link2 size={28} className="text-[var(--color-gold)]/50" />
+            <div className="text-[13px] font-black text-white">لم تربط أي مزود بعد</div>
+            <div className="text-[11px] text-zinc-500">اضغط «إضافة مزود جديد» أعلاه لربط أول مزود</div>
+          </div>
+        )}
+        <div className="space-y-6">
+          {providers.map((p, idx) => (
+            <section key={p.id} aria-label={`قسم ${p.name}`}>
+              <ProviderCard
+                p={p}
+                services={services}
+                syncing={syncing}
+                globalMarkup={globalMarkup}
+                onSync={syncServices}
+                onToggleProvider={toggleProvider}
+                onPreview={openPreviewSafe}
+                onEdit={(pp) => { setEditing(pp); setForm({ name: pp.name, api_url: pp.api_url, api_key: pp.api_key, notes: pp.notes || "" }); setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                onDeleteProvider={deleteProvider}
+                onServiceAction={serviceAction}
+                onMarkup={updateServiceMarkup}
+                onRenameService={renameService}
+                onUpdateAll={updateAllProviderServices}
+              />
+              {idx < providers.length - 1 && <div className="mt-6 h-px bg-gradient-to-l from-transparent via-[var(--color-gold)]/25 to-transparent" />}
+            </section>
           ))}
-
-          <button
-            onClick={() => { setShowForm(true); setEditing(null); setForm({ name: "", api_url: "", api_key: "", notes: "" }); }}
-            className="w-full rounded-2xl border border-dashed border-[var(--color-border)] py-4 text-sm font-black text-zinc-400 transition hover:border-[var(--color-primary)]/50 hover:text-[var(--color-primary)]"
-          >
-            <Plus size={18} className="inline-block ml-1" /> إضافة مزود جديد
-          </button>
         </div>
 
-        {/* مودال الاستعراض الانتقائي لخدمات المزود */}
+        {/* ═══ مودال الاستعراض الانتقائي ═══ */}
         {previewing !== null && (
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-2 backdrop-blur-sm sm:items-center" onClick={() => setPreviewing(null)}>
+          <div key={previewing} className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-2 backdrop-blur-sm sm:items-center" onClick={() => setPreviewing(null)}>
             <div
-              className="max-h-[85vh] w-full max-w-lg overflow-hidden rounded-t-3xl border border-[var(--color-primary)]/20 bg-[#0c0c0c] sm:rounded-3xl"
+              className="max-h-[85vh] w-full max-w-lg overflow-hidden rounded-t-3xl border border-[var(--color-gold)]/25 bg-[#0c0c0c] sm:rounded-3xl"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between border-b border-[var(--color-border)] p-4">
+              <div className="flex items-center justify-between border-b border-[var(--color-gold)]/15 bg-[var(--color-surface)] p-4">
                 <div>
-                  <div className="text-lg font-black text-gradient-luxe">استعراض خدمات المزود</div>
-                  <div className="text-[10px] text-zinc-500">جميع خدمات المزود مباشرة من سيرفره — أضف ما تعجبك فقط، وتظهر للمستخدمين فورًا بوسم "جديد"</div>
+                  <div className="text-[16px] font-black text-gradient-luxe">استعراض خدمات المزود</div>
+                  <div className="text-[10px] text-zinc-500">كل خدمات المزود مرتبة حسب النوع — أضِف انتقائيًا وتظهر فورًا، وعدّل الاسم والسعر واحفظ فورًا</div>
                 </div>
-                <button onClick={() => setPreviewing(null)} className="rounded-full border border-[var(--color-border)] p-2 text-zinc-400 transition hover:text-white">
-                  <XCircle size={18} />
+                <button onClick={() => setPreviewing(null)} className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] text-zinc-400 transition hover:text-white">
+                  <XCircle size={17} />
                 </button>
               </div>
-              <div className="p-4">
-                <input
-                  value={previewSearch}
-                  onChange={(e) => setPreviewSearch(e.target.value)}
-                  placeholder="ابحث في خدمات المزود..."
-                  className="input-luxe mb-3 w-full rounded-xl px-4 py-3 text-sm text-white"
-                />
+              <div className="p-3">
+                <div className="relative mb-3">
+                  <Search size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    value={previewSearch}
+                    onChange={(e) => setPreviewSearch(e.target.value)}
+                    placeholder="ابحث بالاسم أو رقم الخدمة..."
+                    className="h-10 w-full rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-surface-2)] pr-9 pl-3 text-[12px] font-bold text-white placeholder:text-zinc-600 outline-none focus:border-[var(--color-gold)]/60"
+                  />
+                  {/* فلاتر نوع الخدمة: اختر النوع لعرض خدماته فقط */}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {["الكل", ...previewCats]
+                      .filter((cat) => cat !== "الكل" || previewCats.length > 0)
+                      .map((cat) => (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setPreviewCat(cat)}
+                          className={`rounded-full border px-2.5 py-1 text-[9.5px] font-black transition active:scale-[0.95] ${previewCat === cat ? "border-[var(--color-gold)] bg-gradient-to-r from-[var(--color-gold-bright)] to-[var(--color-gold)] text-black shadow-[0_0_12px_-4px_rgba(255,215,0,0.5)]" : "border-[var(--color-gold)]/20 bg-[var(--color-surface-2)] text-zinc-400 hover:border-[var(--color-gold)]/40 hover:text-[var(--color-gold-pale)]"}`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                  </div>
+                </div>
                 {previewLoading ? (
-                  <div className="flex items-center justify-center gap-2 py-10 text-sm text-zinc-400">
-                    <Loader2 className="animate-spin" size={18} className="animate-spin" /> جاري جلب الخدمات من سيرفر المزود...
+                  <div className="flex items-center justify-center gap-2 py-10 text-[12px] text-zinc-400">
+                    <Loader2 className="animate-spin" size={16} /> جاري جلب الخدمات من سيرفر المزود...
                   </div>
                 ) : previewServices.length === 0 ? (
-                  <div className="py-8 text-center text-xs text-zinc-500">لا توجد خدمات لدى هذا المزود</div>
+                  <div className="py-8 text-center text-[11px] text-zinc-500">لا توجد خدمات لدى هذا المزود</div>
                 ) : (
                   <div className="max-h-[55vh] space-y-1.5 overflow-y-auto">
                     {previewServices
-                      .filter((s: any) => String(s.name || "").toLowerCase().includes(previewSearch.toLowerCase()) || String(s.service || "").includes(previewSearch))
+                      .filter((s: any) => previewCat === "الكل" || s.category === previewCat || s.type === previewCat)
+                      .filter((s: any) => {
+                        const q = previewSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        return `${s.name || ""} ${s.service || ""} ${s.category || ""}`.toLowerCase().includes(q);
+                      })
                       .map((s: any) => (
-                        <div key={s.service} className={`flex items-center gap-2 rounded-xl border p-2.5 text-xs ${s.added ? "border-green-500/30 bg-green-500/5" : "border-[var(--color-border)] bg-[var(--color-surface)]/50"}`}>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-white">#{s.service}</span>
-                              <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-card)] px-1.5 py-0.5 text-[9px] text-zinc-400">{s.category || "عام"}</span>
-                              {s.type && <span className="rounded-full border border-purple-500/20 bg-purple-500/10 px-1.5 py-0.5 text-[9px] text-purple-300">{s.type}</span>}
-                              <span className="text-[9px] text-zinc-600">min {s.min} · max {s.max}</span>
-                            </div>
-                            <div className="mt-0.5 truncate text-[10px] text-zinc-400">{s.name}</div>
-                            <div className="mt-0.5 text-[10px]">
-                              <span className="text-zinc-500">التكلفة: ${Number(s.rate).toFixed(5)}</span>
-                              <span className="mx-1 text-zinc-600">|</span>
-                              <span className="font-black text-[var(--color-primary)]">سعر العرض: ${(Number(s.rate) * (1 + globalMarkup / 100)).toFixed(5)} (هامش {globalMarkup}%)</span>
-                            </div>
-                          </div>
-                          {s.added ? (
-                            <span className="flex items-center gap-1 rounded-full bg-green-500/15 px-2.5 py-1.5 text-[10px] font-black text-green-400">
-                              <CheckCircle2 size={12} /> مضافة
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() => addServiceFromPreview(previewing!, String(s.service))}
-                              className="flex shrink-0 items-center gap-1 rounded-full bg-gradient-to-r from-purple-500 to-purple-600 px-3 py-1.5 text-[10px] font-black text-white shadow-[0_0_16px_-6px_#a855f7] transition hover:brightness-110"
-                            >
-                              <Plus size={12} /> إضافة
-                            </button>
-                          )}
-                        </div>
+                        <PreviewServiceRow
+                          key={s.service}
+                          s={s}
+                          previewing={previewing!}
+                          services={services}
+                          globalMarkup={globalMarkup}
+                          onAdd={() => addServiceFromPreview(previewing!, String(s.service))}
+                          onSaved={(msg) => setResult({ message: msg })}
+                          onError={(msg) => setResult({ error: msg })}
+                          onRefresh={() => openPreviewOrig(previewing!)}
+                        />
                       ))}
                   </div>
                 )}
-                <div className="mt-2 text-center text-[10px] text-zinc-600">الإضافة الانتقائية تحفظ الخدمة لدى المزود الأصلي بوسم "جديد" وتظهر فورًا عند كل المستخدمين ومستخدمي API</div>
+                <div className="mt-2 pb-1 text-center text-[9.5px] text-zinc-600">الإضافة الانتقائية تظهر فورًا عند كل المستخدمين ومستخدمي API — أي تعديل على الاسم أو السعر يُحفظ فورًا</div>
               </div>
             </div>
           </div>
         )}
 
-        {/* سجل التنفيذ */}
+        {/* ═══ سجل التنفيذ ═══ */}
         {logs.length > 0 && (
-          <div className="card-luxe rounded-3xl border p-5">
-            <h2 className="mb-4 flex items-center gap-2 text-lg font-black text-white">
-              <Activity size={20} className="text-[var(--color-primary)]" />
-              سجل تنفيذ الطلبات عبر المزودين
+          <div className="rounded-3xl border border-[var(--color-gold)]/20 bg-[var(--color-surface)] p-4">
+            <h2 className="mb-3 flex items-center gap-2 text-[15px] font-black text-white">
+              <Activity size={16} className="text-[var(--color-gold-bright)]" />
+              سجل تنفيذ الطلبات
             </h2>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {logs.map((l) => (
-                <div key={l.id} className="flex items-center gap-3 rounded-xl bg-[var(--color-surface)]/60 px-3 py-2 text-xs">
-                  {l.status === "sent" ? (
-                    <CheckCircle2 size={14} className="text-green-400" />
-                  ) : l.status === "failed" ? (
-                    <XCircle size={14} className="text-red-400" />
-                  ) : (
-                    <Activity size={14} className="text-yellow-400" />
-                  )}
-                  <span className="text-zinc-300">مزود <b className="text-[var(--color-primary)]">{l.provider_name}</b></span>
-                  <span className="text-zinc-500">طلب محلي #{l.local_order_id || "—"}</span>
-                  <span className="text-zinc-500">رقم المزود: {l.remote_order_id || "—"}</span>
-                  <span className={`font-bold ${l.status === "sent" ? "text-green-400" : l.status === "failed" ? "text-red-400" : "text-yellow-400"}`}>{l.status}</span>
-                  {l.error && <span className="text-red-400/80 truncate">{l.error}</span>}
-                  <span className="mr-auto text-zinc-500 text-[10px]">{new Date(l.created_at).toLocaleString("ar-EG")}</span>
+                <div key={l.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-[var(--color-surface-2)] px-3 py-2 text-[10.5px]">
+                  {l.status === "sent" ? <CheckCircle2 size={13} className="text-green-400" /> : l.status === "failed" ? <XCircle size={13} className="text-red-400" /> : <Activity size={13} className="text-yellow-400" />}
+                  <span className="text-zinc-300">مزود <b className="text-[var(--color-gold-bright)]">{l.provider_name}</b></span>
+                  <span className="text-zinc-500">طلب #{l.local_order_id || "—"}</span>
+                  <span className="text-zinc-500">المزود: {l.remote_order_id || "—"}</span>
+                  <span className={`rounded-full px-2 py-0.5 font-black ${l.status === "sent" ? "bg-green-500/15 text-green-400" : l.status === "failed" ? "bg-red-500/15 text-red-400" : "bg-yellow-500/15 text-yellow-400"}`}>{l.status}</span>
+                  {l.error && <span className="w-full text-red-400/80">{l.error}</span>}
+                  <span className="mr-auto text-zinc-600">{new Date(l.created_at).toLocaleString("ar-EG")}</span>
                 </div>
               ))}
             </div>

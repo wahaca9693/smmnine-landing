@@ -36,7 +36,8 @@ export default function Header({ onMenuClick, user, unreadNotifications = 0 }: H
   }, [showNotifications]);
 
   return (
-    <header className="sticky top-0 z-50 flex h-[60px] items-center justify-between bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] px-4 shadow-lg">
+    <header className="glass sticky top-0 z-50 flex h-[60px] items-center justify-between border-b border-[var(--gold)]/25 bg-[linear-gradient(135deg,rgba(120,90,30,0.92),rgba(60,42,15,0.95),rgba(30,22,8,0.95))] px-4">
+      <div className="pointer-events-none absolute top-0 right-0 left-0 h-px bg-gradient-to-r from-transparent via-[var(--gold-light)]/50 to-transparent" />
       {/* Logo on the right (RTL visual left) */}
       <div className="flex items-center gap-2">
         <img
@@ -44,14 +45,14 @@ export default function Header({ onMenuClick, user, unreadNotifications = 0 }: H
           alt="Follower"
           className="h-10 w-10 rounded-xl object-cover"
         />
-        <span className="text-xl font-black text-white">Follower</span>
+        <span className="text-xl font-black text-gradient-luxe">Follower</span>
       </div>
 
       {/* Icons on the left (RTL visual right) */}
       <div className="flex items-center gap-2">
         <button
           onClick={() => { setShowNotifications(!showNotifications); if (!showNotifications) markRead(); }}
-          className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/25"
+          className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--gold)]/40 bg-[rgba(212,175,55,0.14)] text-[var(--color-gold-bright)] backdrop-blur-sm transition hover:bg-[rgba(212,175,55,0.26)] hover:text-[var(--color-gold-bright)]"
           title={t("header.notifications")}
         >
           <Bell size={20} />
@@ -63,14 +64,14 @@ export default function Header({ onMenuClick, user, unreadNotifications = 0 }: H
         </button>
         <button
           onClick={onMenuClick}
-          className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/25"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--gold)]/20 bg-[var(--color-surface)] text-[var(--color-gold-pale)] transition hover:border-[var(--gold)]/50 hover:text-[var(--color-gold-bright)]"
           title={t("header.profile")}
         >
           <User size={20} />
         </button>
         <button
           onClick={onMenuClick}
-          className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/25"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--gold)]/20 bg-[var(--color-surface)] text-[var(--color-gold-pale)] transition hover:border-[var(--gold)]/50 hover:text-[var(--color-gold-bright)]"
           title={t("sidebar.menu")}
         >
           <Menu size={22} />
@@ -78,7 +79,7 @@ export default function Header({ onMenuClick, user, unreadNotifications = 0 }: H
       </div>
 
       {showNotifications && (
-        <div className="absolute left-4 top-[68px] z-[60] w-[320px] max-w-[calc(100vw-32px)] rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)] p-3 shadow-2xl animate-fadeIn">
+        <div className="absolute left-4 top-[68px] z-[60] w-[320px] max-w-[calc(100vw-32px)] rounded-2xl border border-[var(--gold)]/30 bg-[rgba(40,30,12,0.97)] p-3 shadow-2xl animate-fadeIn">
           <div className="mb-2 flex items-center justify-between">
             <span className="font-bold text-white">{t("header.notifications")}</span>
             <button onClick={() => setShowNotifications(false)}><X size={18} className="text-zinc-400" /></button>
@@ -88,7 +89,7 @@ export default function Header({ onMenuClick, user, unreadNotifications = 0 }: H
           ) : (
             <div className="max-h-[300px] overflow-auto space-y-2">
               {notifications.map((n) => (
-                <div key={n.id} className={`rounded-xl p-3 text-sm ${n.is_read ? "bg-[var(--color-surface)] text-zinc-400" : "bg-[var(--color-primary-dark)]/10 text-white border border-[var(--color-primary-dark)]/20"}`}>
+                <div key={n.id} className={`rounded-xl p-3 text-sm ${n.is_read ? "bg-[var(--color-surface)] text-zinc-400" : "border border-[var(--gold)]/25 bg-[var(--gold)]/10 text-white"}`}>
                   <div className="font-bold">{n.title}</div>
                   <div className="text-xs opacity-80">{n.body}</div>
                 </div>

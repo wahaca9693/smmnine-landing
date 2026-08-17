@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
-import { ShoppingCart, Check, AlertCircle, ChevronDown, ChevronUp, Calculator, Wallet } from "lucide-react";
+import { ShoppingCart, Check, AlertCircle, ChevronDown, ChevronUp, Calculator, Wallet, AlertTriangle } from "lucide-react";
+import { Modal } from "../../components/Modal";
 
 export default function NewOrderContent() {
   const searchParams = useSearchParams();
@@ -22,6 +23,9 @@ export default function NewOrderContent() {
   const [balance, setBalance] = useState(0);
   const [showServices, setShowServices] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(false);
+  const [requirements, setRequirements] = useState<any[]>([]);
+  const [requirementsChecked, setRequirementsChecked] = useState(false);
+  const [requirementsLoading, setRequirementsLoading] = useState(false);
 
   useEffect(() => {
     fetch("/api/services")
@@ -32,16 +36,38 @@ export default function NewOrderContent() {
         if (initialService) {
           setServiceId(initialService);
         }
-      });
+      })
+      .catch(() => {});
     fetch("/api/user")
       .then((res) => res.json())
-      .then((data) => setBalance(Number(data.user?.balance || 0)));
+      .then((data) => setBalance(Number(data.user?.balance || 0)))
+      .catch(() => {});
   }, [initialService]);
 
+  // تحميل شروط الخدمة إلزاميًا عند اختيار خدمة (مثل إنستغرام)
   const selectedService = useMemo(
     () => services.find((s) => String(s.service) === serviceId),
     [serviceId, services]
   );
+  const serviceCategory = selectedService?.category || "";
+  const isInstagram = serviceCategory.startsWith("Instagram");
+  useEffect(() => {
+    setRequirements([]);
+    setRequirementsChecked(false);
+    if (!selectedService || !serviceCategory) return;
+    setRequirementsLoading(true);
+    fetch(`/api/service-requirements?category=${encodeURIComponent(serviceCategory)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setRequirements(Array.isArray(data.requirements) ? data.requirements : []);
+        setRequirementsLoading(false);
+      })
+      .catch(() => setRequirementsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedService?.service, serviceCategory]);
+
+    const showRequirementsModal = requirements.length > 0 && !requirementsChecked && selectedService;
+
 
   const estimatedCost = useMemo(() => {
     if (!selectedService || !quantity) return 0;
@@ -65,6 +91,7 @@ export default function NewOrderContent() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedService || !link || !quantity) return;
+    if (showRequirementsModal) return;
     setConfirmDialog(true);
   };
 
@@ -156,8 +183,16 @@ export default function NewOrderContent() {
 
           {/* Selected service details */}
           {selectedService && (
-            <div className="rounded-2xl border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/5 p-4">
-              <div className="font-bold text-white leading-relaxed">{selectedService.name}</div>
+            <div className={`rounded-2xl border p-4 ${isInstagram ? "border-[var(--color-gold)]/40 bg-gradient-to-br from-[var(--color-gold)]/10 to-transparent" : "border-[var(--color-primary)]/20 bg-[var(--color-primary)]/5"}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="font-bold text-white leading-relaxed">{selectedService.name}</div>
+                {isInstagram && (
+                  <span className="shrink-0 rounded-full bg-[var(--color-gold)]/15 px-2.5 py-1 text-[10px] font-black text-[var(--color-gold)]">
+                    <AlertTriangle size={10} className="inline ml-1" />
+                    شروط إلزامية
+                  </span>
+                )}
+              </div>
               <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-xl bg-[var(--color-card)] p-2">
                   <div className="text-xs text-zinc-500">الحد الأدنى</div>
@@ -258,8 +293,81 @@ export default function NewOrderContent() {
           >
             {loading ? "جاري الإرسال..." : <><ShoppingCart size={20} /> متابعة الطلب</>}
           </button>
-        </form>
+
+          {selectedService && requirementsLoading && (
+            <div className="text-center text-xs text-zinc-500">جاري فحص شروط الخدمة...</div>
+          )}
+          {showRequirementsModal && (
+            <button
+              type="button"
+              onClick={() => setRequirementsChecked(true)}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[var(--color-gold)]/50 bg-[var(--color-gold)]/10 py-3 font-black text-[var(--color-gold)]"
+            >
+              <AlertTriangle size={18} /> اعرض الشروط الإلزامية لهذه الخدمة
+            </button>
+          )}
+          {selectedService && isInstagram && requirementsChecked && (
+            <div className="flex items-center gap-2 rounded-xl bg-green-500/10 p-3 text-xs font-bold text-green-400">
+              <Check size={14} /> تم تأكيد الشروط — يمكنك المتابعة
+            </div>
+          )}
+                </form>
       </div>
+        <>
+        {/* نافذة شروط الخدمة الإلزامية */}
+        <Modal
+          open={showRequirementsModal}
+          onClose={() => {}}
+          size="lg"
+          showClose={false}
+          icon={<AlertTriangle className="text-[var(--color-gold)]" />}
+        >
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-[var(--color-gold)]/40 bg-[var(--color-gold)]/5 p-4">
+              <h2 className="text-lg font-black text-white">شروط إلزامية — قبل طلب الخدمة</h2>
+              <p className="mt-1 text-xs text-zinc-400 leading-relaxed">
+                هذه الشروط إلزامية لضمان وصول طلبك بنجاح. إن لم يتم الالتزام بها <span className="font-black text-red-400">لن يتم تعويضك أبدًا</span>.
+              </p>
+            </div>
+            <div className="max-h-[45vh] space-y-4 overflow-y-auto pl-1">
+              {requirements.map((req: any) => (
+                <div key={req.id} className="space-y-2">
+                  <h3 className="flex items-center gap-2 font-black text-[var(--color-gold)]">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--color-gold-bright)] to-[var(--color-gold)] text-xs font-black text-black">!</span>
+                    {req.title}
+                  </h3>
+                  {req.description && <p className="text-sm leading-relaxed text-zinc-300">{req.description}</p>}
+                  {(req.image_url || req.image_file) && (
+                    <div className="space-y-1.5">
+                      <div className="overflow-hidden rounded-2xl border-2 border-[var(--color-gold)]/45 shadow-[0_10px_40px_-12px_rgba(255,215,0,0.45)]">
+                        <img
+                          src={req.image_url || `/images/${req.image_file}`}
+                          alt={req.title}
+                          className="w-full"
+                          loading="lazy"
+                        />
+                      </div>
+                      <p className="flex items-start gap-1.5 rounded-xl bg-red-500/8 p-2 text-[11px] font-bold leading-relaxed text-red-300/90">
+                        <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                        <span>التأشير الأحمر في الصورة هو الخيار الذي يجب عليك <span className="font-black">إيقافه/إغلاقه</span> قبل الطلب — إن لم يتم إغلاقه فلن يتم تعويضك أبدًا.</span>
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setRequirementsChecked(true)}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[var(--color-gold)] to-[var(--color-gold-deep)] py-3.5 font-black text-black"
+            >
+              أؤكد أنني طبقت الشروط أعلاه — متابعة الطلب
+            </button>
+            <p className="text-center text-[10px] leading-relaxed text-zinc-500">
+              بمتابعة الطلب فأنت تقر أنك أغلقت/أوقفت الخيارات المطلوبة، وتقبل أنك لن تُعَوَّض إن لم تكن قد طبقتها.
+            </p>
+          </div>
+        </Modal>
 
       {/* Confirmation dialog */}
       {confirmDialog && selectedService && (
@@ -306,6 +414,7 @@ export default function NewOrderContent() {
           </div>
         </div>
       )}
+        </>
     </DashboardLayout>
   );
 }

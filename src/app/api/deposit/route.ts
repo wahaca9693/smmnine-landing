@@ -26,12 +26,45 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "يرجى إدخال طريقة الدفع والمبلغ" }, { status: 400 });
     }
 
+    // تحقق من طريقة الدفع
+    const methodRes = await db.execute({ sql: "SELECT * FROM payment_methods WHERE id = ? AND is_active = 1", args: [methodId] });
+    const method = methodRes.rows[0] as any;
+    if (!method) return NextResponse.json({ error: "طريقة الدفع غير صالحة" }, { status: 404 });
+
+    let noteText = notes || "";
+    let cryptoInfo: { coin: string; network: string; address: string } | null = null;
+
+    // شحن كريبتو: نحاول تحليل notes كـ JSON يحتوي بيانات العملة
+    if (typeof notes === "string" && notes.trim().startsWith("{")) {
+      try {
+        const parsed = JSON.parse(notes);
+        if (parsed?.type === "crypto" && parsed?.coin && parsed?.address) {
+          cryptoInfo = { coin: parsed.coin, network: parsed.network, address: parsed.address };
+          noteText = `شحن كريبتو — ${parsed.coin} عبر ${parsed.network || "الشبكة"}`;
+        }
+      } catch {
+        /* لا شيء — notes نص عادي */
+      }
+    }
+
     await db.execute({
       sql: "INSERT INTO transactions (user_id, type, amount, status, description) VALUES (?, ?, ?, ?, ?)",
-      args: [session.userId!, "deposit", amount, "pending", `طلب شحن رصيد - ${notes || ""}`],
+      args: [session.userId!, "deposit", amount, "pending", `طلب شحن رصيد - ${noteText}`],
     });
 
-    return NextResponse.json({ message: "تم إرسال طلب الشحن، سيتم المراجعة قريباً" });
+    // تسجيل طلب الكريبتو في جدول crypto_deposits للتتبع التلقائي
+    if (cryptoInfo) {
+      await db.execute({
+        sql: `INSERT INTO crypto_deposits (user_id, coin, network, amount, address, status, note)
+              VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+        args: [session.userId!, cryptoInfo.coin, cryptoInfo.network || "network", Number(amount), cryptoInfo.address, noteText],
+      });
+      // ملاحظة تشغيلية: في الإنتاج يُربط النظام بمراقب بلوكشين حقيقي
+      // (مثل NowPayments أو CoinPayments — مجانيان وبدون هوية) عبر مهمة دورية
+      // تتحقق من المعاملة وتشحن الرصيد تلقائيًا دون أي تدخل يدوي.
+    }
+
+    return NextResponse.json({ message: cryptoInfo ? "تم إنشاء طلب الشحن — سيتم التحقق من المعاملة وشحن رصيدك تلقائيًا" : "تم إرسال طلب الشحن، سيتم المراجعة قريباً" });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

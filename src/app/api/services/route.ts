@@ -43,7 +43,13 @@ const platforms = [
 
 export async function GET() {
   try {
-    const services = await getServices();
+    let services: any[] = [];
+    try {
+      services = await getServices();
+    } catch {
+      // مزود Follower غير مربوط بمفتاح — نعمل بالخدمات المحلية ومزودين فقط
+      services = [];
+    }
     const providerServices = await getProviderServices();
 
     // دمج خدمات المزودين الخارجيين مع الخدمات المحلية

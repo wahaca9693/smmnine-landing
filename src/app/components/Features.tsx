@@ -40,7 +40,7 @@ const features = [
   },
   {
     icon: LayoutDashboard,
-    title: "لوحة تحكم ذكية",
+    title: "واجهة ذكية",
     desc: "تابع جميع طلباتك ومعاملاتك من مكان واحد.",
     bg: "#e0f7fa",
     color: "#00838f",

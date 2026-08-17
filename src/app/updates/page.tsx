@@ -6,7 +6,7 @@ import { Bell, Sparkles, Wrench, Shield, Zap } from "lucide-react";
 const updates = [
   {
     date: "7 أغسطس 2026",
-    title: "تحديث جديد للوحة التحكم",
+    title: "تحديث جديد للمنصة",
     body: "تم إضافة قائمة جانبية كاملة، دعم تبديل اللغة، التعبئة التلقائية، سجل المعاملات، وتحسين التنقل.",
     icon: Sparkles,
     color: "text-[var(--color-primary)]",

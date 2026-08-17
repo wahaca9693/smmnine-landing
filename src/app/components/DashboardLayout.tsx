@@ -40,7 +40,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="flex min-h-screen flex-col bg-[var(--color-bg)]">
       <Header onMenuClick={() => setSidebarOpen(true)} user={user} unreadNotifications={unread} />
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} user={user} />
-      <main className="flex-1 pb-24 pt-4 px-4">{children}</main>
+      <main className="flex-1 pb-28 pt-4 px-4">{children}</main>
       <BottomNav />
     </div>
   );

@@ -155,27 +155,47 @@ export async function GET(request: Request) {
       const prov = await db.execute({ sql: "SELECT * FROM providers WHERE id = ?", args: [Number(providerId)] });
       const p = prov.rows[0] as any;
       if (!p) return NextResponse.json({ error: "المزود غير موجود" }, { status: 404 });
+      let services: any[] = [];
+      let fetchError: string | null = null;
       try {
-        const services = await fetchProviderServices(p.api_url, p.api_key);
-        // جلب الخدمات المضافة مسبقًا من هذا المزود لتحديد المضافة منها
-        const existing = await db.execute({
-          sql: "SELECT remote_service_id, is_active, is_new, name FROM provider_services WHERE provider_id = ?",
-          args: [Number(providerId)],
-        });
-        const added = new Set((existing.rows as any[]).map((r) => String(r.remote_service_id)));
-        return NextResponse.json({
-          services: services.map((s: any) => ({
-            ...s,
-            added: added.has(String(s.service)),
-            category: String(s.category || ""),
-            type: String(s.type || ""),
-          })),
-          count: services.length,
-          provider: { id: p.id, name: p.name },
-        });
+        services = await fetchProviderServices(p.api_url, p.api_key);
       } catch (err: any) {
-        return NextResponse.json({ error: "تعذر جلب خدمات المزود: " + (err.message || "") }, { status: 502 });
+        fetchError = err.message || "";
       }
+      // جلب الخدمات المضافة مسبقًا من هذا المزود لتحديد المضافة منها
+      const existing = await db.execute({
+        sql: "SELECT id, remote_service_id, name, category, rate, min, max, type, markup_percent, sell_rate, is_active, is_new FROM provider_services WHERE provider_id = ?",
+        args: [Number(providerId)],
+      });
+      const localRows = existing.rows as any[];
+      const added = new Set(localRows.map((r) => String(r.remote_service_id)));
+      // إذا نجح الجلب من السيرفر نعرض خدماته؛ وإلا نعرض الخدمات المضافة محليًا (كي يعمل المزود عند تعذر الاتصال)
+      const base = services.length > 0 ? services.map((s: any) => ({
+        ...s,
+        added: added.has(String(s.service)),
+        category: String(s.category || ""),
+        type: String(s.type || ""),
+      })) : localRows.map((r) => ({
+        service: r.remote_service_id,
+        name: r.name,
+        category: r.category,
+        type: r.type,
+        rate: Number(r.rate),
+        min: Number(r.min),
+        max: Number(r.max),
+        added: true,
+        is_active: Number(r.is_active) === 1,
+        markup_percent: Number(r.markup_percent),
+        sell_rate: Number(r.sell_rate),
+        is_new: Number(r.is_new),
+        local: true,
+      }));
+      return NextResponse.json({
+        services: base,
+        count: base.length,
+        fetchError: fetchError ? "تعذر الاتصال بسيرفر المزود — تُعرض الخدمات المضافة محليًا فقط" : null,
+        provider: { id: p.id, name: p.name },
+      });
     }
 
     if (mode === "logs") {
@@ -279,11 +299,23 @@ export async function POST(request: Request) {
       const updated: any[] = [];
       for (const p of rows.rows as any[]) {
         const balance = await fetchProviderBalance(p.api_url, p.api_key);
+        // الحفاظ على آخر رصيد معروف بدلًا من الكتابة بـ"غير متاح" عند فشل الاتصال المؤقت
+        const isUnavailable = balance === "غير متاح" || balance === "";
+        const knownBalance =
+          typeof p.balance === "string" && p.balance !== "غير متاح" && p.balance !== "";
+        const finalBalance = isUnavailable && knownBalance ? p.balance : balance;
+        const keepOldFetched = isUnavailable && knownBalance;
         await db.execute({
           sql: `UPDATE providers SET balance=?, balance_fetched_at=CURRENT_TIMESTAMP WHERE id=?`,
-          args: [balance, p.id],
+          args: [finalBalance, p.id],
         });
-        updated.push({ id: p.id, name: p.name, balance });
+        if (keepOldFetched && p.balance_fetched_at) {
+          await db.execute({
+            sql: `UPDATE providers SET balance_fetched_at=? WHERE id=?`,
+            args: [String(p.balance_fetched_at), p.id],
+          });
+        }
+        updated.push({ id: p.id, name: p.name, balance: finalBalance });
       }
       return NextResponse.json({ ok: true, updated });
     }

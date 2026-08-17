@@ -1,0 +1,303 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import DashboardLayout from "../components/DashboardLayout";
+import Link from "next/link";
+import { KeyRound, Copy, Check, RefreshCw, Ban, Plus, ArrowLeft, Terminal, Wallet, Activity, GraduationCap, Server, ShieldAlert, Rocket, Repeat, Zap, AlertTriangle, Eye, EyeOff } from "lucide-react";
+
+interface ApiKey {
+  id: number;
+  api_key: string;
+  name: string;
+  requests_count: number;
+  last_used_at: string | null;
+  is_active: number;
+  created_at: string;
+}
+
+/** صندوق كود ذهبي مع زر نسخ — يعرض الروابط بشكل مرتب داخل حدود واضحة */
+function CodeBox({ title, code, compact = false }: { title: string; code: string; compact?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <div className="rounded-2xl border border-[var(--color-gold)]/25 bg-gradient-to-br from-[#2a1f0a] to-[#1a1205] p-3 shadow-[inset_0_0_30px_-18px_rgba(255,215,0,0.25)]">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-[10px] font-black tracking-wide text-[var(--color-gold-pale)]">{title}</span>
+        <button
+          onClick={copy}
+          className="flex h-6 items-center gap-1 rounded-lg border border-[var(--color-gold)]/30 bg-[var(--color-gold)]/10 px-2 text-[10px] font-black text-[var(--color-gold-bright)]"
+        >
+          {copied ? <Check size={10} strokeWidth={4} /> : <Copy size={10} />}
+          {copied ? "تم النسخ" : "نسخ"}
+        </button>
+      </div>
+      <div className="overflow-x-auto rounded-lg bg-black/60 px-3 py-2">
+        <code dir="ltr" className={`block whitespace-nowrap font-mono text-[11px] leading-relaxed text-green-400 ${compact ? "" : "py-1"}`}>
+          {code}
+        </code>
+      </div>
+    </div>
+  );
+}
+
+/** زر رجوع أنيق صغير بحد ذهبي لامع */
+function BackButton() {
+  return (
+    <Link
+      href="/"
+      className="group flex items-center gap-1.5 rounded-full border border-[var(--color-gold)]/40 bg-gradient-to-r from-[#2a1f0a] to-[#1a1205] px-3 py-1.5 text-[11px] font-black text-[var(--color-gold-bright)] shadow-[0_0_12px_-6px_rgba(255,215,0,0.4)] transition hover:border-[var(--color-gold)] hover:shadow-[0_0_16px_-4px_rgba(255,215,0,0.6)]"
+    >
+      <ArrowLeft size={13} className="transition group-hover:-translate-x-0.5 rtl:rotate-180" />
+      رجوع
+    </Link>
+  );
+}
+
+export default function ApiAccessPage() {
+  const [keys, setKeys] = useState<ApiKey[]>([]);
+  const [balance, setBalance] = useState(0);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const refresh = async () => {
+    const res = await fetch("/api/api-access");
+    const data = await res.json();
+    if (data.keys) setKeys(data.keys);
+    fetch("/api/user")
+      .then((r) => r.json())
+      .then((d) => setBalance(Number(d.user?.balance || 0)));
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const copy = async (key: ApiKey) => {
+    await navigator.clipboard.writeText(key.api_key);
+    setCopiedId(key.id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const create = async () => {
+    setLoading(true);
+    const res = await fetch("/api/api-access", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "مفتاحي الرئيسي" }),
+    });
+    const data = await res.json();
+    setLoading(false);
+    if (data.error) setMessage(data.error);
+    else refresh();
+  };
+
+  const act = async (id: number, action: "revoke" | "regenerate") => {
+    const res = await fetch("/api/api-access", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, action }),
+    });
+    const data = await res.json();
+    if (data.error) setMessage(data.error);
+    else refresh();
+  };
+
+  const activeKey = keys.find((k) => Number(k.is_active));
+  const API_URL = "/api/v2";
+  const keyQuery = activeKey ? `?key=${activeKey.api_key}` : "";
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-4 pb-24">
+        {/* رأس الصفحة مع زر رجوع أنيق */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl gradient-luxe shadow-[0_0_28px_-6px_rgba(255,215,0,0.55)]">
+              <KeyRound size={24} className="text-black" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-2xl font-black text-white">بوابة API</h1>
+              <p className="truncate text-xs text-zinc-500">اربط موقعك أو بوتك بالمنصة واطلب من محفظتك تلقائيًا</p>
+            </div>
+          </div>
+          <BackButton />
+        </div>
+
+        {/* ما هو API الخاص بي؟ — شرح مفصّل لوظيفة الـ API */}
+        <div className="rounded-3xl border border-[var(--color-gold)]/30 bg-gradient-to-br from-[#33260c] via-[#241a08] to-[#171004] p-5 shadow-[0_0_40px_-16px_rgba(255,215,0,0.35),inset_0_1px_0_rgba(255,215,0,0.15)]">
+          <div className="mb-3 flex items-center gap-2 text-sm font-black text-white">
+            <GraduationCap size={16} className="text-[var(--color-gold-bright)]" /> ما هو الـ API الخاص بك؟
+          </div>
+          <p className="text-[11px] leading-[1.7] text-zinc-300">
+            الـ <span className="font-black text-[var(--color-gold-bright)]">API</span> هو بوابة تربط موقعك أو بوتك الخاص بمنصة
+            <span className="font-black text-white"> Follower</span> مباشرة. وظيفته أن تمنحك التحكم الكامل من داخل منصتك أنت:
+            استدعاء جميع خدمات Follower بشكل كامل وفوري، وأي تحديث جديد على الخدمات أو الأسعار يصلك فورًا تلقائيًا عبر الـ API دون الحاجة لتحديث يدوي،
+            بالإضافة إلى إنشاء وتنفيذ الطلبات (متابعين، مشاهدات، إعجابات وغير ذلك) بطلب برمجي واحد فقط.
+          </p>
+          {/* خطوات من إنشاء الحساب حتى الاستخدام */}
+          <div className="mt-3 space-y-2">
+            {[
+              { icon: Rocket, title: "أنشئ حسابك", text: "أنشئ حسابًا داخل المنصة وسجل دخولك إلى لوحة خدمات Follower" },
+              { icon: KeyRound, title: "ادخل إلى قسم الـ API", text: "افتح هذا القسم — ستجد عنوان الـ API الخاص بك ومفتاحك العشوائي الطويل يظهر لك هنا" },
+              { icon: Terminal, title: "انسخ المفتاح واربطه", text: "انسخ المفتاح واستخدمه في موقعك أو بوتك لاستدعاء الخدمات وتنفيذ الطلبات" },
+            ].map((s, i) => (
+              <div key={i} className="flex items-start gap-2.5 rounded-2xl border border-[var(--color-gold)]/15 bg-[#241a08]/70 p-2.5">
+                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-gold)]/15 text-[var(--color-gold-bright)]">
+                  <s.icon size={12} />
+                </div>
+                <div>
+                  <div className="text-[11px] font-black text-white">{i + 1}. {s.title}</div>
+                  <div className="text-[10px] leading-relaxed text-zinc-400">{s.text}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* بطاقة المفتاح — تصميم ذهبي لامع بدل الزجاجي */}
+        <div className="rounded-3xl border border-[var(--color-gold)]/30 bg-gradient-to-br from-[#33260c] via-[#241a08] to-[#171004] p-5 shadow-[0_0_40px_-16px_rgba(255,215,0,0.35),inset_0_1px_0_rgba(255,215,0,0.15)]">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-black text-white">
+              <KeyRound size={16} className="text-[var(--color-gold-bright)]" /> مفتاحك الخاص
+            </div>
+            {activeKey ? (
+              <span className="rounded-full bg-green-500/15 px-2.5 py-1 text-[10px] font-black text-green-400">
+                <Check size={10} strokeWidth={4} className="inline ml-1" /> نشط
+              </span>
+            ) : (
+              <span className="rounded-full bg-red-500/15 px-2.5 py-1 text-[10px] font-black text-red-400">لا يوجد مفتاح</span>
+            )}
+          </div>
+
+          {activeKey ? (
+            <>
+              {/* صندوق المفتاح مع زر نسخ مدمج */}
+              <div className="mt-3 flex items-center gap-2 rounded-2xl border border-[var(--color-gold)]/30 bg-gradient-to-r from-black/70 to-[#1a1204] px-3 py-2.5 shadow-[inset_0_0_24px_-16px_rgba(255,215,0,0.3)]">
+                <Terminal size={14} className="shrink-0 text-[var(--color-gold-bright)]" />
+                <code dir="ltr" className="min-w-0 flex-1 truncate font-mono text-[11px] text-white">
+                  {activeKey.api_key}
+                </code>
+                <button
+                  onClick={() => copy(activeKey)}
+                  className="shrink-0 rounded-lg border border-[var(--color-gold)]/40 bg-[var(--color-gold)]/10 px-2.5 py-1.5 text-[10px] font-black text-[var(--color-gold-bright)] transition hover:bg-[var(--color-gold)]/20"
+                >
+                  {copiedId === activeKey.id ? (
+                    <span className="flex items-center gap-1"><Check size={10} strokeWidth={4} /> تم</span>
+                  ) : (
+                    <span className="flex items-center gap-1"><Copy size={10} /> نسخ</span>
+                  )}
+                </button>
+              </div>
+
+              {/* إحصاءات */}
+              <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-2xl border border-[var(--color-gold)]/15 bg-[#241a08]/80 p-3">
+                  <div className="text-zinc-500">الاستخدامات</div>
+                  <div className="mt-0.5 font-black text-white">
+                    <Activity size={11} className="mb-0.5 inline text-[var(--color-gold)]" /> {activeKey.requests_count}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-[var(--color-gold)]/15 bg-[#241a08]/80 p-3">
+                  <div className="text-zinc-500">رصيدك</div>
+                  <div className="mt-0.5 font-black text-gradient-luxe">
+                    <Wallet size={11} className="mb-0.5 inline" /> ${balance.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              {/* أزرار طبيعية الحجم */}
+              <div className="mt-3 flex gap-2">
+                <button
+                  onClick={() => act(activeKey.id, "regenerate")}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-[var(--color-gold)]/40 bg-gradient-to-r from-[#3a2d0d] to-[#2a2008] py-2.5 text-[11px] font-black text-[var(--color-gold-bright)] transition hover:shadow-[0_0_18px_-6px_rgba(255,215,0,0.5)]"
+                  title="يتم تعطيل المفتاح السابق فورًا وتفعيل المفتاح الجديد فقط"
+                >
+                  <RefreshCw size={12} /> تغيير المفتاح
+                </button>
+                <button
+                  onClick={() => act(activeKey.id, "revoke")}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-red-400/40 bg-gradient-to-r from-[#3a0f0f] to-[#2a0a0a] py-2.5 text-[11px] font-black text-red-400 transition hover:shadow-[0_0_18px_-6px_rgba(255,80,80,0.5)]"
+                >
+                  <Ban size={12} /> إلغاء المفتاح
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="mt-3 space-y-3 text-center">
+              <p className="text-sm text-zinc-400">أنشئ مفتاحك الخاص لربط منصتك أو بوتك بالمنصة</p>
+              <button onClick={create} disabled={loading} className="btn-gold w-full rounded-xl py-3 text-sm disabled:opacity-50">
+                {loading ? "جاري..." : <><Plus size={14} className="inline ml-1" /> إنشاء مفتاح جديد</>}
+              </button>
+            </div>
+          )}
+
+          {message && (
+            <div className="mt-3 rounded-xl bg-red-500/10 p-3 text-xs font-bold text-red-400">{message}</div>
+          )}
+
+          {/* شرح الخصم من محفظتك */}
+          <div className="mt-3 rounded-2xl border border-[var(--color-gold)]/20 bg-[#1a1204]/60 p-3 text-[11px] leading-relaxed text-zinc-400">
+            <div className="mb-1.5 flex items-center gap-1.5 font-black text-[var(--color-gold-pale)]">
+              <Wallet size={12} /> كيف يعمل الخصم من محفظتك؟
+            </div>
+            <p>
+              كل عملية طلب تصل عبر مفتاحك — أو أي تحديث أو تغيير على خدمات Follower تستدعيه من هذا الـ API — يتم احتساب قيمتها وخصمها
+              <span className="font-black text-white"> من رصيد محفظتك أنت داخل المنصة حصريًا</span>، تلقائيًا وفوريًا عند تنفيذ الطلب. لا علاقة لمحفظة الإدارة أو حسابات المستخدمين الآخرين بمفاتيحك.
+              إن لم يكن في محفظتك رصيد كافٍ، سيظهر لك خطأ ويُرفض الطلب ولن يُخصم شيء.
+            </p>
+          </div>
+
+          {/* تحذير أمان */}
+          <div className="mt-3 rounded-2xl border border-red-400/35 bg-gradient-to-br from-[#3a0f0f]/80 to-[#1a0606]/80 p-3 text-[11px] leading-relaxed text-red-300/90 shadow-[0_0_20px_-10px_rgba(255,80,80,0.4)]">
+            <div className="mb-1.5 flex items-center gap-1.5 font-black text-red-400">
+              <ShieldAlert size={13} /> تحذير أمني مهم — لا تشارك مفتاحك أبدًا
+            </div>
+            <p>
+              أي شخص يمتلك مفتاحك يستطيع تنفيذ طلبات على حسابك <span className="font-black">وسيتم خصم الرصيد من محفظتك أنت</span>. عند بناء موقعك أو بوتك الخاص،
+              احفظ المفتاح في إعدادات السيرفر (Environment Variables) وأخفِه بعيدًا عن الكود الظاهر والمستعرض — لا تشاركه مع أي مستخدم ولا تنشره في أي مكان.
+            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <Eye size={12} className="text-red-400" />
+              <span className="text-[10px]">مكشوف أمام الغير = خسارة رصيدك</span>
+              <EyeOff size={12} className="mr-auto text-red-400" />
+              <span className="text-[10px]">مخفي على سيرفرك = آمن تمامًا</span>
+            </div>
+          </div>
+        </div>
+
+        {/* دليل الاستخدام — صناديق كود منظمة بدل النصوص المكسورة */}
+        {activeKey && (
+          <div className="rounded-3xl border border-[var(--color-gold)]/30 bg-gradient-to-br from-[#33260c] via-[#241a08] to-[#171004] p-5 shadow-[0_0_40px_-16px_rgba(255,215,0,0.35),inset_0_1px_0_rgba(255,215,0,0.15)]">
+            <div className="mb-3 flex items-center gap-2 text-sm font-black text-white">
+              <GraduationCap size={16} className="text-[var(--color-gold-bright)]" /> دليل الاستخدام — ربط الـ API بموقعك أو بوتك
+            </div>
+            <div className="space-y-2 text-[11px]">
+              <CodeBox
+                title={`1. رابط البوابة (POST)`}
+                code={`POST ${API_URL}${keyQuery}`}
+              />
+              <CodeBox
+                title={`2. جلب الخدمات المتاحة (GET)`}
+                code={`GET ${API_URL}${keyQuery}`}
+                compact
+              />
+              <CodeBox
+                title="3. إرسال طلب — جسم JSON"
+                code={`{"service": "1", "link": "https://instagram.com/user", "quantity": 1000}`}
+              />
+              <p className="text-zinc-500">
+                الأسعار تخصم من رصيد محفظتك مباشرة حسب عرض المنصة، وأي تحديث جديد على خدمات Follower يظهر فورًا عند استدعاء جلب الخدمات، وكل طلب يصل عبر هذا المفتاح يسجل في قائمة طلباتك.
+                عند الضغط على "تغيير المفتاح" يتم تعطيل المفتاح السابق فورًا وتفعيل المفتاح الجديد فقط — أي طلب يصل بالمفتاح القديم لن يُنفذ بعد ذلك.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </DashboardLayout>
+  );
+}
