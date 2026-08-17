@@ -11,7 +11,7 @@
 | المستودع الأساسي وفرع النشر | [smmnine-landing](https://github.com/wahaca9693/smmnine-landing/tree/deploy/royal-gold-crypto-turso-20260817) |
 | النسخة الاحتياطية وفرع النشر | [smmnine-backup](https://github.com/wahaca9693/smmnine-backup/tree/deploy/royal-gold-crypto-turso-20260817) |
 | التوثيق الكامل | [`docs/PROJECT_COMPLETE.md`](docs/PROJECT_COMPLETE.md) |
-| معرض الصور | [`docs/screenshots/README.md`](docs/screenshots/README.md) |
+| معرض الصور | [`docs/store-gallery/README.md`](docs/store-gallery/README.md) |
 
 ## أبرز ما تم تطويره
 
@@ -87,7 +87,7 @@
 
 يعتمد التصميم على أسطح ذهبية وداكنة ثابتة، وليس على بطاقات شفافة أو زجاجية. أُعيد ضبط أحجام الأزرار، المسافات، التنقل، النوافذ المنبثقة، حالات التحميل، بطاقات الخدمات، صفحة تسجيل الدخول، وصفحات الدعم والإيداع لتكون مفهومة على الهاتف أولًا.
 
-توجد لقطات الشاشة والمواد المرئية في [`docs/screenshots/`](docs/screenshots/). تشمل الصور شاشات الدخول، API، الخدمات، الإيداع، لوحة الإدارة، المزودين، الدعم، اللغات، والتنقل على عرض 390px.
+توجد لقطات الشاشة والمواد المرئية في [`docs/store-gallery/`](docs/store-gallery/). تشمل الصور شاشات الدخول، API، الخدمات، الإيداع، لوحة الإدارة، المزودين، الدعم، اللغات، والتنقل على عرض 390px.
 
 ## الأمان وحالة الدفع
 
