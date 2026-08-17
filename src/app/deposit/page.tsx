@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
+import { useLiveRefresh } from "../components/useLiveRefresh";
 import Link from "next/link";
 import { Wallet, Copy, Check, ArrowLeft, QrCode, Zap, ShieldCheck, Coins, Clock, AlertTriangle } from "lucide-react";
 
@@ -10,6 +11,8 @@ interface DepositMethod {
   name: string;
   name_en: string;
   icon: string;
+  is_active: number;
+  is_auto: number;
   min_amount: number;
   config?: string;
 }
@@ -48,14 +51,28 @@ export default function DepositPage() {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
-  useEffect(() => {
-    fetch("/api/deposit")
-      .then((res) => res.json())
-      .then((d) => setMethods((d.methods || []).filter((m: any) => ["usdt", "bnb", "btc"].includes(m.icon))));
-    fetch("/api/user")
-      .then((res) => res.json())
-      .then((d) => setBalance(Number(d.user?.balance || 0)));
+  const refreshData = useCallback(async () => {
+    try {
+      const [methodsRes, userRes] = await Promise.all([
+        fetch("/api/deposit", { cache: "no-store" }),
+        fetch("/api/user", { cache: "no-store" }),
+      ]);
+      const [methodsData, userData] = await Promise.all([methodsRes.json(), userRes.json()]);
+      setMethods((methodsData.methods || []).filter((m: any) => ["usdt", "bnb", "btc"].includes(m.icon)));
+      setBalance(Number(userData.user?.balance || 0));
+    } catch {
+      // Preserve the last known wallet state if the refresh is temporarily unavailable.
+    }
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refreshData();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshData]);
+
+  useLiveRefresh(refreshData, { intervalMs: 30000 });
 
   const cfg = selected ? (JSON.parse(selected.config || "{}") as { coin?: string; network?: string; address?: string }) : null;
 
@@ -86,9 +103,10 @@ export default function DepositPage() {
     });
     const data = await res.json();
     setSubmitting(false);
+    await refreshData();
     if (data.error) setMessage({ text: data.error, error: true });
     else {
-      setMessage({ text: "تم إنشاء طلب الشحن — سيتم التحقق من المعاملة وشحن رصيدك تلقائيًا دون أي تدخل", error: false });
+      setMessage({ text: Number(selected.is_auto) === 1 ? "تم إنشاء طلب الشحن — سيُحدّث الرصيد بعد تأكيد بوابة الدفع" : "تم تسجيل طلب الشحن — سيبقى معلقًا حتى مراجعة الإيداع من الإدارة", error: false });
       setSubmitted(true);
     }
   };
@@ -103,7 +121,7 @@ export default function DepositPage() {
             </div>
             <div>
               <h1 className="text-2xl font-black text-white">شحن الرصيد</h1>
-              <p className="text-xs text-zinc-500">شحن فوري بالعملات الرقمية — تلقائي بالكامل</p>
+              <p className="text-xs text-zinc-500">شحن بالعملات الرقمية مع تحقق واضح حسب الشبكة</p>
             </div>
           </div>
           <Link href="/" className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs font-bold text-zinc-300">
@@ -151,6 +169,9 @@ export default function DepositPage() {
                 </span>
                 <span className="text-[9px] font-bold text-zinc-400">
                   {networkOf(JSON.parse(m.config || "{}")) || m.name_en}
+                </span>
+                <span className={`text-[9px] font-bold ${Number(m.is_auto) === 1 ? "text-green-400" : "text-amber-300"}`}>
+                  {Number(m.is_auto) === 1 ? "تحقق آلي" : "مراجعة قبل الشحن"}
                 </span>
                 <span className="rounded-full bg-white/5 px-1.5 py-0.5 text-[8px] font-bold text-zinc-500">
                   من {m.min_amount} {coinMeta[m.icon]?.label || ""}
@@ -213,12 +234,12 @@ export default function DepositPage() {
 
             <div className="rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-gold)]/5 p-3 text-[11px] leading-relaxed text-zinc-400">
               <div className="mb-1.5 flex items-center gap-1.5 font-black text-[var(--color-gold-pale)]">
-                <ShieldCheck size={14} /> كيف يعمل الشحن التلقائي؟
+                <ShieldCheck size={14} /> كيف يعمل الشحن؟
               </div>
               <ul className="list-disc space-y-1 pr-4">
-                <li>بعد تأكيد الطلب ستظهر شاشة المراقبة — النظام يتحقق من الشبكة تلقائيًا.</li>
-                <li>بمجرد وصول التحويل إلى العنوان، يُشحن المبلغ نفسه فورًا في محفظتك.</li>
-                <li>لا حاجة لأي تدخل يدوي من فريق الدعم — العملية فورية 24/7.</li>
+                <li>العنوان المعروض مرتبط بالعملة والشبكة المختارتين من إعدادات المنصة.</li>
+                <li>أرسل العملة نفسها على الشبكة نفسها فقط، ثم احتفظ برقم المعاملة إن احتجت للدعم.</li>
+                <li>{Number(selected.is_auto) === 1 ? "سيتم تحديث الرصيد بعد تأكيد بوابة الدفع." : "سيبقى الطلب معلقًا حتى مراجعة الإيداع من الإدارة؛ لا يوجد اعتماد آلي مفعّل لهذه الطريقة حاليًا."}</li>
               </ul>
             </div>
 
@@ -236,7 +257,7 @@ export default function DepositPage() {
           <div className="glass-card flex items-center gap-3 p-4 text-sm text-green-400">
             <Clock size={18} />
             <span>
-              طلبك مسجل — انتظر حتى تصل المعاملة للعنوان ثم سيُشحن رصيدك تلقائيًا. تابع من صفحة{" "}
+              طلبك مسجل — انتظر حتى تصل المعاملة للعنوان ثم تُعالج حسب حالة طريقة الدفع. تابع من صفحة{" "}
               <Link href="/orders" className="font-black text-[var(--color-gold)] underline">
                 الطلبات
               </Link>

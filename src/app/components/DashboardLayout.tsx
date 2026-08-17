@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Header from "./Header";
 import BottomNav from "./BottomNav";
 import Sidebar from "./Sidebar";
+import { useLiveRefresh } from "./useLiveRefresh";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<{ username: string; balance: number; role: string } | null>(null);
@@ -12,21 +13,36 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [loading, setLoading] = useState(true);
   const [unread, setUnread] = useState(0);
   const router = useRouter();
+  const firstLoadRef = useRef(true);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const res = await fetch("/api/user", { cache: "no-store" });
+      const data = await res.json();
+      if (data.error) {
+        router.push("/login");
+        return;
+      }
+      setUser(data.user);
+      setUnread(Number(data.unreadNotifications || 0));
+    } catch {
+      // Preserve the current session view during transient network failures.
+    } finally {
+      if (firstLoadRef.current) {
+        firstLoadRef.current = false;
+        setLoading(false);
+      }
+    }
+  }, [router]);
 
   useEffect(() => {
-    fetch("/api/user")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.error) {
-          router.push("/login");
-          return;
-        }
-        setUser(data.user);
-        setUnread(data.unreadNotifications || 0);
-        setLoading(false);
-      })
-      .catch(() => router.push("/login"));
-  }, [router]);
+    const timer = window.setTimeout(() => {
+      void refreshUser();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshUser]);
+
+  useLiveRefresh(refreshUser, { intervalMs: 30000 });
 
   if (loading) {
     return (

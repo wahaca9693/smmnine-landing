@@ -94,42 +94,6 @@ async function fetchProviderBalance(apiUrl: string, apiKey: string): Promise<str
   }
 }
 
-// تنفيذ طلب عبر المزود (SMM Panels: action=add)
-export async function executeProviderOrder(params: {
-  providerId: number;
-  service: string;
-  link: string;
-  quantity: string;
-}): Promise<{ ok: boolean; remoteOrderId?: string; error?: string }> {
-  const prov = await db.execute({ sql: "SELECT api_url, api_key FROM providers WHERE id = ? AND is_active = 1", args: [params.providerId] });
-  const p = prov.rows[0] as any;
-  if (!p) return { ok: false, error: "المزود غير موجود أو معطّل" };
-  const url = String(p.api_url).replace(/\/+$/, "");
-  const body = new URLSearchParams({
-    key: p.api_key,
-    action: "add",
-    service: params.service,
-    link: params.link,
-    quantity: params.quantity,
-  });
-  try {
-    const res = await fetch(url + "/api/v2", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
-      cache: "no-store",
-      signal: AbortSignal.timeout(20000),
-    });
-    const data = await res.json();
-    if (!res.ok || data.error) {
-      return { ok: false, error: data.error || `HTTP ${res.status}` };
-    }
-    return { ok: true, remoteOrderId: String(data.order ?? "") };
-  } catch (err: any) {
-    return { ok: false, error: err.message || "تعذر إرسال الطلب للمزود" };
-  }
-}
-
 export async function GET(request: Request) {
   try {
     await initDb();

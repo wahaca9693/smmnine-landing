@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { useLiveRefresh } from "./useLiveRefresh";
 
 interface SiteSettings {
   siteName: string;
@@ -38,7 +39,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const fetchSettings = async () => {
     try {
-      const res = await fetch("/api/settings");
+      const res = await fetch("/api/settings", { cache: "no-store" });
       const data = await res.json();
       if (data.settings) {
         setSettings({ ...defaultSettings, ...data.settings });
@@ -51,8 +52,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    fetchSettings();
+    const timer = window.setTimeout(() => {
+      void fetchSettings();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
+
+  useLiveRefresh(fetchSettings, { intervalMs: 60000 });
 
   useEffect(() => {
     const root = document.documentElement;

@@ -2,12 +2,13 @@ import { createClient } from "@libsql/client";
 
 let url = process.env.TURSO_DATABASE_URL;
 const authToken = process.env.TURSO_AUTH_TOKEN;
+const useLocalDb = process.env.USE_LOCAL_DB === "1" && process.env.NODE_ENV !== "production";
 
-if (process.env.USE_LOCAL_DB === "1") {
+if (useLocalDb) {
   url = `file:${process.env.LOCAL_DB_PATH || "/tmp/follower-local.db"}`;
 }
 
-if (!url || (!authToken && process.env.USE_LOCAL_DB !== "1")) {
+if (!url || (!authToken && !useLocalDb)) {
   throw new Error("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set");
 }
 
@@ -81,6 +82,22 @@ export async function initDb() {
       title TEXT NOT NULL,
       body TEXT,
       is_read INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS crypto_deposits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      coin TEXT NOT NULL,
+      network TEXT NOT NULL,
+      amount REAL NOT NULL,
+      address TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      note TEXT,
+      completed_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     )

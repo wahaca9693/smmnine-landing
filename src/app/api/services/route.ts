@@ -22,6 +22,19 @@ async function getProviderServices(): Promise<any[]> {
   }
 }
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+function json(data: unknown, init?: ResponseInit) {
+  return NextResponse.json(data, {
+    ...init,
+    headers: {
+      "Cache-Control": "no-store, max-age=0",
+      ...(init?.headers || {}),
+    },
+  });
+}
+
 const platforms = [
   { id: "facebook", name: "فيسبوك", color: "#1877F2" },
   { id: "tiktok", name: "تيك توك", color: "#000000" },
@@ -55,7 +68,7 @@ export async function GET() {
     // دمج خدمات المزودين الخارجيين مع الخدمات المحلية
     const providerMapped = providerServices.map((s: any) => ({
       ...s,
-      service: String(s.service),
+      service: s.local_id != null ? `provider:${s.local_id}` : String(s.service),
       remote_service_id: String(s.service),
       rate: String(s.rate),
       min: String(s.min),
@@ -78,13 +91,13 @@ export async function GET() {
 
     const categories = [...new Set(merged.map((s: any) => s.category || "عام"))].sort();
 
-    return NextResponse.json({
+    return json({
       services: enrichedServices,
       categories,
       platforms,
       count: merged.length,
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return json({ error: err.message }, { status: 500 });
   }
 }

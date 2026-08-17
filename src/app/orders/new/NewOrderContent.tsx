@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
+import { useLiveRefresh } from "../../components/useLiveRefresh";
 import { ShoppingCart, Check, AlertCircle, ChevronDown, ChevronUp, Calculator, Wallet, AlertTriangle } from "lucide-react";
 import { Modal } from "../../components/Modal";
 
@@ -26,23 +27,40 @@ export default function NewOrderContent() {
   const [requirements, setRequirements] = useState<any[]>([]);
   const [requirementsChecked, setRequirementsChecked] = useState(false);
   const [requirementsLoading, setRequirementsLoading] = useState(false);
+  const serviceIdRef = useRef("");
+  const initialServiceRef = useRef(initialService);
 
   useEffect(() => {
-    fetch("/api/services")
-      .then((res) => res.json())
-      .then((data) => {
-        setServices(data.services || []);
-        setCategories(data.categories || []);
-        if (initialService) {
-          setServiceId(initialService);
-        }
-      })
-      .catch(() => {});
-    fetch("/api/user")
-      .then((res) => res.json())
-      .then((data) => setBalance(Number(data.user?.balance || 0)))
-      .catch(() => {});
-  }, [initialService]);
+    serviceIdRef.current = serviceId;
+  }, [serviceId]);
+
+  const refreshData = useCallback(async () => {
+    try {
+      const [servicesRes, userRes] = await Promise.all([
+        fetch("/api/services", { cache: "no-store" }),
+        fetch("/api/user", { cache: "no-store" }),
+      ]);
+      if (!servicesRes.ok || !userRes.ok) return;
+      const [servicesData, userData] = await Promise.all([servicesRes.json(), userRes.json()]);
+      setServices(Array.isArray(servicesData.services) ? servicesData.services : []);
+      setCategories(Array.isArray(servicesData.categories) ? servicesData.categories : []);
+      setBalance(Number(userData.user?.balance || 0));
+      if (initialServiceRef.current && !serviceIdRef.current) {
+        setServiceId(initialServiceRef.current);
+      }
+    } catch {
+      // Keep the last known snapshot if a transient refresh fails.
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refreshData();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshData]);
+
+  useLiveRefresh(refreshData, { intervalMs: 30000 });
 
   // تحميل شروط الخدمة إلزاميًا عند اختيار خدمة (مثل إنستغرام)
   const selectedService = useMemo(
@@ -108,7 +126,7 @@ export default function NewOrderContent() {
     if (data.error) setResult({ error: data.error });
     else {
       setResult({ message: `تم إنشاء الطلب بنجاح: #${data.order.smmnine_order_id}` });
-      setBalance((b) => b - Number(data.order.charge));
+      await refreshData();
       setServiceId("");
       setLink("");
       setQuantity("");
@@ -377,7 +395,7 @@ export default function NewOrderContent() {
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-zinc-500">الخدمة:</span>
-                <span className="text-right font-bold text-white max-w-[60%]">#{selectedService.service}</span>
+                <span className="text-right font-bold text-white max-w-[60%]">{selectedService.name}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-zinc-500">الكمية:</span>

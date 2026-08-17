@@ -63,16 +63,19 @@ npx dotenv-cli -e .env.local -- npm run seed
 ## متغيرات البيئة
 
 ```env
-SMMNINE_API_URL=https://smmnine.com/api/v2
-SMMNINE_API_KEY=...
+SMMNINE_API_URL=https://your-domain.example/api/v2
+SMMNINE_API_KEY=<user-api-key>
 
-TURSO_DATABASE_URL=libsql://...
-TURSO_AUTH_TOKEN=...
+TURSO_DATABASE_URL=libsql://your-database.turso.io
+# اضبط رمز مصادقة Turso كمتغير سري محمي في الاستضافة، ولا تكتبه في Git
+USE_LOCAL_DB=0
 
-SESSION_SECRET=your-super-secret-key-32charslong
+SESSION_SECRET=<random-secret-at-least-32-chars>
 ```
 
 ## التشغيل محليًا
+
+يستخدم المشروع قاعدة Turso عند ضبط `TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN` مع `USE_LOCAL_DB=0` أو عند حذف `USE_LOCAL_DB`. لاستخدام SQLite محليًا للاختبارات فقط، اضبط `USE_LOCAL_DB=1` و`LOCAL_DB_PATH`، ثم لا تستخدم ذلك الإعداد في الإنتاج.
 
 ```bash
 npm run dev
