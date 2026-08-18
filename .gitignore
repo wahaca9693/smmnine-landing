@@ -43,3 +43,11 @@ next-env.d.ts
 # misc
 cookies.txt
 database.db
+
+# local delivery archives and generated captures
+/deliverables/
+/artifacts/
+/shots/
+/*.zip
+*.tar.gz.enc
+*-package-password*.txt

@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import DashboardLayout from "../components/DashboardLayout";
 import { useLiveRefresh } from "../components/useLiveRefresh";
 import Link from "next/link";
-import { Wallet, Copy, Check, ArrowLeft, QrCode, Zap, ShieldCheck, Coins, Clock, AlertTriangle } from "lucide-react";
+import { Wallet, Copy, Check, ArrowLeft, QrCode, Zap, ShieldCheck, Coins, Clock, AlertTriangle, Smartphone, ArrowUpRight, Gift, Loader2, CreditCard } from "lucide-react";
 
 interface DepositMethod {
   id: number;
@@ -42,6 +43,7 @@ const networkOf = (cfg: { coin?: string; network?: string } | null): string => {
 };
 
 export default function DepositPage() {
+  const router = useRouter();
   const [methods, setMethods] = useState<DepositMethod[]>([]);
   const [selected, setSelected] = useState<DepositMethod | null>(null);
   const [amount, setAmount] = useState("");
@@ -50,16 +52,28 @@ export default function DepositPage() {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  const [paymentInfo, setPaymentInfo] = useState<{ pay_address?: string; pay_amount?: number; pay_currency?: string; payment_id?: string } | null>(null);
+  const [asiacell, setAsiacell] = useState<{ connected: boolean; store_phone?: string; exchange_rate?: number }>({ connected: false });
+  const [asiacellOpen, setAsiacellOpen] = useState(false);
+  const [giftCode, setGiftCode] = useState("");
+  const [redeemingGift, setRedeemingGift] = useState(false);
+  const [giftMessage, setGiftMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
   const refreshData = useCallback(async () => {
     try {
-      const [methodsRes, userRes] = await Promise.all([
-        fetch("/api/deposit", { cache: "no-store" }),
-        fetch("/api/user", { cache: "no-store" }),
+      const [methodsRes, userRes, asiacellRes] = await Promise.all([
+        fetch("/api/deposit", { cache: "no-store", credentials: "include" }),
+        fetch("/api/user", { cache: "no-store", credentials: "include" }),
+        fetch("/api/payments/asiacell", { cache: "no-store", credentials: "include" }),
       ]);
-      const [methodsData, userData] = await Promise.all([methodsRes.json(), userRes.json()]);
-      setMethods((methodsData.methods || []).filter((m: any) => ["usdt", "bnb", "btc"].includes(m.icon)));
+      const [methodsData, userData, asiacellData] = await Promise.all([methodsRes.json(), userRes.json(), asiacellRes.json()]);
+      setMethods(methodsData.methods || []);
       setBalance(Number(userData.user?.balance || 0));
+      setAsiacell({
+        connected: Boolean(asiacellData.connected),
+        store_phone: asiacellData.store_phone,
+        exchange_rate: Number(asiacellData.exchange_rate || 1666),
+      });
     } catch {
       // Preserve the last known wallet state if the refresh is temporarily unavailable.
     }
@@ -74,21 +88,39 @@ export default function DepositPage() {
 
   useLiveRefresh(refreshData, { intervalMs: 30000 });
 
+  const cryptoMethods = methods.filter((m) => ["usdt", "bnb", "btc"].includes(String(m.icon).toLowerCase()));
+  const asiacellConfigured = Boolean(asiacell.connected);
   const cfg = selected ? (JSON.parse(selected.config || "{}") as { coin?: string; network?: string; address?: string }) : null;
+  const selectedIsCrypto = Boolean(selected && ["usdt", "bnb", "btc"].includes(String(selected.icon).toLowerCase()));
+  const selectedMinimum = selectedIsCrypto ? 1 : Number(selected?.min_amount || 0);
+  const activeAddress = paymentInfo?.pay_address || cfg?.address;
 
   const copyAddress = async () => {
-    if (!cfg?.address) return;
-    await navigator.clipboard.writeText(cfg.address);
+    if (!activeAddress) return;
+    await navigator.clipboard.writeText(activeAddress);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const redeemGift = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!giftCode.trim() || redeemingGift) return;
+    setRedeemingGift(true); setGiftMessage(null);
+    try {
+      const res = await fetch("/api/gift-codes/redeem", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: giftCode }) });
+      const data = await res.json();
+      if (res.ok) { setGiftMessage({ text: `تمت إضافة $${Number(data.credited).toFixed(6)} إلى محفظتك` }); setGiftCode(""); setBalance(Number(data.balance || 0)); }
+      else setGiftMessage({ text: data.error || "تعذر استرداد الكود", error: true });
+    } catch { setGiftMessage({ text: "تعذر الاتصال بالخادم", error: true }); }
+    finally { setRedeemingGift(false); }
   };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selected || !amount) return;
     const num = Number(amount);
-    if (isNaN(num) || num < selected.min_amount) {
-      setMessage({ text: `الحد الأدنى للشحن ${selected.min_amount} ${selected.name_en}`, error: true });
+    if (isNaN(num) || num < selectedMinimum) {
+      setMessage({ text: `الحد الأدنى للشحن ${selectedMinimum.toFixed(2)} دولار`, error: true });
       return;
     }
     setSubmitting(true);
@@ -106,7 +138,8 @@ export default function DepositPage() {
     await refreshData();
     if (data.error) setMessage({ text: data.error, error: true });
     else {
-      setMessage({ text: Number(selected.is_auto) === 1 ? "تم إنشاء طلب الشحن — سيُحدّث الرصيد بعد تأكيد بوابة الدفع" : "تم تسجيل طلب الشحن — سيبقى معلقًا حتى مراجعة الإيداع من الإدارة", error: false });
+      if (data.payment) setPaymentInfo(data.payment);
+      setMessage({ text: data.message || (Number(selected.is_auto) === 1 ? "تم إنشاء طلب الشحن — سيُحدّث الرصيد بعد تأكيد بوابة الدفع" : "تم تسجيل طلب الشحن — سيبقى معلقًا حتى مراجعة الإيداع من الإدارة"), error: false });
       setSubmitted(true);
     }
   };
@@ -124,9 +157,9 @@ export default function DepositPage() {
               <p className="text-xs text-zinc-500">شحن بالعملات الرقمية مع تحقق واضح حسب الشبكة</p>
             </div>
           </div>
-          <Link href="/" className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs font-bold text-zinc-300">
+          <button type="button" onClick={() => router.back()} className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs font-bold text-zinc-300">
             <ArrowLeft size={14} className="inline ml-1" />رجوع
-          </Link>
+          </button>
         </div>
 
         <div className="glass-card flex items-center justify-between p-4">
@@ -137,16 +170,22 @@ export default function DepositPage() {
           <span className="text-lg font-black text-gradient-luxe">${balance.toFixed(4)}</span>
         </div>
 
+        <form onSubmit={redeemGift} className="glass-card rounded-2xl border border-[var(--color-gold)]/25 bg-gradient-to-l from-[var(--color-gold)]/10 to-transparent p-4">
+          <div className="mb-2 flex items-center gap-2"><Gift size={17} className="text-[var(--color-gold)]" /><div><h2 className="text-sm font-black text-white">لديك كود هدية؟</h2><p className="text-[10px] text-zinc-500">أدخل الكود لإضافة رصيده إلى محفظتك مباشرة</p></div></div>
+          <div className="flex gap-2"><input value={giftCode} onChange={(e) => setGiftCode(e.target.value.toUpperCase())} placeholder="مثال: GOLD9X" className="h-10 min-w-0 flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-center font-mono text-sm font-black tracking-widest text-white outline-none focus:border-[var(--color-gold)]" /><button disabled={redeemingGift || !giftCode.trim()} className="flex h-10 shrink-0 items-center gap-1 rounded-xl bg-gradient-to-r from-[var(--color-gold-bright)] to-[var(--color-gold-deep)] px-3 text-[11px] font-black text-black disabled:opacity-50">{redeemingGift ? <Loader2 size={14} className="animate-spin" /> : <Gift size={14} />} استرداد</button></div>
+          {giftMessage && <div className={`mt-2 text-[10px] font-bold ${giftMessage.error ? "text-red-300" : "text-green-300"}`}>{giftMessage.text}</div>}
+        </form>
+
         {/* اختيار العملة */}
         <div>
           <div className="mb-2 flex items-center gap-2 text-sm font-black text-white">
             <Zap size={16} className="text-[var(--color-gold)]" /> اختر العملة والشبكة
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            {methods.map((m) => (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {cryptoMethods.map((m) => (
               <button
                 key={m.id}
-                onClick={() => { setSelected(m); setSubmitted(false); setMessage(null); }}
+                onClick={() => { setSelected(m); setPaymentInfo(null); setSubmitted(false); setMessage(null); }}
                 className={`relative flex flex-col items-center gap-1 rounded-2xl border p-3 transition ${
                   selected?.id === m.id
                     ? "border-[var(--color-gold)]/60 bg-[var(--color-gold)]/10 shadow-[0_0_24px_-8px_rgba(255,215,0,0.5)]"
@@ -174,14 +213,46 @@ export default function DepositPage() {
                   {Number(m.is_auto) === 1 ? "تحقق آلي" : "مراجعة قبل الشحن"}
                 </span>
                 <span className="rounded-full bg-white/5 px-1.5 py-0.5 text-[8px] font-bold text-zinc-500">
-                  من {m.min_amount} {coinMeta[m.icon]?.label || ""}
+                  من {String(m.icon).toLowerCase() === "usdt" || String(m.icon).toLowerCase() === "bnb" || String(m.icon).toLowerCase() === "btc" ? "1.00" : m.min_amount} {coinMeta[m.icon]?.label || ""}
                 </span>
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => { setAsiacellOpen((open) => !open); setSelected(null); setPaymentInfo(null); setMessage(null); setSubmitted(false); }}
+              className={`relative flex min-h-[148px] flex-col items-center justify-center gap-1 rounded-2xl border p-3 text-center transition sm:min-h-[164px] ${asiacellOpen ? "border-[var(--color-gold)]/70 bg-[var(--color-gold)]/12 shadow-[0_0_24px_-8px_rgba(255,215,0,0.55)]" : "glass-card hover:border-[var(--color-gold)]/45"}`}
+            >
+              {asiacellOpen && <span className="absolute -top-1.5 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-r from-[var(--color-gold-bright)] to-[var(--color-gold)] text-black"><Check size={12} strokeWidth={4} /></span>}
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-gold)]/15 ring-2 ring-[var(--color-gold)]/25"><Smartphone size={22} className="text-[var(--color-gold)]" /></span>
+              <span className="text-sm font-black text-[var(--color-gold)]">Asiacell</span>
+              <span className="text-[10px] font-bold text-zinc-300">شحن بالعراقي</span>
+              <span className={`rounded-full px-2 py-0.5 text-[8px] font-black ${asiacellConfigured ? "bg-emerald-500/15 text-emerald-300" : "bg-zinc-500/15 text-zinc-500"}`}>{asiacellConfigured ? "متاح الآن" : "قيد التفعيل"}</span>
+            </button>
           </div>
+
+          {asiacellOpen && (
+            <section className="glass-card mt-3 overflow-hidden rounded-2xl border border-[var(--color-gold)]/35 animate-slideUp">
+              <div className="flex items-start gap-3 border-b border-[var(--color-border)] bg-gradient-to-l from-[var(--color-gold)]/12 to-transparent p-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-gold)]/15 text-[var(--color-gold)]"><Smartphone size={20} /></span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-black text-white">اختر طريقة الشحن عبر Asiacell</h2><span className={`rounded-full px-2 py-0.5 text-[8px] font-black ${asiacellConfigured ? "bg-emerald-500/15 text-emerald-300" : "bg-zinc-500/15 text-zinc-500"}`}>{asiacellConfigured ? "متاح الآن" : "غير متاح مؤقتًا"}</span></div>
+                  <p className="mt-1 text-[10px] leading-relaxed text-zinc-400">اختر التحويل من رقم الهاتف أو أدخل بطاقة شحن Asiacell. التحويل عليه رسم ثابت 500 د.ع، أما بطاقة الشحن فبدون رسوم.</p>
+                </div>
+              </div>
+              <div className="grid gap-2 p-3 sm:grid-cols-2">
+                <Link href={asiacellConfigured ? "/deposit/asiacell?method=transfer" : "/deposit"} className={`group flex min-h-[72px] items-center justify-between rounded-2xl border px-4 py-3 transition ${asiacellConfigured ? "border-[var(--color-gold)]/55 bg-gradient-to-l from-[var(--color-gold)]/12 to-transparent hover:border-[var(--color-gold)]" : "pointer-events-none border-[var(--color-border)] opacity-50"}`}>
+                  <span className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-gold)]/15 text-[var(--color-gold)]"><ArrowUpRight size={19} /></span><span><b className="block text-sm font-black text-white">تحويل</b><small className="mt-1 block text-[9px] text-zinc-400">من رقم الهاتف · OTP · رسم 500 د.ع</small></span></span><ArrowLeft size={17} className="text-[var(--color-gold)] transition group-hover:-translate-x-1" />
+                </Link>
+                <Link href={asiacellConfigured ? "/deposit/asiacell?method=card" : "/deposit"} className={`group flex min-h-[72px] items-center justify-between rounded-2xl border px-4 py-3 transition ${asiacellConfigured ? "border-[var(--color-border)] bg-black/15 hover:border-[var(--color-gold)]/60" : "pointer-events-none border-[var(--color-border)] opacity-50"}`}>
+                  <span className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-gold)]/10 text-[var(--color-gold)]"><CreditCard size={19} /></span><span><b className="block text-sm font-black text-white">كرت</b><small className="mt-1 block text-[9px] text-zinc-400">14–16 رقمًا · بلا رسوم</small></span></span><ArrowLeft size={17} className="text-zinc-400 transition group-hover:-translate-x-1" />
+                </Link>
+              </div>
+              <div className="px-3 pb-3 text-[9px] text-zinc-600">السعر المخصص للمنصة: {Number(asiacell.exchange_rate || 1666).toLocaleString("ar-IQ")} د.ع لكل دولار. السعر الرسمي/السوقي قد يختلف.</div>
+            </section>
+          )}
         </div>
 
-        {selected && cfg?.address && (
+        {selected && activeAddress && (
           <div className="glass-card space-y-4 p-5 animate-slideUp">
             <div className="flex items-center gap-2 text-sm font-black text-white">
               <QrCode size={16} className="text-[var(--color-gold)]" /> عنوان الإيداع — {selected.name}
@@ -189,7 +260,7 @@ export default function DepositPage() {
 
             <div className="relative mx-auto w-fit overflow-hidden rounded-2xl bg-white p-2">
               <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(cfg.address)}`}
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(activeAddress)}`}
                 alt="QR"
                 width={200}
                 height={200}
@@ -199,7 +270,7 @@ export default function DepositPage() {
 
             <div className="rounded-xl border border-[var(--color-gold)]/20 bg-[var(--color-gold)]/5 p-3">
               <div className="mb-1 text-[10px] font-black text-[var(--color-gold-pale)]">العنوان (انسخه بدقة كاملة)</div>
-              <div className="break-all font-mono text-xs leading-relaxed text-white">{cfg.address}</div>
+              <div className="break-all font-mono text-xs leading-relaxed text-white">{activeAddress}</div>
               <button
                 onClick={copyAddress}
                 className="mt-2 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[var(--color-gold)] to-[var(--color-gold-deep)] px-4 py-2 text-xs font-black text-black shadow-[0_0_16px_-6px_rgba(255,215,0,0.5)]"
@@ -216,7 +287,7 @@ export default function DepositPage() {
                   step="0.01"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  placeholder={`الحد الأدنى ${selected.min_amount} ${selected.name_en}`}
+                  placeholder={`الحد الأدنى ${selectedMinimum.toFixed(2)} دولار` + (paymentInfo?.pay_amount ? ` · المطلوب ${paymentInfo.pay_amount} ${paymentInfo.pay_currency || ""}` : "")}
                   className="input-luxe w-full rounded-xl px-4 py-3 text-white"
                 />
               </div>
@@ -247,7 +318,7 @@ export default function DepositPage() {
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />
               <span>
                 أرسل العملة الصحيحة على الشبكة الصحيحة فقط. إرسال USDT على شبكة خاطئة أو عملات أخرى للعنوان قد يؤدي لفقدان الأموال نهائيًا.
-                الحد الأدنى: {selected.min_amount} {selected.name_en}. وقت التأكيد: 1–10 دقائق حسب الشبكة.
+                الحد الأدنى: {selectedMinimum.toFixed(2)} دولار. {paymentInfo?.pay_amount ? `أرسل ${paymentInfo.pay_amount} ${paymentInfo.pay_currency || ""} إلى العنوان أعلاه.` : "وقت التأكيد: 1–10 دقائق حسب الشبكة."}
               </span>
             </div>
           </div>

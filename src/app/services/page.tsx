@@ -1,66 +1,57 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import { Modal } from "../components/Modal";
 import { Search, Layers, ChevronDown, ChevronUp, ShoppingCart, ShieldCheck, Sparkles, Zap, Infinity, RefreshCw } from "lucide-react";
 import { PlatformIcon } from "../components/Icons";
 import Link from "next/link";
+import { useLiveRefresh } from "../components/useLiveRefresh";
+import { useLanguage, translatePlatform, translateServiceName, translateServiceType } from "../components/LanguageProvider";
 
 const platformOrder = [
-  { id: "facebook", name: "فيسبوك" },
-  { id: "tiktok", name: "تيك توك" },
-  { id: "instagram", name: "إنستغرام" },
-  { id: "whatsapp", name: "واتساب" },
-  { id: "twitter", name: "تويتر / X" },
-  { id: "youtube", name: "يوتيوب" },
-  { id: "telegram", name: "تيليجرام" },
-  { id: "discord", name: "ديسكورد" },
-  { id: "snapchat", name: "سناب جات" },
-  { id: "threads", name: "ثريدز" },
-  { id: "twitch", name: "تويتش" },
-  { id: "kuaishou", name: "كواي" },
-  { id: "likee", name: "كيك" },
-  { id: "spotify", name: "سبوتيفاي" },
-  { id: "other", name: "أخرى" },
-  { id: "all", name: "الكل" },
+  { id: "facebook" },
+  { id: "tiktok" },
+  { id: "instagram" },
+  { id: "whatsapp" },
+  { id: "twitter" },
+  { id: "youtube" },
+  { id: "telegram" },
+  { id: "discord" },
+  { id: "snapchat" },
+  { id: "threads" },
+  { id: "twitch" },
+  { id: "kuaishou" },
+  { id: "likee" },
+  { id: "spotify" },
+  { id: "other" },
+  { id: "all" },
 ];
 
-const serviceTypeLabels: Record<string, string> = {
-  followers: "متابعين",
-  likes: "لايكات",
-  views: "مشاهدات",
-  comments: "تعليقات",
-  shares: "مشاركات",
-  saves: "حفظ",
-  votes: "تصويت",
-  stories: "ستوريات",
-  reels: "ريلز",
-  live: "بث مباشر",
-  other: "أخرى",
-};
+const serviceTypeIds = ["followers", "likes", "views", "comments", "shares", "saves", "votes", "stories", "reels", "live", "other"];
 
-function detectGuarantees(name: string): { isGuaranteed: boolean; badges: { label: string; icon: any; color: string }[] } {
+function detectGuarantees(name: string, t: (key: string) => string): { isGuaranteed: boolean; badges: { label: string; icon: any; color: string }[] } {
   const lower = name.toLowerCase();
   const badges: { label: string; icon: any; color: string }[] = [];
 
   if (/مضمون|ضمان|garant|guarantee|ضامن/.test(lower)) {
-    badges.push({ label: "مضمونة", icon: ShieldCheck, color: "bg-green-500/10 text-green-400 border-green-500/20" });
+    badges.push({ label: t("service.badge.guaranteed"), icon: ShieldCheck, color: "bg-green-500/10 text-green-400 border-green-500/20" });
   }
   if (/مدى الحياة|lifetime|life time|الحياة/.test(lower)) {
-    badges.push({ label: "مدى الحياة", icon: Infinity, color: "bg-purple-500/10 text-purple-400 border-purple-500/20" });
+    badges.push({ label: t("service.badge.lifetime"), icon: Infinity, color: "bg-purple-500/10 text-purple-400 border-purple-500/20" });
   }
   if (/فوري|فورية|instant|fast|quick|سريع|سريعة/.test(lower)) {
-    badges.push({ label: "فورية", icon: Zap, color: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" });
+    badges.push({ label: t("service.badge.instant"), icon: Zap, color: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" });
   }
   if (/تعويض|refill|auto refill|إعادة تعبئة/.test(lower)) {
-    badges.push({ label: "تعويض تلقائي", icon: RefreshCw, color: "bg-blue-500/10 text-blue-400 border-blue-500/20" });
+    badges.push({ label: t("service.badge.refill"), icon: RefreshCw, color: "bg-blue-500/10 text-blue-400 border-blue-500/20" });
   }
 
   return { isGuaranteed: badges.length > 0, badges };
 }
 
 export default function ServicesPage() {
+  const { locale, t } = useLanguage();
   const [services, setServices] = useState<any[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [platforms, setPlatforms] = useState<any[]>([]);
@@ -68,6 +59,9 @@ export default function ServicesPage() {
   const [selectedType, setSelectedType] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [fetchError, setFetchError] = useState("");
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
 
   const [showGuaranteed, setShowGuaranteed] = useState(false);
@@ -75,22 +69,38 @@ export default function ServicesPage() {
   const [guaranteedPlatform, setGuaranteedPlatform] = useState<string | null>(null);
   const [guaranteedTypeFilter, setGuaranteedTypeFilter] = useState<string>("all");
 
-  useEffect(() => {
-    fetch("/api/services")
-      .then((res) => res.json())
-      .then((data) => {
-        setServices(data.services || []);
-        setCategories(data.categories || []);
-        setPlatforms(data.platforms || []);
-        setLoading(false);
-      });
+  const loadServices = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/services", { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "تعذر تحميل الخدمات");
+      setServices(data.services || []);
+      setCategories(data.categories || []);
+      setPlatforms(data.platforms || []);
+      setFetchError("");
+      setLastSyncedAt(new Date());
+    } catch (error) {
+      setFetchError(error instanceof Error ? error.message : "تعذر تحميل الخدمات");
+    } finally {
+      setLoading(false);
+      setSyncing(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadServices();
+  }, [loadServices]);
+
+  useLiveRefresh(() => loadServices(true), { intervalMs: 30000 });
 
   const filteredServices = useMemo(() => {
     return services.filter((s) => {
       const matchesPlatform = selectedPlatform === "all" ? true : s.platform === selectedPlatform;
       const matchesType = selectedType === "all" ? true : s.serviceType === selectedType;
-      const matchesSearch = s.name.toLowerCase().includes(search.toLowerCase()) || String(s.service).includes(search);
+      const translatedName = translateServiceName(s.name, locale);
+      const matchesSearch = s.name.toLowerCase().includes(search.toLowerCase()) || translatedName.toLowerCase().includes(search.toLowerCase()) || String(s.service).includes(search);
       return matchesPlatform && matchesType && matchesSearch;
     }).sort((a, b) => {
       // الخدمات الجديدة (وسم "جديد" / تحديث) تظهر أولًا دائمًا
@@ -99,7 +109,7 @@ export default function ServicesPage() {
       if (aNew !== bNew) return bNew - aNew;
       return String(a.service).localeCompare(String(b.service));
     });
-  }, [services, selectedPlatform, selectedType, search]);
+  }, [services, selectedPlatform, selectedType, search, locale]);
 
   const servicesByCategory = useMemo(() => {
     const map: Record<string, any[]> = {};
@@ -122,10 +132,10 @@ export default function ServicesPage() {
   const guaranteedServices = useMemo(() => {
     return services.filter((s) => {
       const matchesPlatform = !guaranteedPlatform || guaranteedPlatform === "all" ? true : s.platform === guaranteedPlatform;
-      const { isGuaranteed } = detectGuarantees(s.name);
+      const { isGuaranteed } = detectGuarantees(s.name, t);
       return matchesPlatform && isGuaranteed;
     });
-  }, [services, guaranteedPlatform]);
+  }, [services, guaranteedPlatform, t]);
 
   const guaranteedServicesByType = useMemo(() => {
     const map: Record<string, any[]> = {};
@@ -183,15 +193,33 @@ export default function ServicesPage() {
           <div className="pointer-events-none absolute -top-16 -left-16 h-48 w-48 rounded-full bg-[var(--color-primary)]/10 blur-3xl" />
           <div className="relative flex items-center justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-black text-gradient-luxe">الخدمات</h1>
-              <p className="mt-1 text-xs text-zinc-400">اختر منصتك واعثر على الخدمة المثالية لنمو حسابك</p>
+              <h1 className="text-2xl font-black text-gradient-luxe">{t("service.title")}</h1>
+              <p className="mt-1 text-xs text-zinc-400">{t("service.subtitle")}</p>
             </div>
             <div className="hidden sm:flex animate-float items-center gap-2 rounded-full border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 px-4 py-2 text-xs font-bold text-[var(--color-primary-light)]">
               <Sparkles size={14} className="sparkle-star" />
-              <span>{filteredServices.length} خدمة متاحة</span>
+              <span>{filteredServices.length} {t("service.availableCount")}</span>
             </div>
           </div>
           <div className="divider-glow mt-4" />
+          <div className="mt-3 flex items-center justify-between gap-3 text-[11px]">
+            <div className="flex min-w-0 items-center gap-2 text-zinc-400">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${fetchError ? "bg-red-400" : "bg-emerald-400"} ${syncing ? "animate-pulse" : ""}`} />
+              <span className="truncate">
+                {fetchError ? t("service.syncError") : lastSyncedAt ? `${t("service.lastUpdatedPrefix")} ${lastSyncedAt.toLocaleTimeString(locale === "ar" ? "ar-AE" : locale, { hour: "2-digit", minute: "2-digit" })}` : t("service.syncing")}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadServices()}
+              disabled={syncing}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 font-bold text-[var(--color-primary-light)] transition hover:border-[var(--color-primary)]/60 disabled:cursor-wait disabled:opacity-60"
+              aria-label={t("service.refresh")}
+            >
+              <RefreshCw size={13} className={syncing ? "animate-spin" : ""} />
+              {t("service.refresh")}
+            </button>
+          </div>
         </div>
 
         {/* Guaranteed services button */}
@@ -206,8 +234,8 @@ export default function ServicesPage() {
                 <ShieldCheck size={26} />
               </span>
               <div className="text-right">
-                <div className="text-lg font-black">الخدمات المضمونة</div>
-                <div className="text-xs opacity-90">خدمات مختارة بضمان • تعويض تلقائي • مدى الحياة</div>
+                <div className="text-lg font-black">{t("service.guaranteed")}</div>
+                <div className="text-xs opacity-90">{t("service.guaranteedDesc")}</div>
               </div>
             </div>
             <Sparkles size={24} className="opacity-80 group-hover:animate-pulse" />
@@ -236,7 +264,7 @@ export default function ServicesPage() {
                   className={`h-8 w-8 ${active ? "platform-icon-animated-active" : "text-white"}`}
                   animated={!active}
                 />
-                <span className="mt-2 text-[10px] font-bold text-zinc-300">{p.name}</span>
+                <span className="mt-2 text-[10px] font-bold text-zinc-300">{p.id === "all" ? t("service.all") : translatePlatform(p.id, locale)}</span>
               </button>
             );
           })}
@@ -255,7 +283,7 @@ export default function ServicesPage() {
                   : "bg-[var(--color-card)] text-zinc-400 border border-[var(--color-border)]"
               }`}
             >
-              {serviceTypeLabels[type] || type}
+              {translateServiceType(type, locale)}
             </button>
           ))}
         </div>
@@ -266,7 +294,8 @@ export default function ServicesPage() {
           <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-[var(--color-primary)] transition-colors" size={18} />
           <input
             type="text"
-            placeholder="ابحث عن خدمة بالاسم..."
+            placeholder={t("service.search")}
+            aria-label={t("service.search")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="input-luxe w-full rounded-2xl py-3.5 pr-12 pl-4 text-sm text-white"
@@ -277,25 +306,39 @@ export default function ServicesPage() {
         <div>
           <div className="mb-3 flex items-center gap-2 text-sm font-bold text-zinc-400">
             <Layers size={16} />
-            <span>الفئات</span>
-            <span className="mr-auto text-xs text-zinc-600">{filteredServices.length} خدمة</span>
+            <span>{t("service.categories")}</span>
+            <span className="mr-auto text-xs text-zinc-600">{filteredServices.length} {t("service.availableCount")}</span>
           </div>
 
           {loading ? (
             <div className="flex h-40 items-center justify-center">
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--color-border)] border-t-[var(--color-primary)]" />
             </div>
+          ) : fetchError ? (
+            <div className="card-luxe rounded-2xl border border-red-400/20 p-6 text-center">
+              <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-red-400/10 text-red-300">!</div>
+              <h2 className="font-black text-white">{t("service.loadingError")}</h2>
+              <p className="mt-1 text-xs text-zinc-400">{fetchError}</p>
+              <button
+                type="button"
+                onClick={() => void loadServices()}
+                className="mt-4 rounded-xl gradient-luxe px-4 py-2 text-xs font-black text-[#111]"
+              >
+                {t("service.retry")}
+              </button>
+            </div>
           ) : (
             <div className="space-y-3">
               {Object.entries(servicesByCategory).map(([category, items]) => {
-                const expanded = expandedCategories[category];
+                      const expanded = expandedCategories[category];
+                const translatedCategory = translateServiceName(category === "عام" ? "other" : category, locale);
                 return (
                   <div key={category} className="card-luxe rounded-2xl border overflow-hidden">
                     <button
                       onClick={() => toggleCategory(category)}
                       className="group flex w-full items-center justify-between p-4"
                     >
-                      <span className="font-bold text-white text-right line-clamp-1">{category}</span>
+                      <span className="font-bold text-white text-right line-clamp-1">{translatedCategory}</span>
                       <span className="rounded-full border border-[var(--color-primary)]/25 bg-[var(--color-primary)]/10 px-2.5 py-0.5 text-[10px] font-black text-[var(--color-primary-light)] group-hover:border-[var(--color-primary)]/50 transition">
                         {items.length}
                       </span>
@@ -311,11 +354,11 @@ export default function ServicesPage() {
                                   <span className="text-gradient-luxe text-sm font-black">#{s.service}</span>
                                   {(s as any).is_new && (
                                     <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-2 py-0.5 text-[9px] font-black text-black shadow-[0_0_12px_-2px_#f59e0b]">
-                                      <Sparkles size={9} /> جديد
+                                      <Sparkles size={9} /> {t("service.new")}
                                     </span>
                                   )}
                                 </div>
-                                <div className="mt-1 text-sm text-zinc-400 leading-relaxed">{s.name}</div>
+                                <div className="mt-1 text-sm text-zinc-400 leading-relaxed">{translateServiceName(s.name, locale)}</div>
                                 <div className="mt-2 flex gap-2 text-[10px] text-zinc-500">
                                   <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">min: {s.min}</span>
                                   <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">max: {s.max}</span>
@@ -323,7 +366,7 @@ export default function ServicesPage() {
                               </div>
                               <div className="text-left">
                                 <div className="text-lg font-black text-gradient-luxe">${Number(s.rate).toFixed(5)}</div>
-                                <div className="text-xs text-zinc-500">لكل 1000</div>
+                                <div className="text-xs text-zinc-500">{t("service.per1000")}</div>
                               </div>
                             </div>
                             <Link
@@ -331,7 +374,7 @@ export default function ServicesPage() {
                               className="btn-glow-pulse mt-3 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] py-2 text-sm font-bold text-white transition hover:brightness-110"
                             >
                               <ShoppingCart size={16} />
-                              اطلب هذه الخدمة
+                              {t("service.orderThis")}
                             </Link>
                           </div>
                         ))}
@@ -349,14 +392,14 @@ export default function ServicesPage() {
           open={showGuaranteed}
           onClose={() => setShowGuaranteed(false)}
           icon={<ShieldCheck size={22} className="text-white" />}
-          title="الخدمات المضمونة"
-          subtitle={guaranteedStep === "platform" ? "اختر المنصة" : `خدمات مضمونة لـ ${platformOrder.find((p) => p.id === guaranteedPlatform)?.name}`}
+          title={t("service.guaranteed")}
+          subtitle={guaranteedStep === "platform" ? t("service.platforms") : `${t("service.guaranteedFor")} ${guaranteedPlatform ? translatePlatform(guaranteedPlatform, locale) : ""}`}
           zIndex={100}
         >
 
               {guaranteedStep === "platform" ? (
                 <div className="space-y-3">
-                  <p className="text-sm text-zinc-400">اختر المنصة اللي تريد تشوف خدماتها المضمونة:</p>
+                  <p className="text-sm text-zinc-400">{t("service.guaranteedPrompt")}</p>
                   <div className="grid grid-cols-3 gap-3">
                     {platformList.map((p) => (
                       <button
@@ -365,7 +408,7 @@ export default function ServicesPage() {
                         className="flex flex-col items-center justify-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 transition hover:border-[var(--color-success)]/30 hover:bg-[var(--color-success)]/5"
                       >
                         <PlatformIcon name={p.id} className="h-7 w-7 text-white" animated />
-                        <span className="mt-2 text-[10px] font-bold text-zinc-300">{p.name}</span>
+                        <span className="mt-2 text-[10px] font-bold text-zinc-300">{p.id === "all" ? t("service.all") : translatePlatform(p.id, locale)}</span>
                       </button>
                     ))}
                   </div>
@@ -376,13 +419,13 @@ export default function ServicesPage() {
                     onClick={() => setGuaranteedStep("platform")}
                     className="text-sm font-bold text-green-400 hover:underline"
                   >
-                    ← تغيير المنصة
+                    {t("service.changePlatform")}
                   </button>
 
                       {guaranteedServices.length === 0 ? (
                     <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]/70 p-8 text-center text-zinc-500">
                       <ShieldCheck size={48} className="mx-auto mb-3 opacity-30" />
-                      <p>لا توجد خدمات مضمونة لهذه المنصة حالياً</p>
+                      <p>{t("service.noGuaranteed")}</p>
                     </div>
                   ) : (
                     <div className="space-y-4">
@@ -396,7 +439,7 @@ export default function ServicesPage() {
                               : "bg-[var(--color-surface)] text-zinc-400 border border-[var(--color-border)]"
                           }`}
                         >
-                          الكل
+                          {t("service.allShort")}
                         </button>
                         {guaranteedTypes.map((type) => (
                           <button
@@ -408,7 +451,7 @@ export default function ServicesPage() {
                                 : "bg-[var(--color-surface)] text-zinc-400 border border-[var(--color-border)]"
                             }`}
                           >
-                            {serviceTypeLabels[type] || type}
+                            {translateServiceType(type, locale)}
                           </button>
                         ))}
                       </div>
@@ -420,18 +463,18 @@ export default function ServicesPage() {
                               <div className="flex items-center gap-2">
                                 <span className="h-px flex-1 bg-[var(--color-border)]" />
                                 <span className="rounded-full bg-[var(--color-success)]/10 px-3 py-1 text-xs font-black text-[var(--color-success)]">
-                                  {serviceTypeLabels[type] || type} ({typeServices.length})
+                                  {translateServiceType(type, locale)} ({typeServices.length})
                                 </span>
                                 <span className="h-px flex-1 bg-[var(--color-border)]" />
                               </div>
                               {typeServices.map((s) => {
-                                const { badges } = detectGuarantees(s.name);
+                                const { badges } = detectGuarantees(s.name, t);
                                 return (
                                   <div key={s.service} className="rounded-2xl border border-[var(--color-success)]/20 bg-[var(--color-success)]/5 p-4">
                                     <div className="flex items-start justify-between gap-3">
                                       <div className="flex-1">
                                         <div className="font-bold text-white">#{s.service}</div>
-                                        <div className="mt-1 text-sm text-zinc-300 leading-relaxed">{s.name}</div>
+                                        <div className="mt-1 text-sm text-zinc-300 leading-relaxed">{translateServiceName(s.name, locale)}</div>
                                         <div className="mt-2 flex flex-wrap gap-1.5">
                                           {badges.map((badge, idx) => {
                                             const Icon = badge.icon;
@@ -445,7 +488,7 @@ export default function ServicesPage() {
                                       </div>
                                       <div className="text-left">
                                         <div className="text-lg font-black text-[var(--color-primary)]">${Number(s.rate).toFixed(5)}</div>
-                                        <div className="text-xs text-zinc-500">لكل 1000</div>
+                                        <div className="text-xs text-zinc-500">{t("service.per1000")}</div>
                                       </div>
                                     </div>
                                     <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
@@ -458,7 +501,7 @@ export default function ServicesPage() {
                                       className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green-600 to-emerald-500 py-2.5 text-sm font-bold text-white"
                                     >
                                       <ShoppingCart size={16} />
-                                      اطلب هذه الخدمة
+                                      {t("service.orderThis")}
                                     </Link>
                                   </div>
                                 );

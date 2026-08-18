@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import DashboardLayout from "../components/DashboardLayout";
-import Link from "next/link";
 import { KeyRound, Copy, Check, RefreshCw, Ban, Plus, ArrowLeft, Terminal, Wallet, Activity, GraduationCap, Server, ShieldAlert, Rocket, Repeat, Zap, AlertTriangle, Eye, EyeOff } from "lucide-react";
 
 interface ApiKey {
@@ -46,14 +46,29 @@ function CodeBox({ title, code, compact = false }: { title: string; code: string
 
 /** زر رجوع أنيق صغير بحد ذهبي لامع */
 function BackButton() {
+  const router = useRouter();
+  const goBack = () => {
+    if (typeof window !== "undefined") {
+      const referrer = document.referrer;
+      const sameOrigin = referrer.startsWith(window.location.origin);
+      const referrerPath = sameOrigin ? new URL(referrer).pathname : "";
+      if (sameOrigin && referrerPath && referrerPath !== "/login" && referrerPath !== "/register") {
+        router.back();
+        return;
+      }
+    }
+    router.push("/dashboard");
+  };
+
   return (
-    <Link
-      href="/"
+    <button
+      type="button"
+      onClick={goBack}
       className="group flex items-center gap-1.5 rounded-full border border-[var(--color-gold)]/40 bg-gradient-to-r from-[#2a1f0a] to-[#1a1205] px-3 py-1.5 text-[11px] font-black text-[var(--color-gold-bright)] shadow-[0_0_12px_-6px_rgba(255,215,0,0.4)] transition hover:border-[var(--color-gold)] hover:shadow-[0_0_16px_-4px_rgba(255,215,0,0.6)]"
     >
       <ArrowLeft size={13} className="transition group-hover:-translate-x-0.5 rtl:rotate-180" />
       رجوع
-    </Link>
+    </button>
   );
 }
 
@@ -63,14 +78,23 @@ export default function ApiAccessPage() {
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [apiBaseUrl, setApiBaseUrl] = useState("/api/v2");
 
   const refresh = async () => {
-    const res = await fetch("/api/api-access");
-    const data = await res.json();
-    if (data.keys) setKeys(data.keys);
-    fetch("/api/user")
-      .then((r) => r.json())
-      .then((d) => setBalance(Number(d.user?.balance || 0)));
+    try {
+      const [keyResponse, userResponse] = await Promise.all([
+        fetch("/api/api-access", { cache: "no-store" }),
+        fetch("/api/user", { cache: "no-store" }),
+      ]);
+      const data = await keyResponse.json();
+      const userData = await userResponse.json();
+      if (data.keys) setKeys(data.keys);
+      if (data.apiBaseUrl) setApiBaseUrl(String(data.apiBaseUrl));
+      setBalance(Number(userData.user?.balance || 0));
+      if (data.error) setMessage(String(data.error));
+    } catch {
+      setMessage("تعذر تحميل بيانات API مؤقتًا. اضغط إعادة المحاولة أو حدّث الصفحة.");
+    }
   };
 
   useEffect(() => {
@@ -85,31 +109,50 @@ export default function ApiAccessPage() {
 
   const create = async () => {
     setLoading(true);
-    const res = await fetch("/api/api-access", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "مفتاحي الرئيسي" }),
-    });
-    const data = await res.json();
-    setLoading(false);
-    if (data.error) setMessage(data.error);
-    else refresh();
+    setMessage(null);
+    try {
+      const res = await fetch("/api/api-access", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "مفتاحي الرئيسي" }),
+      });
+      const data = await res.json();
+      if (data.apiBaseUrl) setApiBaseUrl(String(data.apiBaseUrl));
+      if (data.error) setMessage(String(data.error));
+      else {
+        setMessage("تم إنشاء المفتاح ورابط API الخاص بك بنجاح");
+        await refresh();
+      }
+    } catch {
+      setMessage("تعذر إنشاء المفتاح الآن. حاول مرة أخرى.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const act = async (id: number, action: "revoke" | "regenerate") => {
-    const res = await fetch("/api/api-access", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, action }),
-    });
-    const data = await res.json();
-    if (data.error) setMessage(data.error);
-    else refresh();
+    setMessage(null);
+    try {
+      const res = await fetch("/api/api-access", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action }),
+      });
+      const data = await res.json();
+      if (data.apiBaseUrl) setApiBaseUrl(String(data.apiBaseUrl));
+      if (data.error) setMessage(String(data.error));
+      else {
+        setMessage(action === "revoke" ? "تم إلغاء المفتاح" : "تم تجديد المفتاح ورابط API ثابت");
+        await refresh();
+      }
+    } catch {
+      setMessage("تعذر تنفيذ العملية الآن. حاول مرة أخرى.");
+    }
   };
 
   const activeKey = keys.find((k) => Number(k.is_active));
-  const API_URL = "/api/v2";
-  const keyQuery = activeKey ? `?key=${activeKey.api_key}` : "";
+  const API_URL = apiBaseUrl;
+  const authHeader = activeKey ? `Authorization: Bearer ${activeKey.api_key}` : "Authorization: Bearer YOUR_API_KEY";
 
   return (
     <DashboardLayout>
@@ -128,6 +171,17 @@ export default function ApiAccessPage() {
           <BackButton />
         </div>
 
+        <div className="rounded-2xl border border-[var(--color-gold)]/30 bg-gradient-to-r from-[#2a1f0a] to-[#1a1205] p-4 shadow-[inset_0_0_24px_-16px_rgba(255,215,0,0.35)]">
+          <div className="mb-2 flex items-center gap-2 text-sm font-black text-white">
+            <Server size={16} className="text-[var(--color-gold-bright)]" /> عنوان ربط الخادم الخاص بك
+          </div>
+          <p className="mb-3 text-[11px] leading-relaxed text-zinc-400">استخدم هذا العنوان في السيرفر الخلفي لموقعك أو بوتك. لا تضع مفتاحك داخل كود المتصفح.</p>
+          <CodeBox title="رابط API v2 — الخدمات والطلبات" code={API_URL} />
+          <div className="mt-2 rounded-xl border border-[var(--color-gold)]/15 bg-black/30 px-3 py-2 text-[10px] text-zinc-400">
+            المصادقة: <code dir="ltr" className="font-mono text-green-400">{authHeader}</code>
+          </div>
+        </div>
+
         {/* ما هو API الخاص بي؟ — شرح مفصّل لوظيفة الـ API */}
         <div className="rounded-3xl border border-[var(--color-gold)]/30 bg-gradient-to-br from-[#33260c] via-[#241a08] to-[#171004] p-5 shadow-[0_0_40px_-16px_rgba(255,215,0,0.35),inset_0_1px_0_rgba(255,215,0,0.15)]">
           <div className="mb-3 flex items-center gap-2 text-sm font-black text-white">
@@ -143,7 +197,7 @@ export default function ApiAccessPage() {
           <div className="mt-3 space-y-2">
             {[
               { icon: Rocket, title: "أنشئ حسابك", text: "أنشئ حسابًا داخل المنصة وسجل دخولك إلى لوحة خدمات Follower" },
-              { icon: KeyRound, title: "ادخل إلى قسم الـ API", text: "افتح هذا القسم — ستجد عنوان الـ API الخاص بك ومفتاحك العشوائي الطويل يظهر لك هنا" },
+              { icon: KeyRound, title: "ادخل إلى قسم الـ API", text: "افتح هذا القسم — ستجد عنوان ربط الخادم ومفتاحك العشوائي الطويل ظاهرين لك هنا" },
               { icon: Terminal, title: "انسخ المفتاح واربطه", text: "انسخ المفتاح واستخدمه في موقعك أو بوتك لاستدعاء الخدمات وتنفيذ الطلبات" },
             ].map((s, i) => (
               <div key={i} className="flex items-start gap-2.5 rounded-2xl border border-[var(--color-gold)]/15 bg-[#241a08]/70 p-2.5">
@@ -237,7 +291,7 @@ export default function ApiAccessPage() {
           )}
 
           {message && (
-            <div className="mt-3 rounded-xl bg-red-500/10 p-3 text-xs font-bold text-red-400">{message}</div>
+            <div aria-live="polite" className="mt-3 rounded-xl border border-[var(--color-gold)]/20 bg-[var(--color-gold)]/10 p-3 text-xs font-bold text-[var(--color-gold-pale)]">{message}</div>
           )}
 
           {/* شرح الخصم من محفظتك */}
@@ -279,15 +333,19 @@ export default function ApiAccessPage() {
             <div className="space-y-2 text-[11px]">
               <CodeBox
                 title={`1. رابط البوابة (POST)`}
-                code={`POST ${API_URL}${keyQuery}`}
+                code={`POST ${API_URL}`}
               />
               <CodeBox
                 title={`2. جلب الخدمات المتاحة (GET)`}
-                code={`GET ${API_URL}${keyQuery}`}
+                code={`GET ${API_URL}`}
                 compact
               />
               <CodeBox
-                title="3. إرسال طلب — جسم JSON"
+                title="3. ترويسة المصادقة"
+                code={authHeader}
+              />
+              <CodeBox
+                title="4. إرسال طلب — جسم JSON"
                 code={`{"service": "1", "link": "https://instagram.com/user", "quantity": 1000}`}
               />
               <p className="text-zinc-500">

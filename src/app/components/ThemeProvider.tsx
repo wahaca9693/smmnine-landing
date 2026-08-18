@@ -5,7 +5,11 @@ import { useLiveRefresh } from "./useLiveRefresh";
 
 interface SiteSettings {
   siteName: string;
+  siteDescription: string;
+  defaultCurrency: string;
   primaryColor: string;
+  secondaryColor: string;
+  primaryLight: string;
   backgroundColor: string;
   cardColor: string;
   surfaceColor: string;
@@ -20,7 +24,11 @@ interface ThemeContextType {
 
 const defaultSettings: SiteSettings = {
   siteName: "Follower",
+  siteDescription: "منصة خدمات تسويق اجتماعي احترافية",
+  defaultCurrency: "USD",
   primaryColor: "var(--color-primary)",
+  secondaryColor: "#fbbf24",
+  primaryLight: "#fdba74",
   backgroundColor: "var(--color-bg)",
   cardColor: "var(--color-card)",
   surfaceColor: "var(--color-surface)",
@@ -64,10 +72,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const root = document.documentElement;
     root.style.setProperty("--color-primary", settings.primaryColor);
     root.style.setProperty("--color-primary-dark", darken(settings.primaryColor, 15));
+    root.style.setProperty("--color-gold", settings.secondaryColor);
+    root.style.setProperty("--color-gold-bright", settings.primaryLight);
     root.style.setProperty("--color-bg", settings.backgroundColor);
     root.style.setProperty("--color-card", settings.cardColor);
     root.style.setProperty("--color-surface", settings.surfaceColor);
     root.style.setProperty("--color-border", settings.borderColor);
+    if (settings.siteName) document.title = settings.siteName;
   }, [settings]);
 
   return (

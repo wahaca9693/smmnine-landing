@@ -4,8 +4,14 @@ import bcrypt from "bcryptjs";
 async function seed() {
   await initDb();
 
-  const adminPassword = await bcrypt.hash("Admin@123", 10);
-  const userPassword = await bcrypt.hash("User@123", 10);
+  const adminSeedPassword = process.env.SEED_ADMIN_PASSWORD;
+  const userSeedPassword = process.env.SEED_USER_PASSWORD;
+  if (!adminSeedPassword || !userSeedPassword) {
+    throw new Error("SEED_ADMIN_PASSWORD and SEED_USER_PASSWORD must be set outside Git");
+  }
+
+  const adminPassword = await bcrypt.hash(adminSeedPassword, 10);
+  const userPassword = await bcrypt.hash(userSeedPassword, 10);
 
   try {
     await db.execute({

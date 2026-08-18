@@ -56,9 +56,11 @@ export async function POST(request: Request) {
         return json({ error: `الكمية يجب أن تكون بين ${min} و ${max}` }, { status: 400 });
       }
 
+      const storedMarkup = Number(providerService.markup_percent);
+      const safeMarkup = Number.isFinite(storedMarkup) && storedMarkup >= 0 ? storedMarkup : 0;
       const sellRate = providerService.sell_rate != null
         ? Number(providerService.sell_rate)
-        : Number(providerService.rate) * (1 + (Number(providerService.markup_percent) || 30) / 100);
+        : Number(providerService.rate) * (1 + safeMarkup / 100);
       const cost = (sellRate * qty) / 1000;
       if (!Number.isFinite(cost) || cost < 0) {
         return json({ error: "سعر الخدمة غير صالح" }, { status: 500 });

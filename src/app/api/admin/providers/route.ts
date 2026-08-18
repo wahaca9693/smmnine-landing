@@ -2,92 +2,139 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { db, initDb } from "@/lib/db";
 
-const DEFAULT_MARKUP = 30; // هامش الربح الافتراضي %
+const DEFAULT_MARKUP = 0; // لا يوجد هامش تلقائي؛ يفعّله الأدمن صراحةً فقط
 
-function applyMarkup(rate: number, markup: number): number {
-  return Math.round((rate * (1 + markup / 100)) * 1000) / 1000;
+function roundRate(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
 }
 
-// اختبار الاتصال بالمزود (SMM Panels API القياسي)
-async function testProvider(apiUrl: string, apiKey: string): Promise<{ ok: boolean; balance?: string; error?: string }> {
-  const url = String(apiUrl).replace(/\/+$/, "");
-  const body = new URLSearchParams({ key: apiKey, action: "services" });
-  try {
-    const res = await fetch(url + "/api/v2", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
-      cache: "no-store",
-      signal: AbortSignal.timeout(15000),
-      redirect: "follow",
-    });
-    let data: any = null;
+function applyMarkup(rate: number, markup: number): number {
+  return roundRate(rate * (1 + markup / 100));
+}
+
+function resolveSellRate(rate: number, markup: number, pricingMode?: string, manualPrice?: number): number {
+  if (pricingMode === "manual") {
+    const direct = Number(manualPrice);
+    return Number.isFinite(direct) && direct >= 0 ? roundRate(direct) : applyMarkup(rate, markup);
+  }
+  return applyMarkup(rate, markup);
+}
+
+function parsePricing(body: any, fallbackMarkup = DEFAULT_MARKUP, fallbackMode = "markup", fallbackManual: number | null = null) {
+  const rawMarkup = body?.markup_percent;
+  const markup = rawMarkup === undefined || rawMarkup === "" ? fallbackMarkup : Number(rawMarkup);
+  const safeMarkup = Number.isFinite(markup) && markup >= 0 ? markup : fallbackMarkup;
+  const mode = body?.pricing_mode === "manual" ? "manual" : (body?.pricing_mode === "markup" ? "markup" : fallbackMode);
+  const rawManual = body?.manual_price;
+  const manual = rawManual === undefined || rawManual === "" ? fallbackManual : Number(rawManual);
+  const safeManual = manual !== null && Number.isFinite(manual) && manual >= 0 ? manual : null;
+  return { markup: safeMarkup, mode, manual: safeManual, sellRate: resolveSellRate(0, safeMarkup, mode, safeManual ?? undefined) };
+}
+
+type ProviderProbe = { ok: boolean; balance?: string; error?: string; endpoint?: string };
+
+type ProviderResponse = { response: Response; data: any; endpoint: string };
+
+/**
+ * يدعم الرابط الأساسي ورابط endpoint كاملًا، ويمنع الحالات الشائعة مثل
+ * /api/v2/api/v2 أو وجود slash زائد في النهاية.
+ */
+function providerEndpointCandidates(input: string): string[] {
+  const raw = String(input || "").trim();
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  const parsed = new URL(withProtocol);
+  if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname) {
+    throw new Error("يجب أن يبدأ رابط المزود بـ http:// أو https://");
+  }
+  const origin = parsed.origin;
+  const directPath = parsed.pathname.replace(/\/+$/, "");
+  const basePath = directPath
+    .replace(/(?:\/api\/v2(?:\/index\.php)?)$/i, "")
+    .replace(/\/+$/, "");
+  const direct = `${origin}${directPath || ""}`;
+  const standard = `${origin}${basePath}/api/v2`;
+  return [...new Set([direct, standard].filter((value) => value && value !== origin))];
+}
+
+function normalizeProviderBaseUrl(input: string): string {
+  const raw = String(input || "").trim();
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  const parsed = new URL(withProtocol);
+  if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname) {
+    throw new Error("رابط المزود غير صالح — استخدم عنوانًا يبدأ بـ https://");
+  }
+  const path = parsed.pathname
+    .replace(/(?:\/api\/v2(?:\/index\.php)?)$/i, "")
+    .replace(/\/+$/, "");
+  return `${parsed.origin}${path}`;
+}
+
+async function postProviderAction(apiUrl: string, apiKey: string, action: string, timeoutMs: number): Promise<ProviderResponse> {
+  const body = new URLSearchParams({ key: apiKey, action });
+  let last: ProviderResponse | null = null;
+  let lastError: unknown = null;
+  for (const endpoint of providerEndpointCandidates(apiUrl)) {
     try {
-      data = await res.json();
-    } catch {
-      data = null;
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+        body,
+        cache: "no-store",
+        signal: AbortSignal.timeout(timeoutMs),
+        redirect: "follow",
+      });
+      const text = await response.text();
+      let data: any = null;
+      try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text.slice(0, 240) }; }
+      last = { response, data, endpoint };
+      // 404 يعني أن هذه الصيغة ليست endpoint الصحيح؛ نجرب الصيغة البديلة فقط.
+      if (response.status !== 404) return last;
+    } catch (error) {
+      lastError = error;
     }
-    const msg = String(data?.error || "").toLowerCase();
-    if (!res.ok) {
-      if (msg.includes("invalid key") || msg.includes("invalid api key") || msg.includes("key") || res.status === 401) {
-        return { ok: false, error: "مفتاح API غير صالح — تحقق من مفتاحك في لوحة المزود الخارجي" };
-      }
-      if (res.status === 404) {
-        return { ok: false, error: "رابط API غير صحيح — استخدم رابط لوحة المزود بدون /api/v2 (النظام يضيفه تلقائيًا)" };
-      }
-      return { ok: false, error: `HTTP ${res.status}: ${data?.error || "المزود يرفض الاتصال"}` };
-    }
-    if (Array.isArray(data)) {
-      return { ok: true, balance: `${data.length} خدمة` };
-    }
-    if (data.error) {
-      const e = String(data.error).toLowerCase();
-      if (e.includes("key") || res.status === 401) {
-        return { ok: false, error: "مفتاح API غير صالح — تحقق من مفتاحك في لوحة المزود الخارجي" };
-      }
-      return { ok: false, error: String(data.error) };
-    }
-    return { ok: true, balance: String(data.balance || data.remaining || "") };
+  }
+  if (last) return last;
+  throw lastError instanceof Error ? lastError : new Error("تعذر الاتصال بالمزود");
+}
+
+function providerError(data: any, status: number): string {
+  const message = String(data?.error || data?.message || "").trim();
+  const lower = message.toLowerCase();
+  if (status === 401 || lower.includes("invalid key") || lower.includes("invalid api key") || lower.includes("api key") || lower.includes("key is")) {
+    return "مفتاح API غير صالح — تأكد من نسخه من لوحة المزود وأنه مفعّل";
+  }
+  if (status === 404) return "لم يُعثر على endpoint الخدمات. جرّب رابط اللوحة الأساسي أو الرابط المنتهي بـ /api/v2";
+  if (status >= 400) return `المزود رفض الاتصال (HTTP ${status})${message ? `: ${message}` : ""}`;
+  if (message) return message;
+  return "استجابة غير مفهومة من المزود";
+}
+
+// اختبار الاتصال بالمزود عبر services فقط؛ لا ينشئ طلبًا ولا يخصم رصيدًا.
+async function testProvider(apiUrl: string, apiKey: string): Promise<ProviderProbe> {
+  try {
+    const { response, data, endpoint } = await postProviderAction(apiUrl, apiKey, "services", 15000);
+    if (!response.ok || data?.error) return { ok: false, error: providerError(data, response.status), endpoint };
+    if (Array.isArray(data)) return { ok: true, balance: `${data.length} خدمة`, endpoint };
+    return { ok: false, error: "المزود استجاب، لكن تنسيق services غير قياسي — يجب أن يعيد قائمة JSON", endpoint };
   } catch (err: any) {
-    const e = String(err.message || "");
-    if (e.includes("fetch") && (e.includes("failed") || e.includes("timed") || e.includes("timeout"))) {
-      return { ok: false, error: "تعذر الاتصال بالسيرفر — تحقق من الرابط أو أن السيرفر يحجب المنطقة" };
-    }
-    return { ok: false, error: "تعذر الاتصال بالمزود — تحقق من الرابط" };
+    const message = String(err?.message || "").toLowerCase();
+    if (message.includes("timeout") || message.includes("aborted")) return { ok: false, error: "انتهت مهلة الاتصال بالمزود — تحقق من الرابط أو جدار الحماية" };
+    if (message.includes("invalid url") || message.includes("url")) return { ok: false, error: "رابط API غير صالح — استخدم عنوانًا يبدأ بـ https://" };
+    return { ok: false, error: "تعذر الوصول إلى المزود — تحقق من DNS وSSL والسماح بالاتصال الخارجي" };
   }
 }
 
 async function fetchProviderServices(apiUrl: string, apiKey: string): Promise<any[]> {
-  const url = String(apiUrl).replace(/\/+$/, "");
-  const body = new URLSearchParams({ key: apiKey, action: "services" });
-  const res = await fetch(url + "/api/v2", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-    cache: "no-store",
-    signal: AbortSignal.timeout(20000),
-  });
-  const data = await res.json();
-  if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
-  if (!Array.isArray(data)) throw new Error("استجابة غير صالحة من المزود");
+  const { response, data } = await postProviderAction(apiUrl, apiKey, "services", 20000);
+  if (!response.ok || data?.error) throw new Error(providerError(data, response.status));
+  if (!Array.isArray(data)) throw new Error("استجابة services غير صالحة؛ يجب أن تكون قائمة JSON");
   return data;
 }
 
 async function fetchProviderBalance(apiUrl: string, apiKey: string): Promise<string> {
-  const url = String(apiUrl).replace(/\/+$/, "");
-  const body = new URLSearchParams({ key: apiKey, action: "balance" });
   try {
-    const res = await fetch(url + "/api/v2", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
-      cache: "no-store",
-      signal: AbortSignal.timeout(15000),
-    });
-    const data = await res.json();
-    if (res.ok && !data.error) {
-      return String(data.balance ?? data.remaining ?? "");
-    }
+    const { response, data } = await postProviderAction(apiUrl, apiKey, "balance", 15000);
+    if (response.ok && !data?.error) return String(data?.balance ?? data?.remaining ?? "");
     return "غير متاح";
   } catch {
     return "غير متاح";
@@ -192,17 +239,28 @@ export async function POST(request: Request) {
       if (!name || !api_url || !api_key) {
         return NextResponse.json({ error: "جميع الحقول مطلوبة" }, { status: 400 });
       }
+      let normalizedUrl = "";
+      try {
+        normalizedUrl = normalizeProviderBaseUrl(String(api_url));
+      } catch (err: any) {
+        return NextResponse.json({ error: err?.message || "رابط API غير صالح" }, { status: 400 });
+      }
       const trimmed = {
         name: String(name).trim(),
-        api_url: String(api_url).trim().replace(/\/+$/, ""),
+        api_url: normalizedUrl,
         api_key: String(api_key).trim(),
         notes: notes ? String(notes).trim() : "",
       };
-      // اختبار الاتصال قبل الحفظ
+      if (trimmed.api_key.length < 8) {
+        return NextResponse.json({ error: "مفتاح API قصير جدًا — أدخل المفتاح الكامل من لوحة المزود" }, { status: 400 });
+      }
+      // اختبار services للقراءة فقط قبل الحفظ؛ لا يتم إنشاء أي طلب.
       const probe = await testProvider(trimmed.api_url, trimmed.api_key);
       if (!probe.ok) {
         return NextResponse.json({ error: `فشل الاتصال بالمزود: ${probe.error}` }, { status: 400 });
       }
+      // نحفظ المسار الذي نجح فعليًا كي تبقى المزامنة متوافقة مع index.php أو المسارات المخصصة.
+      if (probe.endpoint) trimmed.api_url = probe.endpoint;
       const balance = await fetchProviderBalance(trimmed.api_url, trimmed.api_key);
       if (id) {
         await db.execute({
@@ -225,15 +283,18 @@ export async function POST(request: Request) {
       const p = prov.rows[0] as any;
       if (!p) return NextResponse.json({ error: "المزود غير موجود" }, { status: 404 });
       const services = await fetchProviderServices(p.api_url, p.api_key);
-      const markupPct = Number(markup ?? p.markup_percent ?? DEFAULT_MARKUP) || DEFAULT_MARKUP;
+      const pricingEnabled = body?.pricing_enabled === true;
+      const pricing = parsePricing({ markup_percent: markup }, pricingEnabled ? Number(p.markup_percent ?? DEFAULT_MARKUP) : 0);
+      const markupPct = pricingEnabled ? pricing.markup : 0;
       // حذف خدمات المزود القديمة واستيراد الجديدة
       await db.execute({ sql: "DELETE FROM provider_services WHERE provider_id = ?", args: [Number(providerId)] });
       let inserted = 0;
       for (const s of services) {
-        const sellRate = applyMarkup(Number(s.rate) || 0, markupPct);
+        const costRate = Number(s.rate) || 0;
+        const sellRate = pricingEnabled ? applyMarkup(costRate, markupPct) : roundRate(costRate);
         await db.execute({
-          sql: `INSERT INTO provider_services (provider_id, remote_service_id, name, category, rate, min, max, type, markup_percent, sell_rate, is_new)
-                VALUES (?,?,?,?,?,?,?,?,?,?,1)`,
+          sql: `INSERT INTO provider_services (provider_id, remote_service_id, name, category, rate, min, max, type, markup_percent, sell_rate, pricing_mode, manual_price, is_new)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)`,
           args: [
             Number(providerId),
             String(s.service),
@@ -245,6 +306,8 @@ export async function POST(request: Request) {
             String(s.type || ""),
             markupPct,
             sellRate,
+            "markup",
+            pricingEnabled ? null : null,
           ],
         });
         inserted++;
@@ -308,7 +371,7 @@ export async function POST(request: Request) {
     // 6-ب) إضافة انتقائية لخدمة واحدة من مزود مربوط (مع وسم جديد + سعر عرض)
     if (action === "add-service") {
       const providerId = Number(body.provider_id ?? body.providerId);
-      const { remote_service_id, markup_percent } = body;
+      const { remote_service_id } = body;
       const prov = await db.execute({ sql: "SELECT * FROM providers WHERE id = ?", args: [Number(providerId)] });
       const p = prov.rows[0] as any;
       if (!p) return NextResponse.json({ error: "المزود غير موجود" }, { status: 404 });
@@ -316,9 +379,10 @@ export async function POST(request: Request) {
         const services = await fetchProviderServices(p.api_url, p.api_key);
         const target = services.find((s: any) => String(s.service) === String(remote_service_id));
         if (!target) return NextResponse.json({ error: "الخدمة غير موجودة لدى المزود" }, { status: 404 });
-        const markupPct = Number(markup_percent ?? p.markup_percent ?? DEFAULT_MARKUP) || DEFAULT_MARKUP;
+        const pricing = parsePricing(body, DEFAULT_MARKUP);
+        const markupPct = pricing.markup;
         const costRate = Number.isFinite(Number(target.rate)) ? Number(target.rate) : 0;
-        const sellRate = applyMarkup(costRate, markupPct);
+        const sellRate = resolveSellRate(costRate, markupPct, pricing.mode, pricing.manual ?? undefined);
         console.error("DEBUG add-service target:", JSON.stringify(target));
         const exists = await db.execute({
           sql: "SELECT id FROM provider_services WHERE provider_id = ? AND remote_service_id = ?",
@@ -326,18 +390,91 @@ export async function POST(request: Request) {
         });
         if ((exists.rows as any[]).length > 0) return NextResponse.json({ error: "الخدمة مضافة مسبقًا" }, { status: 409 });
         await db.execute({
-          sql: `INSERT INTO provider_services (provider_id, remote_service_id, name, category, rate, min, max, type, markup_percent, sell_rate, is_active, is_new)
-                VALUES (?,?,?,?,?,?,?,?,?,?,1,1)`,
+          sql: `INSERT INTO provider_services (provider_id, remote_service_id, name, category, rate, min, max, type, markup_percent, sell_rate, pricing_mode, manual_price, is_active, is_new)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,1)`,
           args: [
             Number(providerId), String(target.service), String(target.name || ""), String(target.category || ""),
             costRate, Number(target.min) || 0, Number(target.max) || 0, String(target.type || ""),
-            markupPct, sellRate,
+            markupPct, sellRate, pricing.mode, pricing.manual,
           ],
         });
         return NextResponse.json({ ok: true, service: { ...target, markup_percent: markupPct, sell_rate: sellRate } });
       } catch (err: any) {
         return NextResponse.json({ error: "تعذر إضافة الخدمة: " + (err.message || "") }, { status: 502 });
       }
+    }
+
+    // 6-ب-2) إضافة مجموعة خدمات من الكتالوج المعروض في دفعة واحدة
+    if (action === "bulk-add-services") {
+      const providerId = Number(body.provider_id ?? body.providerId);
+      const incoming = Array.isArray(body.services) ? body.services : [];
+      if (!Number.isInteger(providerId) || providerId <= 0) {
+        return NextResponse.json({ error: "معرّف المزود غير صالح" }, { status: 400 });
+      }
+      if (incoming.length === 0) {
+        return NextResponse.json({ error: "لم تُرسل أي خدمات للإضافة" }, { status: 400 });
+      }
+      if (incoming.length > 10000) {
+        return NextResponse.json({ error: "الدفعة كبيرة جدًا — قسّم الخدمات إلى دفعات أصغر" }, { status: 413 });
+      }
+      const provider = await db.execute({ sql: "SELECT id FROM providers WHERE id = ?", args: [providerId] });
+      if (!provider.rows.length) return NextResponse.json({ error: "المزود غير موجود" }, { status: 404 });
+
+      const existingRows = await db.execute({
+        sql: "SELECT remote_service_id FROM provider_services WHERE provider_id = ?",
+        args: [providerId],
+      });
+      const knownIds = new Set((existingRows.rows as any[]).map((row) => String(row.remote_service_id)));
+      const pricingEnabled = body?.pricing_enabled === true;
+      const pricing = parsePricing(body, pricingEnabled ? DEFAULT_MARKUP : 0);
+      const markupPct = pricingEnabled ? pricing.markup : 0;
+      const statements: any[] = [];
+      let skipped = 0;
+      let invalid = 0;
+
+      for (const raw of incoming) {
+        const remoteId = String(raw?.service ?? raw?.remote_service_id ?? raw?.id ?? "").trim();
+        if (!remoteId || knownIds.has(remoteId)) {
+          if (remoteId) skipped++;
+          else invalid++;
+          continue;
+        }
+        const rate = Number(raw?.rate);
+        const min = Number(raw?.min);
+        const max = Number(raw?.max);
+        if (!Number.isFinite(rate) || rate < 0) {
+          invalid++;
+          continue;
+        }
+        const name = String(raw?.name ?? `Service ${remoteId}`).trim() || `Service ${remoteId}`;
+        const category = String(raw?.category ?? "").trim();
+        const type = String(raw?.type ?? "").trim();
+        const sellRate = pricingEnabled ? resolveSellRate(rate, markupPct, pricing.mode, pricing.manual ?? undefined) : roundRate(rate);
+        statements.push({
+          sql: `INSERT INTO provider_services (provider_id, remote_service_id, name, category, rate, min, max, type, markup_percent, sell_rate, pricing_mode, manual_price, is_active, is_new)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,1)`,
+          args: [providerId, remoteId, name, category, rate, Number.isFinite(min) ? min : 0, Number.isFinite(max) ? max : 0, type, markupPct, sellRate, pricing.mode, pricing.manual],
+        });
+        knownIds.add(remoteId);
+      }
+
+      if (statements.length) await db.batch(statements, "write");
+      return NextResponse.json({ ok: true, added: statements.length, skipped, invalid });
+    }
+
+    // 6-ب-3) حذف مجموعة خدمات محددة أو كل خدمات مزود
+    if (action === "delete-services") {
+      const providerId = Number(body.provider_id ?? body.providerId);
+      const ids = Array.isArray(body.ids) ? body.ids.map((id: unknown) => Number(id)).filter((id: number) => Number.isInteger(id) && id > 0) : [];
+      if (!Number.isInteger(providerId) || providerId <= 0) return NextResponse.json({ error: "معرّف المزود غير صالح" }, { status: 400 });
+      if (ids.length > 5000) return NextResponse.json({ error: "عدد الخدمات كبير جدًا — نفذ الحذف على دفعات" }, { status: 413 });
+      if (ids.length === 0) {
+        const result = await db.execute({ sql: "DELETE FROM provider_services WHERE provider_id = ?", args: [providerId] });
+        return NextResponse.json({ ok: true, deleted: Number((result as any).rowsAffected || 0), scope: "provider" });
+      }
+      const placeholders = ids.map(() => "?").join(",");
+      const result = await db.execute({ sql: `DELETE FROM provider_services WHERE provider_id = ? AND id IN (${placeholders})`, args: [providerId, ...ids] });
+      return NextResponse.json({ ok: true, deleted: Number((result as any).rowsAffected || 0), scope: "selected" });
     }
 
     // 6-ج) تعديل اسم أي خدمة (ينطبق فورًا على كل المستخدمين)
@@ -354,30 +491,73 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
-    // 7) تحديث هامش ربح خدمة
+    // 7) تحديث نسبة الربح أو سعر البيع المباشر لخدمة واحدة
     if (action === "update-service") {
-      const { id, markup_percent, is_active } = body;
-      const svc = await db.execute({ sql: "SELECT rate, markup_percent FROM provider_services WHERE id = ?", args: [Number(id)] });
+      const { id, is_active } = body;
+      const svc = await db.execute({ sql: "SELECT rate, markup_percent, pricing_mode, manual_price FROM provider_services WHERE id = ?", args: [Number(id)] });
       const s = svc.rows[0] as any;
       if (!s) return NextResponse.json({ error: "الخدمة غير موجودة" }, { status: 404 });
-      const markupPct = Number(markup_percent ?? s.markup_percent ?? DEFAULT_MARKUP);
-      const sellRate = applyMarkup(Number(s.rate) || 0, markupPct);
+      const pricing = parsePricing(body, Number(s.markup_percent ?? DEFAULT_MARKUP), String(s.pricing_mode || "markup"), s.manual_price == null ? null : Number(s.manual_price));
+      const sellRate = resolveSellRate(Number(s.rate) || 0, pricing.markup, pricing.mode, pricing.manual ?? undefined);
       await db.execute({
-        sql: `UPDATE provider_services SET markup_percent=?, sell_rate=?, is_active=${is_active !== undefined ? is_active : 1}, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-        args: [markupPct, sellRate, Number(id)],
+        sql: `UPDATE provider_services SET markup_percent=?, pricing_mode=?, manual_price=?, sell_rate=?, is_active=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+        args: [pricing.markup, pricing.mode, pricing.mode === "manual" ? pricing.manual : null, sellRate, is_active === undefined ? Number(s.is_active ?? 1) : (Number(is_active) ? 1 : 0), Number(id)],
       });
-      return NextResponse.json({ ok: true, sell_rate: sellRate });
+      return NextResponse.json({ ok: true, pricing_mode: pricing.mode, manual_price: pricing.manual, sell_rate: sellRate });
     }
 
-    // 8) تحديث هامش جميع خدمات المزود دفعة واحدة
+    // 8) تحديث نسبة أو سعر مباشر لنطاق صريح من خدمات المزود
     if (action === "update-provider-services") {
-      const { providerId, markup_percent } = body;
-      const markupPct = Number(markup_percent) || 0;
-      await db.execute({
-        sql: `UPDATE provider_services SET markup_percent=?, sell_rate = ROUND(rate * (1 + ? / 100), 3), updated_at=CURRENT_TIMESTAMP WHERE provider_id=?`,
-        args: [markupPct, markupPct / 100, Number(providerId)],
+      const providerId = Number(body.providerId ?? body.provider_id);
+      const pricing = parsePricing(body, 0);
+      const requestedScope = String(body.scope || "provider");
+      const scope = requestedScope === "selected" || requestedScope === "category" ? requestedScope : "provider";
+      const ids = Array.isArray(body.ids)
+        ? body.ids.map((id: unknown) => Number(id)).filter((id: number) => Number.isInteger(id) && id > 0)
+        : [];
+      const category = String(body.category || "").trim();
+      if (!Number.isInteger(providerId) || providerId <= 0) return NextResponse.json({ error: "معرّف المزود غير صالح" }, { status: 400 });
+      if (scope === "selected" && ids.length === 0) return NextResponse.json({ error: "حدد خدمة واحدة على الأقل أو اختر تطبيقًا على المزود كاملًا" }, { status: 400 });
+      if (scope === "category" && !category) return NextResponse.json({ error: "حدد تصنيفًا أو منصة لتطبيق التسعير عليها" }, { status: 400 });
+      if (ids.length > 5000) return NextResponse.json({ error: "عدد الخدمات كبير جدًا — نفّذ التحديث على دفعات أصغر" }, { status: 413 });
+      if (pricing.mode === "manual" && pricing.manual === null) return NextResponse.json({ error: "أدخل سعر العرض المباشر" }, { status: 400 });
+      const where = scope === "selected"
+        ? `WHERE provider_id=? AND id IN (${ids.map(() => "?").join(",")})`
+        : scope === "category"
+          ? "WHERE provider_id=? AND (category=? OR type=?)"
+          : "WHERE provider_id=?";
+      const args = scope === "selected"
+        ? [pricing.markup, pricing.mode, pricing.mode === "manual" ? pricing.manual : null, pricing.mode, pricing.manual ?? 0, pricing.markup, providerId, ...ids]
+        : scope === "category"
+          ? [pricing.markup, pricing.mode, pricing.mode === "manual" ? pricing.manual : null, pricing.mode, pricing.manual ?? 0, pricing.markup, providerId, category, category]
+          : [pricing.markup, pricing.mode, pricing.mode === "manual" ? pricing.manual : null, pricing.mode, pricing.manual ?? 0, pricing.markup, providerId];
+      const result = await db.execute({
+        sql: `UPDATE provider_services SET markup_percent=?, pricing_mode=?, manual_price=?, sell_rate=CASE WHEN ? = 'manual' THEN ? ELSE ROUND(rate * (1 + ? / 100), 6) END, updated_at=CURRENT_TIMESTAMP ${where}`,
+        args,
       });
-      return NextResponse.json({ ok: true });
+      return NextResponse.json({ ok: true, updated: Number((result as any).rowsAffected || 0), scope, pricing_mode: pricing.mode, manual_price: pricing.manual });
+    }
+
+    // 9) إلغاء أي هامش أو سعر مباشر وإعادة كل الخدمات إلى تكلفة المزود
+    if (action === "reset-provider-pricing") {
+      const providerId = Number(body.providerId ?? body.provider_id);
+      const requestedScope = String(body.scope || "provider");
+      const scope = requestedScope === "selected" || requestedScope === "category" ? requestedScope : "provider";
+      const ids = Array.isArray(body.ids)
+        ? body.ids.map((id: unknown) => Number(id)).filter((id: number) => Number.isInteger(id) && id > 0)
+        : [];
+      const category = String(body.category || "").trim();
+      if (!Number.isInteger(providerId) || providerId <= 0) return NextResponse.json({ error: "معرّف المزود غير صالح" }, { status: 400 });
+      if (scope === "selected" && ids.length === 0) return NextResponse.json({ error: "حدد خدمات لإلغاء النسبة عنها" }, { status: 400 });
+      if (scope === "category" && !category) return NextResponse.json({ error: "حدد تصنيفًا أو منصة لإلغاء التسعير عنها" }, { status: 400 });
+      const where = scope === "selected"
+        ? `WHERE provider_id=? AND id IN (${ids.map(() => "?").join(",")})`
+        : scope === "category"
+          ? "WHERE provider_id=? AND (category=? OR type=?)"
+          : "WHERE provider_id=?";
+      const args = scope === "selected" ? [providerId, ...ids] : scope === "category" ? [providerId, category, category] : [providerId];
+      const result = await db.execute({ sql: `UPDATE provider_services SET markup_percent=0, pricing_mode='markup', manual_price=NULL, sell_rate=ROUND(rate, 6), updated_at=CURRENT_TIMESTAMP ${where}`, args });
+      return NextResponse.json({ ok: true, updated: Number((result as any).rowsAffected || 0), scope });
     }
 
     return NextResponse.json({ error: "إجراء غير معروف" }, { status: 400 });

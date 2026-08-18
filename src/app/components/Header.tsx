@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Menu, User, Bell, X } from "lucide-react";
 import Image from "next/image";
 import { useLanguage } from "./LanguageProvider";
+import { useTheme } from "./ThemeProvider";
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -13,6 +14,7 @@ interface HeaderProps {
 
 export default function Header({ onMenuClick, user, unreadNotifications = 0 }: HeaderProps) {
   const { t } = useLanguage();
+  const { settings } = useTheme();
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
 
@@ -42,10 +44,10 @@ export default function Header({ onMenuClick, user, unreadNotifications = 0 }: H
       <div className="flex items-center gap-2">
         <img
           src="/logo.gif"
-          alt="Follower"
+          alt={settings.siteName || "Follower"}
           className="h-10 w-10 rounded-xl object-cover"
         />
-        <span className="text-xl font-black text-gradient-luxe">Follower</span>
+        <span className="max-w-[150px] truncate text-xl font-black text-gradient-luxe">{settings.siteName || "Follower"}</span>
       </div>
 
       {/* Icons on the left (RTL visual right) */}

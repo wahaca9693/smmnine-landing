@@ -1,12 +1,11 @@
 "use client";
 
-import { useState } from "react";
+
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import {
   X,
   User,
-  Globe,
   Boxes,
   ShoppingCart,
   Zap,
@@ -19,10 +18,10 @@ import {
   LogOut,
   Shield,
   FileText,
-  Check,
   KeyRound,
+  Settings,
 } from "lucide-react";
-import { useLanguage, type Locale } from "./LanguageProvider";
+import { useLanguage } from "./LanguageProvider";
 
 interface SidebarProps {
   open: boolean;
@@ -34,62 +33,19 @@ type MenuItem =
   | { type: "link"; label: string; href: string; icon?: React.ElementType; badge?: string; badgeColor?: string }
   | { type: "action"; label: string; action: () => void; icon?: React.ElementType; badge?: string; badgeColor?: string };
 
-/** أعلام SVG مخصصة: علم الإمارات وعلم الولايات المتحدة */
-function FlagIcon({ lang, className = "" }: { lang: Locale; className?: string }) {
-  return (
-    <span className={`inline-flex h-6 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[var(--color-border)] ${className}`}>
-      {lang === "ar" ? (
-        /* UAE flag: green, white, black stripes + red vertical bar */
-        <svg viewBox="0 0 27 18" className="h-full w-full">
-          <rect width="27" height="6" y="0" fill="#00732F" />
-          <rect width="27" height="6" y="6" fill="#FFFFFF" />
-          <rect width="27" height="6" y="12" fill="#000000" />
-          <rect width="7" height="18" x="0" fill="#FF0000" />
-        </svg>
-      ) : (
-        /* US flag: simplified stripes + blue canton with star dots */
-        <svg viewBox="0 0 27 18" className="h-full w-full">
-          <rect width="27" height="18" fill="#FFFFFF" />
-          {[0, 2, 4, 6, 8, 10, 12].map((y) => (
-            <rect key={y} width="27" height={18 / 13} y={(y * 18) / 13} fill="#B22234" />
-          ))}
-          <rect width="10.8" height={18 * 7 / 13} fill="#3C3B6E" />
-          {[0, 1, 2, 3].map((r) =>
-            [0, 1, 2, 3, 4].map((c) => (
-              <circle key={`${r}-${c}`} cx={1.08 + c * 2.16} cy={0.8 + r * 1.08} r={0.4} fill="#FFFFFF" />
-            ))
-          )}
-        </svg>
-      )}
-    </span>
-  );
-}
-
 export default function Sidebar({ open, onClose, user }: SidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { locale, setLocale, t } = useLanguage();
-  const [showLangSheet, setShowLangSheet] = useState(false);
+  const { t } = useLanguage();
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
   };
 
-  const handleLangSelect = (value: Locale) => {
-    setLocale(value);
-    setShowLangSheet(false);
-    onClose();
-  };
-
   const menuItems: MenuItem[] = [
     { type: "link", label: t("sidebar.menu"), href: "/dashboard" },
-    {
-      type: "action",
-      label: `${t("sidebar.language")} (${locale === "ar" ? "EN" : "AR"})`,
-      action: () => setShowLangSheet(true),
-      icon: Globe,
-    },
+    { type: "link", label: t("sidebar.settings"), href: "/settings", icon: Settings },
     { type: "link", label: t("sidebar.services"), href: "/services", icon: Boxes },
     { type: "link", label: t("sidebar.orders"), href: "/orders", icon: ShoppingCart },
     { type: "link", label: t("sidebar.actions"), href: "/orders?tab=actions", icon: Zap },
@@ -194,42 +150,6 @@ export default function Sidebar({ open, onClose, user }: SidebarProps) {
         </div>
       </aside>
 
-      {/* Language selection sheet */}
-      {showLangSheet && (
-        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/80 p-4 sm:items-center animate-fadeIn">
-          <div className="w-full max-w-md rounded-3xl border border-[var(--color-border)] bg-[var(--color-card)] p-5 animate-slideUp">
-            <div className="mb-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Globe className="text-[var(--color-primary)]" size={20} />
-                <h3 className="text-lg font-black text-white">{t("language.title")}</h3>
-              </div>
-              <button onClick={() => setShowLangSheet(false)} className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-surface)] text-zinc-400">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="space-y-2">
-              {(["ar", "en"] as Locale[]).map((lang) => (
-                <button
-                  key={lang}
-                  onClick={() => handleLangSelect(lang)}
-                  className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3.5 transition ${
-                    locale === lang
-                      ? "border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-white"
-                      : "border-[var(--color-border)] bg-[var(--color-surface)] text-zinc-300 hover:border-[var(--color-primary)]/30"
-                  }`}
-                >
-                  <FlagIcon lang={lang} />
-                  <div className="flex flex-col items-start">
-                    <span className="font-bold">{t(`language.${lang}`)}</span>
-                    <span className="text-[10px] text-zinc-500">{lang === "ar" ? "العربية — الإمارات" : "English — United States"}</span>
-                  </div>
-                  {locale === lang && <Check size={18} className="ms-auto text-[var(--color-primary)]" />}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

@@ -24,7 +24,13 @@ import {
   EyeOff,
   X,
   Link2,
+  CheckSquare,
+  Square,
+  Filter,
+  Layers3,
+  DollarSign,
 } from "lucide-react";
+import { detectPlatform, detectServiceType } from "@/lib/platform-mapping";
 
 interface Provider {
   id: number;
@@ -50,22 +56,40 @@ interface ProviderService {
   type: string;
   markup_percent: number;
   sell_rate: number;
+  pricing_mode?: "markup" | "manual" | string;
+  manual_price?: number | null;
   is_active: number;
   is_new?: number;
+}
+
+interface PreviewCatalogService {
+  service: string | number;
+  remote_service_id?: string | number;
+  name?: string;
+  category?: string;
+  type?: string;
+  rate?: number;
+  min?: number;
+  max?: number;
+  added?: boolean;
 }
 
 /* ══════════ صف الخدمة: بطاقة أفقية واحدة مضغوطة ══════════ */
 interface ServiceRowProps {
   s: ProviderService;
+  selected: boolean;
+  onSelect: (id: number, checked: boolean) => void;
   onNameSave: (id: number, name: string) => void;
-  onMarkup: (id: number, markup: number) => void;
+  onPricing: (id: number, pricing: { pricing_mode: "markup" | "manual"; markup_percent: number; manual_price?: number | null }) => void;
   onToggle: (id: number) => void;
   onDelete: (id: number) => void;
 }
 
-function ServiceRow({ s, onNameSave, onMarkup, onToggle, onDelete }: ServiceRowProps) {
+function ServiceRow({ s, selected, onSelect, onNameSave, onPricing, onToggle, onDelete }: ServiceRowProps) {
   const [name, setName] = useState(s.name);
   const [mark, setMark] = useState(String(s.markup_percent));
+  const [mode, setMode] = useState<"markup" | "manual">(s.pricing_mode === "manual" ? "manual" : "markup");
+  const [manual, setManual] = useState(s.manual_price == null ? String(s.sell_rate ?? "") : String(s.manual_price));
   const [dirtyName, setDirtyName] = useState(false);
   const [savingName, setSavingName] = useState(false);
 
@@ -84,10 +108,15 @@ function ServiceRow({ s, onNameSave, onMarkup, onToggle, onDelete }: ServiceRowP
     setDirtyName(false);
   };
 
-  const commitMarkup = () => {
-    const v = Number(mark);
-    if (!isNaN(v) && v >= 0 && v !== s.markup_percent) onMarkup(s.id, v);
-    else setMark(String(s.markup_percent));
+  const commitPricing = () => {
+    const markup = Number(mark);
+    const direct = Number(manual);
+    if (!Number.isFinite(markup) || markup < 0) { setMark(String(s.markup_percent)); return; }
+    if (mode === "manual" && (!Number.isFinite(direct) || direct < 0)) { setManual(String(s.sell_rate ?? "")); return; }
+    const unchanged = mode === (s.pricing_mode === "manual" ? "manual" : "markup")
+      && markup === Number(s.markup_percent)
+      && (mode === "markup" || direct === Number(s.manual_price ?? s.sell_rate));
+    if (!unchanged) onPricing(s.id, { pricing_mode: mode, markup_percent: markup, manual_price: mode === "manual" ? direct : null });
   };
 
   const isNew = Number((s as any).is_new) === 1;
@@ -96,6 +125,7 @@ function ServiceRow({ s, onNameSave, onMarkup, onToggle, onDelete }: ServiceRowP
     <div className={`mx-2.5 my-1.5 rounded-2xl border bg-[var(--color-surface-2)] px-3 py-3 transition ${s.is_active ? "border-[var(--color-gold)]/25" : "border-red-500/20 opacity-70"}`}>
       {/* السطر الأول: الرقم + الاسم القابل للتعديل + وسم جديد */}
       <div className="flex items-center gap-1.5">
+        <button type="button" onClick={() => onSelect(s.id, !selected)} className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition active:scale-95 ${selected ? "border-[var(--color-gold)] bg-[var(--color-gold)] text-black" : "border-[var(--color-gold)]/30 bg-[var(--color-surface-3)] text-zinc-500 hover:text-[var(--color-gold-pale)]"}`} aria-label={selected ? "إلغاء تحديد الخدمة" : "تحديد الخدمة للتسعير الجماعي"} title={selected ? "إلغاء التحديد" : "تحديد للتسعير الجماعي"}>{selected ? <CheckSquare size={13} /> : <Square size={13} />}</button>
         <span className="shrink-0 rounded-lg border border-[var(--color-gold)]/30 bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] font-black text-[var(--color-gold-bright)]">#{s.remote_service_id}</span>
         <input
           value={name}
@@ -117,27 +147,29 @@ function ServiceRow({ s, onNameSave, onMarkup, onToggle, onDelete }: ServiceRowP
         <span>الأقصى {s.max.toLocaleString("en-US")}</span>
       </div>
 
-      {/* السطر الثالث: الأسعار + هامش الربح */}
-      <div className="mt-2 grid grid-cols-3 items-center gap-1.5">
+      {/* السطر الثالث: التكلفة وسعر العرض والتحكم المرن */}
+      <div className="mt-2 grid grid-cols-2 gap-1.5">
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-3)] px-2 py-1.5 text-center">
           <div className="text-[8.5px] font-bold text-zinc-500">التكلفة /1000</div>
-          <div className="text-[12px] font-black text-white">${Number(s.rate).toFixed(3)}</div>
+          <div className="text-[12px] font-black text-white">${Number(s.rate).toFixed(6)}</div>
         </div>
         <div className="rounded-xl border border-[var(--color-gold)]/35 bg-gradient-to-b from-[var(--color-gold)]/15 to-transparent px-2 py-1.5 text-center">
-          <div className="text-[8.5px] font-bold text-[var(--color-gold-pale)]">سعر العرض</div>
-          <div className="text-[12px] font-black text-[var(--color-gold-bright)]">${Number(s.sell_rate).toFixed(3)}</div>
+          <div className="text-[8.5px] font-bold text-[var(--color-gold-pale)]">سعر العرض /1000</div>
+          <div className="text-[12px] font-black text-[var(--color-gold-bright)]">${Number(s.sell_rate).toFixed(6)}</div>
         </div>
-        <div className="flex items-center gap-1">
-          <span className="shrink-0 text-[9px] font-black text-zinc-400">ربح%</span>
-          <input
-            type="number"
-            value={mark}
-            onChange={(e) => setMark(e.target.value)}
-            onBlur={commitMarkup}
-            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-            className="h-8 w-full rounded-lg border border-[var(--color-gold)]/30 bg-[var(--color-surface)] px-1 text-center text-[12px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)]"
-          />
+      </div>
+      <div className="mt-1.5 rounded-xl border border-[var(--color-gold)]/20 bg-[var(--color-surface-3)] p-1.5">
+        <div className="mb-1 flex items-center gap-1">
+          <DollarSign size={11} className="text-[var(--color-gold)]" />
+          <span className="text-[9px] font-black text-zinc-400">طريقة تحديد سعر العرض</span>
+          <button type="button" onClick={() => { setMode("markup"); setTimeout(commitPricing, 0); }} className={`mr-auto rounded-lg px-2 py-1 text-[9px] font-black ${mode === "markup" ? "bg-[var(--color-gold)] text-black" : "bg-[var(--color-surface)] text-zinc-500"}`}>نسبة ربح</button>
+          <button type="button" onClick={() => setMode("manual")} className={`rounded-lg px-2 py-1 text-[9px] font-black ${mode === "manual" ? "bg-[var(--color-gold)] text-black" : "bg-[var(--color-surface)] text-zinc-500"}`}>سعر مباشر</button>
         </div>
+        {mode === "markup" ? (
+          <input type="number" min="0" step="0.01" value={mark} onChange={(e) => setMark(e.target.value)} onBlur={commitPricing} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} className="h-8 w-full rounded-lg border border-[var(--color-gold)]/30 bg-[var(--color-surface)] px-2 text-center text-[11px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)]" placeholder="نسبة الربح % — مثل 30.50" />
+        ) : (
+          <input type="number" min="0" step="0.000001" value={manual} onChange={(e) => setManual(e.target.value)} onBlur={commitPricing} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} className="h-8 w-full rounded-lg border border-[var(--color-gold)]/30 bg-[var(--color-surface)] px-2 text-center text-[11px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)]" placeholder="سعر البيع /1000 — مثل 0.125500" />
+        )}
       </div>
 
       {/* السطر الرابع: الأزرار المتساوية */}
@@ -164,17 +196,19 @@ function ServiceRow({ s, onNameSave, onMarkup, onToggle, onDelete }: ServiceRowP
 
 /* ══════════ صف خدمة المودال (استعراض/إضافة) ══════════ */
 interface PreviewServiceRowProps {
-  s: any;
+  s: PreviewCatalogService;
   previewing: number;
   services: ProviderService[];
   globalMarkup: number;
+  selected: boolean;
+  onSelect: (remoteId: string, checked: boolean) => void;
   onAdd: () => void;
   onSaved: (msg: string) => void;
   onError: (msg: string) => void;
   onRefresh: () => void;
 }
 
-function PreviewServiceRow({ s, previewing, services, globalMarkup, onAdd, onSaved, onError, onRefresh }: PreviewServiceRowProps) {
+function PreviewServiceRow({ s, previewing, services, globalMarkup, selected, onSelect, onAdd, onSaved, onError, onRefresh }: PreviewServiceRowProps) {
   // الخدمة المضافة محليًا (نطابقها بـ provider_id + remote_service_id)
   const local = useMemo(
     () => services.find((l) => l.provider_id === previewing && String(l.remote_service_id) === String(s.service)),
@@ -244,13 +278,23 @@ function PreviewServiceRow({ s, previewing, services, globalMarkup, onAdd, onSav
   const showRate = (cost * (1 + (local ? local.markup_percent : globalMarkup) / 100));
 
   return (
-    <div className={`rounded-xl border p-2.5 text-[11px] transition ${isAdded ? "border-green-500/30 bg-green-500/5" : "border-[var(--color-gold)]/15 bg-[var(--color-surface-2)]"}`}>
-      {/* السطر الأول: الرقم + التصنيف + النوع */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="rounded border border-[var(--color-gold)]/30 bg-[var(--color-surface-3)] px-1 py-0.5 text-[9px] font-black text-[var(--color-gold-bright)]">#{s.service}</span>
-        <span className="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[9px] text-zinc-400">{s.category || "عام"}</span>
-        {s.type && <span className="rounded-full bg-[var(--color-gold)]/10 px-1.5 py-0.5 text-[9px] text-[var(--color-gold-pale)]">{s.type}</span>}
-        <span className="text-[9px] text-zinc-600">min {Number(s.min).toLocaleString("en-US")} · max {Number(s.max).toLocaleString("en-US")}</span>
+    <div className={`rounded-xl border p-2 text-[10px] transition sm:p-2.5 sm:text-[11px] ${selected ? "border-[var(--color-gold)]/70 bg-[var(--color-gold)]/10" : isAdded ? "border-green-500/30 bg-green-500/5" : "border-[var(--color-gold)]/15 bg-[var(--color-surface-2)]"}`}>
+      {/* السطر الأول: تحديد + الرقم + التصنيف + النوع */}
+      <div className="flex flex-wrap items-center gap-1">
+        <button
+          type="button"
+          disabled={isAdded}
+          onClick={() => onSelect(String(s.service), !selected)}
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-45 ${selected ? "border-[var(--color-gold)] bg-[var(--color-gold)] text-black" : "border-[var(--color-gold)]/30 bg-[var(--color-surface-3)] text-zinc-500 hover:text-[var(--color-gold-pale)]"}`}
+          aria-label={selected ? "إلغاء تحديد الخدمة" : "تحديد الخدمة"}
+          title={isAdded ? "الخدمة مضافة مسبقًا" : selected ? "إلغاء التحديد" : "تحديد الخدمة للإضافة الجماعية"}
+        >
+          {selected ? <CheckSquare size={13} /> : <Square size={13} />}
+        </button>
+        <span className="rounded border border-[var(--color-gold)]/30 bg-[var(--color-surface-3)] px-1 py-0.5 text-[8px] font-black text-[var(--color-gold-bright)] sm:text-[9px]">#{s.service}</span>
+        <span className="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[8px] text-zinc-400 sm:text-[9px]">{s.category || "عام"}</span>
+        {s.type && <span className="rounded-full bg-[var(--color-gold)]/10 px-1.5 py-0.5 text-[8px] text-[var(--color-gold-pale)] sm:text-[9px]">{s.type}</span>}
+        <span className="text-[8px] text-zinc-600 sm:text-[9px]">min {Number(s.min).toLocaleString("en-US")} · max {Number(s.max).toLocaleString("en-US")}</span>
       </div>
       {/* السطر الثاني: الاسم القابل للتعديل */}
       <div className="mt-1 flex items-center gap-1">
@@ -260,7 +304,7 @@ function PreviewServiceRow({ s, previewing, services, globalMarkup, onAdd, onSav
           onChange={(e) => { setName(e.target.value); setDirtyName(true); }}
           onBlur={commitEdits}
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-          className="min-w-0 flex-1 rounded-lg bg-transparent px-1.5 py-0.5 text-[11px] font-black text-white outline-none transition focus:bg-[var(--color-surface-3)] disabled:opacity-70"
+          className="min-w-0 flex-1 rounded-lg bg-transparent px-1 py-0.5 text-[10px] font-black text-white outline-none transition focus:bg-[var(--color-surface-3)] disabled:opacity-70 sm:px-1.5 sm:text-[11px]"
           placeholder="اسم الخدمة"
           title="اضغط لتعديل الاسم — ثم اضغط Enter أو انقل التركيز للحفظ الفوري"
         />
@@ -268,7 +312,7 @@ function PreviewServiceRow({ s, previewing, services, globalMarkup, onAdd, onSav
         {saving && <Loader2 className="animate-spin shrink-0 text-zinc-500" size={12} />}
       </div>
       {/* السطر الثالث: الأسعار + هامش الربح القابل للتعديل */}
-      <div className="mt-1 grid grid-cols-3 items-center gap-1.5">
+      <div className="mt-1 grid grid-cols-3 items-center gap-1">
         <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-3)] px-1.5 py-1 text-center">
           <div className="text-[7.5px] font-bold text-zinc-500">التكلفة /1000</div>
           <div className="text-[10.5px] font-black text-white">${cost.toFixed(3)}</div>
@@ -286,7 +330,7 @@ function PreviewServiceRow({ s, previewing, services, globalMarkup, onAdd, onSav
             onChange={(e) => { setMark(e.target.value); setDirtyMark(true); }}
             onBlur={commitEdits}
             onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-            className="h-7 w-full rounded-lg border border-[var(--color-gold)]/30 bg-[var(--color-surface)] px-1 text-center text-[10.5px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)] disabled:opacity-60"
+            className="h-[26px] w-full rounded-lg border border-[var(--color-gold)]/30 bg-[var(--color-surface)] px-1 text-center text-[10px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)] disabled:opacity-60 sm:h-7 sm:text-[10.5px]"
             title="غيّر نسبة الربح ثم اضغط Enter أو انقل التركيز ليُحفظ السعر فورًا"
           />
         </div>
@@ -297,22 +341,22 @@ function PreviewServiceRow({ s, previewing, services, globalMarkup, onAdd, onSav
           <button
             onClick={() => { if (adding) return; setAdding(true); onAdd(); setAdding(false); }}
             disabled={adding}
-            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-[var(--color-gold-bright)] to-[var(--color-gold)] text-[10.5px] font-black text-black shadow-[0_0_16px_-6px_rgba(255,215,0,0.5)] transition hover:brightness-110 active:scale-[0.97] disabled:opacity-60"
+            className="flex h-7 w-full items-center justify-center gap-1 rounded-xl bg-gradient-to-r from-[var(--color-gold-bright)] to-[var(--color-gold)] text-[9px] font-black text-black shadow-[0_0_16px_-6px_rgba(255,215,0,0.5)] transition hover:brightness-110 active:scale-[0.97] disabled:opacity-60"
           >
-            <Plus size={13} /> {adding ? "جاري الإضافة..." : "إضافة للعرض (تظهر فورًا عند الجميع)"}
+            <Plus size={12} /> {adding ? "جاري الإضافة..." : <><span className="sm:hidden">إضافة للعرض</span><span className="hidden sm:inline">إضافة للعرض (تظهر فورًا عند الجميع)</span></>}
           </button>
         ) : (
           <button
             onClick={toggleHide}
             disabled={toggling || saving}
-            className={`flex h-7 w-full items-center justify-center gap-1.5 rounded-lg border text-[10px] font-black transition active:scale-[0.97] disabled:opacity-60 ${local && !local.is_active ? "border-[var(--color-gold)]/30 bg-[var(--color-surface)] text-[var(--color-gold-pale)]" : "border-green-500/30 bg-green-500/10 text-green-400"}`}
+            className={`flex h-7 w-full items-center justify-center gap-1 rounded-lg border text-[9px] sm:text-[10px] font-black transition active:scale-[0.97] disabled:opacity-60 ${local && !local.is_active ? "border-[var(--color-gold)]/30 bg-[var(--color-surface)] text-[var(--color-gold-pale)]" : "border-green-500/30 bg-green-500/10 text-green-400"}`}
           >
             {toggling ? (
               <Loader2 className="animate-spin" size={12} />
             ) : local && !local.is_active ? (
-              <><Eye size={13} /> مخفية — اضغط لإعادة العرض عند كل المستخدمين</>
+              <><Eye size={12} /> <span className="sm:hidden">مخفية — إعادة العرض</span><span className="hidden sm:inline">مخفية — اضغط لإعادة العرض عند كل المستخدمين</span></>
             ) : (
-              <><EyeOff size={13} /> مضافة للعرض — اضغط للإخفاء عن كل المستخدمين</>
+              <><EyeOff size={12} /> <span className="sm:hidden">مضافة — إخفاء</span><span className="hidden sm:inline">مضافة للعرض — اضغط للإخفاء عن كل المستخدمين</span></>
             )}
           </button>
         )}
@@ -333,21 +377,27 @@ interface ProviderCardProps {
   onEdit: (p: Provider) => void;
   onDeleteProvider: (id: number) => void;
   onServiceAction: (id: number, is_active?: number) => void;
-  onMarkup: (id: number, markup: number) => void;
+  onDeleteService: (id: number) => void;
+  onPricing: (id: number, pricing: { pricing_mode: "markup" | "manual"; markup_percent: number; manual_price?: number | null }) => void;
   onRenameService: (id: number, name: string) => void;
-  onUpdateAll: (id: number) => void;
+  onUpdateAll: (id: number, mode: "markup" | "manual", value: string, scope: "provider" | "category" | "selected", ids?: number[], category?: string) => void;
+  onResetPricing: (id: number, scope: "provider" | "category" | "selected", ids?: number[], category?: string) => void;
+  onDeleteServices: (id: number, ids?: number[]) => void;
 }
 
 function ProviderCard(props: ProviderCardProps) {
   const {
     p, services, syncing, globalMarkup, onSync, onToggleProvider,
-    onPreview, onEdit, onDeleteProvider, onServiceAction, onMarkup, onRenameService, onUpdateAll,
+    onPreview, onEdit, onDeleteProvider, onServiceAction, onDeleteService, onPricing, onRenameService, onUpdateAll, onResetPricing, onDeleteServices,
   } = props;
 
   const [svcSearch, setSvcSearch] = useState("");
   const [svcCat, setSvcCat] = useState<string>("الكل");
   const [svcMode, setSvcMode] = useState<"active" | "paused">("active");
   const [bulkMark, setBulkMark] = useState("");
+  const [bulkManual, setBulkManual] = useState("");
+  const [bulkScope, setBulkScope] = useState<"provider" | "category" | "selected">("provider");
+  const [selectedServiceIds, setSelectedServiceIds] = useState<Set<number>>(new Set());
   const [deleted] = useState<Set<number>>(new Set());
 
   const all = useMemo(() => services.filter((s) => s.provider_id === p.id && !deleted.has(s.id)), [services, p.id, deleted]);
@@ -512,30 +562,38 @@ function ProviderCard(props: ProviderCardProps) {
             <ServiceRow
               key={s.id}
               s={s}
+              selected={selectedServiceIds.has(s.id)}
+              onSelect={(id, checked) => setSelectedServiceIds((prev) => { const next = new Set(prev); if (checked) next.add(id); else next.delete(id); return next; })}
               onNameSave={onRenameService}
-              onMarkup={onMarkup}
+              onPricing={onPricing}
               onToggle={onServiceAction}
-              onDelete={onServiceAction}
+              onDelete={onDeleteService}
             />
           ))}
         </div>
 
-        {/* هامش جماعي + مزامنة */}
-        <div className="mt-3 flex items-center gap-2 px-2.5">
-          <input
-            type="number"
-            placeholder="هامش %"
-            value={bulkMark}
-            onChange={(e) => setBulkMark(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && bulkMark) { onUpdateAll(p.id); setBulkMark(""); } }}
-            className="h-10 w-20 rounded-xl border border-[var(--color-gold)]/30 bg-[var(--color-surface-2)] px-2 text-center text-[12px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)]"
-          />
-          <button
-            onClick={() => { onUpdateAll(p.id); setBulkMark(""); }}
-            className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[11px] font-black text-zinc-300 transition hover:border-[var(--color-gold)]/40 hover:text-[var(--color-gold-pale)] active:scale-[0.97]"
-          >
-            <Zap size={14} /> تحديث أسعار الكل
-          </button>
+        {/* تسعير جماعي دقيق */}
+        <div className="mt-3 rounded-2xl border border-[var(--color-gold)]/20 bg-[var(--color-surface-2)] p-2.5">
+          <div className="mb-1 flex items-center gap-1.5 text-[10px] font-black text-[var(--color-gold-pale)]"><DollarSign size={13} /> تسعير اختياري بنطاق محدد</div>
+          <div className="mb-2 text-[9px] leading-relaxed text-zinc-500">لن تُطبّق أي نسبة تلقائيًا. اختر المزود أو التصنيف أو خدمات محددة ثم اضغط الإجراء المطلوب.</div>
+          <select value={bulkScope} onChange={(e) => setBulkScope(e.target.value as "provider" | "category" | "selected")} className="mb-2 h-9 w-full rounded-xl border border-[var(--color-gold)]/30 bg-[var(--color-surface)] px-2 text-center text-[10px] font-black text-[var(--color-gold-pale)] outline-none">
+            <option value="provider">كل خدمات هذا المزود</option>
+            <option value="category">التصنيف الحالي: {svcCat === "الكل" ? "اختر تصنيفًا من الأعلى" : svcCat}</option>
+            <option value="selected">الخدمات المحددة فقط ({selectedServiceIds.size})</option>
+          </select>
+          <div className="grid grid-cols-2 gap-1.5">
+            <input type="number" min="0" step="0.01" placeholder="نسبة الربح %" value={bulkMark} onChange={(e) => setBulkMark(e.target.value)} className="h-9 rounded-xl border border-[var(--color-gold)]/30 bg-[var(--color-surface)] px-2 text-center text-[11px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)]" />
+            <input type="number" min="0" step="0.000001" placeholder="سعر مباشر /1000" value={bulkManual} onChange={(e) => setBulkManual(e.target.value)} className="h-9 rounded-xl border border-[var(--color-gold)]/30 bg-[var(--color-surface)] px-2 text-center text-[11px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)]" />
+          </div>
+          <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+            <button onClick={() => { onUpdateAll(p.id, "markup", bulkMark, bulkScope, [...selectedServiceIds], svcCat !== "الكل" ? svcCat : undefined); setBulkMark(""); }} className="flex h-9 items-center justify-center gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] text-[10px] font-black text-zinc-300 hover:border-[var(--color-gold)]/50"><Zap size={13} /> تطبيق النسبة</button>
+            <button onClick={() => { onUpdateAll(p.id, "manual", bulkManual, bulkScope, [...selectedServiceIds], svcCat !== "الكل" ? svcCat : undefined); setBulkManual(""); }} className="flex h-9 items-center justify-center gap-1 rounded-xl border border-[var(--color-gold)]/40 bg-[var(--color-gold)]/10 text-[10px] font-black text-[var(--color-gold-pale)]"><DollarSign size={13} /> تطبيق السعر</button>
+            <button onClick={() => onResetPricing(p.id, bulkScope, [...selectedServiceIds], svcCat !== "الكل" ? svcCat : undefined)} className="flex h-9 items-center justify-center gap-1 rounded-xl border border-red-500/30 bg-red-500/10 text-[10px] font-black text-red-300 hover:bg-red-500/15"><X size={13} /> إلغاء النسبة</button>
+          </div>
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-1.5 px-2.5">
+          <button onClick={() => onDeleteServices(p.id)} className="flex h-9 items-center justify-center gap-1 rounded-xl border border-red-500/30 bg-red-500/10 text-[10px] font-black text-red-300 hover:bg-red-500/15"><Trash2 size={13} /> إزالة كل خدمات المزود</button>
+          <button onClick={() => onDeleteServices(p.id, all.filter((s) => s.is_active === 0).map((s) => s.id))} className="flex h-9 items-center justify-center gap-1 rounded-xl border border-amber-500/30 bg-amber-500/10 text-[10px] font-black text-amber-300 hover:bg-amber-500/15"><Trash2 size={13} /> إزالة الموقوفة</button>
         </div>
         <button
           onClick={() => onSync(p.id)}
@@ -559,20 +617,31 @@ export default function ProvidersPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Provider | null>(null);
   const [form, setForm] = useState({ name: "", api_url: "", api_key: "", notes: "" });
-  const [globalMarkup, setGlobalMarkup] = useState(30);
+  const [globalMarkup, setGlobalMarkup] = useState(0);
   const [syncing, setSyncing] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [result, setResult] = useState<{ message?: string; error?: string } | null>(null);
   const [deletedServiceIds, setDeletedServiceIds] = useState<Set<number>>(new Set());
   const [previewing, setPreviewing] = useState<number | null>(null);
-  const [previewServices, setPreviewServices] = useState<any[]>([]);
+  const [previewServices, setPreviewServices] = useState<PreviewCatalogService[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewSearch, setPreviewSearch] = useState("");
-  const [previewCat, setPreviewCat] = useState<string>("الكل");
+  const [previewPlatform, setPreviewPlatform] = useState<string>("all");
+  const [previewType, setPreviewType] = useState<string>("all");
+  const [previewPage, setPreviewPage] = useState(1);
+  const [selectedPreviewIds, setSelectedPreviewIds] = useState<Set<string>>(new Set());
+  const [bulkConfirm, setBulkConfirm] = useState<{ mode: "selected" | "filtered"; services: PreviewCatalogService[] } | null>(null);
+  const [bulkSaving, setBulkSaving] = useState(false);
 
-  const previewCats = useMemo(() => {
+  const previewPlatforms = useMemo(() => {
     const set = new Set<string>();
-    for (const s of previewServices) set.add(s.category || s.type || "عام");
+    for (const s of previewServices) set.add(detectPlatform(String(s.category || ""), String(s.name || "")));
+    return [...set].sort();
+  }, [previewServices]);
+
+  const previewTypes = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of previewServices) set.add(detectServiceType(String(s.name || "") + " " + String(s.category || "")));
     return [...set].sort();
   }, [previewServices]);
 
@@ -611,24 +680,31 @@ export default function ProvidersPage() {
   const saveProvider = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    // لا نترك رسالة فشل قديمة ظاهرة أثناء فحص اتصال جديد.
     setResult(null);
-    const res = await fetch("/api/admin/providers", {
+    try {
+      const res = await fetch("/api/admin/providers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...form, action: "save", id: editing?.id }),
     });
-    const data = await res.json();
-    if (data.error) setResult({ error: data.error });
-    else {
-      setResult({
-        message: `تم الربط بنجاح ✓ الاتصال سليم — الرصيد لدى المزود: $${Number(data.balance ?? 0).toFixed(2)} — اضغط «عرض الخدمات» لإضافة ما تعجبك انتقائيًا`,
-      });
-      setShowForm(false);
-      setEditing(null);
-      setForm({ name: "", api_url: "", api_key: "", notes: "" });
-      load();
+      const data = await res.json();
+      if (data.error) {
+        setResult({ error: data.error });
+      } else {
+        setResult({
+          message: `تم الربط بنجاح ✓ الاتصال سليم — الرصيد لدى المزود: $${Number(data.balance ?? 0).toFixed(2)} — تم اعتماد الرابط: ${data.api_url || "endpoint المكتشف"} — اضغط «عرض الخدمات» لإضافة ما تعجبك انتقائيًا`,
+        });
+        setShowForm(false);
+        setEditing(null);
+        setForm({ name: "", api_url: "", api_key: "", notes: "" });
+        load();
+      }
+    } catch {
+      setResult({ error: "تعذر الوصول إلى الخادم. تحقق من الاتصال ثم أعد المحاولة." });
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const syncServices = async (providerId: number) => {
@@ -638,12 +714,12 @@ export default function ProvidersPage() {
       const res = await fetch("/api/admin/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "sync", providerId, markup: globalMarkup }),
+        body: JSON.stringify({ action: "sync", providerId, pricing_enabled: false }),
       });
       const data = await res.json();
       if (data.error) setResult({ error: data.error });
       else {
-        setResult({ message: `تم استيراد ${data.imported} خدمة بنجاح مع هامش ربح ${globalMarkup}%` });
+        setResult({ message: `تم استيراد ${data.imported} خدمة بنجاح دون هامش تلقائي — اختر نطاقًا لتطبيق الربح اختياريًا` });
         load();
       }
     } finally {
@@ -675,14 +751,17 @@ export default function ProvidersPage() {
     setServices(updated);
   };
 
-  const updateServiceMarkup = async (id: number, markup: number) => {
-    const updated = services.map((s) => (s.id === id ? { ...s, markup_percent: markup, sell_rate: s.rate * (1 + markup / 100) } : s));
-    setServices(updated);
-    fetch("/api/admin/providers", {
+  const updateServicePricing = async (id: number, pricing: { pricing_mode: "markup" | "manual"; markup_percent: number; manual_price?: number | null }) => {
+    const service = services.find((s) => s.id === id);
+    if (!service) return;
+    const sellRate = pricing.pricing_mode === "manual" ? Number(pricing.manual_price || 0) : Number(service.rate) * (1 + Number(pricing.markup_percent) / 100);
+    setServices((prev) => prev.map((s) => s.id === id ? { ...s, ...pricing, sell_rate: Math.round(sellRate * 1_000_000) / 1_000_000 } : s));
+    const res = await fetch("/api/admin/providers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "update-service", id, markup_percent: markup }),
+      body: JSON.stringify({ action: "update-service", id, ...pricing }),
     });
+    if (!res.ok) { setResult({ error: "تعذر حفظ سعر الخدمة" }); load(); }
   };
 
   const serviceAction = async (id: number) => {
@@ -714,18 +793,41 @@ export default function ProvidersPage() {
     }
   };
 
-  const updateAllProviderServices = async (providerId: number) => {
-    await fetch("/api/admin/providers", {
+  const updateAllProviderServices = async (providerId: number, mode: "markup" | "manual" = "markup", value = String(globalMarkup), scope: "provider" | "category" | "selected" = "provider", ids: number[] = [], category?: string) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) { setResult({ error: mode === "manual" ? "أدخل سعرًا مباشرًا صالحًا" : "أدخل نسبة ربح صالحة" }); return; }
+    const res = await fetch("/api/admin/providers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "update-provider-services", providerId, markup_percent: globalMarkup }),
+      body: JSON.stringify({ action: "update-provider-services", providerId, scope, ids, category, pricing_mode: mode, markup_percent: mode === "markup" ? numeric : 0, manual_price: mode === "manual" ? numeric : undefined }),
     });
-    load();
+    const data = await res.json();
+    if (res.ok) { setResult({ message: mode === "manual" ? `تم تطبيق سعر بيع مباشر $${numeric.toFixed(6)} على النطاق المحدد` : `تم تطبيق هامش ${numeric}% على النطاق المحدد` }); load(); }
+    else setResult({ error: data.error || "تعذر تحديث الأسعار" });
   };
 
-  // إعادة تعيين الفلتر عند فتح مودال جديد (يضمن مودالًا واحدًا نظيفًا)
+  const resetProviderPricing = async (providerId: number, scope: "provider" | "category" | "selected", ids: number[] = [], category?: string) => {
+    if (scope === "selected" && ids.length === 0) { setResult({ error: "حدد خدمات أولًا لإلغاء النسبة عنها" }); return; }
+    if (scope === "category" && !category) { setResult({ error: "اختر تصنيفًا من قائمة الفلاتر أولًا" }); return; }
+    if (!confirm("سيتم إلغاء النسبة والسعر المباشر عن النطاق المحدد وإرجاعه إلى تكلفة المزود. هل تريد المتابعة؟")) return;
+    const res = await fetch("/api/admin/providers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reset-provider-pricing", providerId, scope, ids, category }) });
+    const data = await res.json();
+    if (res.ok) { setResult({ message: `تم إلغاء التسعير الإضافي عن ${data.updated ?? 0} خدمة` }); load(); }
+    else setResult({ error: data.error || "تعذر إلغاء النسبة" });
+  };
+
+  const deleteServices = async (providerId: number, ids?: number[]) => {
+    const isAll = !ids || ids.length === 0;
+    const message = isAll ? "سيتم حذف جميع خدمات هذا المزود نهائيًا. هل تريد المتابعة؟" : `سيتم حذف ${ids.length} خدمة موقوفة. هل تريد المتابعة؟`;
+    if (!confirm(message)) return;
+    const res = await fetch("/api/admin/providers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete-services", providerId, ids: ids || [] }) });
+    const data = await res.json();
+    if (res.ok) { setResult({ message: `تم حذف ${data.deleted ?? 0} خدمة` }); load(); }
+    else setResult({ error: data.error || "تعذر حذف الخدمات" });
+  };
+
+  // فتح نافذة جديدة يعيد كل فلاتر المعاينة والتحديد إلى الحالة الافتراضية.
   const openPreviewSafe = async (providerId: number) => {
-    if (previewing !== null && previewing !== providerId) setPreviewCat("الكل");
     await openPreviewOrig(providerId);
   };
 
@@ -733,6 +835,10 @@ export default function ProvidersPage() {
     setPreviewing(providerId);
     setPreviewLoading(true);
     setPreviewSearch("");
+    setPreviewPlatform("all");
+    setPreviewType("all");
+    setPreviewPage(1);
+    setSelectedPreviewIds(new Set());
     try {
       const res = await fetch(`/api/admin/providers?mode=preview&providerId=${providerId}`);
       const data = await res.json();
@@ -747,15 +853,131 @@ export default function ProvidersPage() {
     const res = await fetch("/api/admin/providers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "add-service", providerId, remote_service_id, markup_percent: globalMarkup }),
+      body: JSON.stringify({ action: "add-service", providerId, remote_service_id, pricing_enabled: false }),
     });
     const data = await res.json();
     if (res.ok) {
       setResult({ message: "أُضيفت الخدمة — ظاهرة للمستخدمين الآن" });
-      openPreviewSafe(providerId);
+      openPreviewOrig(providerId);
       load();
     } else {
       setResult({ error: data.error || "تعذرت الإضافة" });
+    }
+  };
+
+  const platformLabels: Record<string, string> = {
+    all: "كل المنصات",
+    instagram: "Instagram",
+    tiktok: "TikTok",
+    youtube: "YouTube",
+    telegram: "Telegram",
+    twitter: "Twitter / X",
+    facebook: "Facebook",
+    whatsapp: "WhatsApp",
+    snapchat: "Snapchat",
+    discord: "Discord",
+    twitch: "Twitch",
+    spotify: "Spotify",
+    threads: "Threads",
+    other: "عام",
+  };
+  const typeLabels: Record<string, string> = {
+    all: "كل الأنواع",
+    followers: "متابعون / أعضاء",
+    likes: "إعجابات",
+    views: "مشاهدات",
+    comments: "تعليقات",
+    shares: "مشاركات",
+    saves: "حفظ",
+    votes: "تصويت",
+    stories: "قصص / ستوري",
+    reels: "ريلز",
+    live: "بث مباشر",
+    other: "نوع آخر",
+  };
+
+  const filteredPreviewServices = useMemo(() => {
+    const q = previewSearch.trim().toLowerCase();
+    return previewServices.filter((s: PreviewCatalogService) => {
+      const platform = detectPlatform(String(s.category || ""), String(s.name || ""));
+      const type = detectServiceType(`${String(s.name || "")} ${String(s.category || "")}`);
+      const matchesPlatform = previewPlatform === "all" || platform === previewPlatform;
+      const matchesType = previewType === "all" || type === previewType;
+      const haystack = `${s.name || ""} ${s.service || ""} ${s.category || ""} ${s.type || ""}`.toLowerCase();
+      return matchesPlatform && matchesType && (!q || haystack.includes(q));
+    });
+  }, [previewServices, previewPlatform, previewType, previewSearch]);
+
+  const previewPageSize = 60;
+  const previewTotalPages = Math.max(1, Math.ceil(filteredPreviewServices.length / previewPageSize));
+  const safePreviewPage = Math.min(previewPage, previewTotalPages);
+  const visiblePreviewServices = filteredPreviewServices.slice(
+    (safePreviewPage - 1) * previewPageSize,
+    safePreviewPage * previewPageSize,
+  );
+  const selectablePreviewServices = filteredPreviewServices.filter((s: PreviewCatalogService) => !s.added);
+  const selectedVisibleCount = selectablePreviewServices.filter((s: PreviewCatalogService) => selectedPreviewIds.has(String(s.service))).length;
+  const allFilteredSelected = selectablePreviewServices.length > 0 && selectedVisibleCount === selectablePreviewServices.length;
+
+  const togglePreviewSelection = (remoteId: string, checked: boolean) => {
+    setSelectedPreviewIds((previous) => {
+      const next = new Set(previous);
+      if (checked) next.add(remoteId); else next.delete(remoteId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllFiltered = () => {
+    setSelectedPreviewIds((previous) => {
+      const next = new Set(previous);
+      if (allFilteredSelected) {
+        selectablePreviewServices.forEach((s: any) => next.delete(String(s.service)));
+      } else {
+        selectablePreviewServices.forEach((s: any) => next.add(String(s.service)));
+      }
+      return next;
+    });
+  };
+
+  const requestBulkAdd = (mode: "selected" | "filtered") => {
+    const candidates = mode === "selected"
+      ? filteredPreviewServices.filter((s: PreviewCatalogService) => selectedPreviewIds.has(String(s.service)) && !s.added)
+      : selectablePreviewServices;
+    if (!candidates.length) {
+      setResult({ error: mode === "selected" ? "حدد خدمة واحدة على الأقل قبل الإضافة" : "لا توجد خدمات جديدة مطابقة لهذا الفلتر" });
+      return;
+    }
+    setBulkConfirm({ mode, services: candidates });
+  };
+
+  const saveBulkServices = async () => {
+    if (!previewing || !bulkConfirm || bulkSaving) return;
+    setBulkSaving(true);
+    try {
+      const res = await fetch("/api/admin/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "bulk-add-services",
+          providerId: previewing,
+          markup_percent: globalMarkup,
+          services: bulkConfirm.services,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setResult({ error: data.error || "تعذر حفظ الخدمات الجماعية" });
+        return;
+      }
+      setBulkConfirm(null);
+      setSelectedPreviewIds(new Set());
+      setResult({ message: `تمت إضافة ${data.added} خدمة${data.skipped ? `، وتجاوز ${data.skipped} مضافة مسبقًا` : ""} — تظهر الآن لجميع المستخدمين` });
+      load();
+      await openPreviewOrig(previewing);
+    } catch {
+      setResult({ error: "تعذر الوصول إلى الخادم أثناء الحفظ الجماعي" });
+    } finally {
+      setBulkSaving(false);
     }
   };
 
@@ -791,15 +1013,17 @@ export default function ProvidersPage() {
         {/* ═══ هامش الربح العام ═══ */}
         <div className="flex items-center gap-3 rounded-2xl border border-[var(--color-gold)]/20 bg-[var(--color-surface)] px-4 py-3">
           <Activity size={16} className="shrink-0 text-[var(--color-gold-bright)]" />
-          <span className="shrink-0 text-[12px] font-black text-white">هامش الربح الافتراضي</span>
+          <span className="shrink-0 text-[12px] font-black text-white">قيمة ربح اختيارية</span>
           <div className="flex flex-1 items-center gap-2">
             <input
               type="number"
+              min="0"
+              step="0.01"
               value={globalMarkup}
               onChange={(e) => setGlobalMarkup(Number(e.target.value))}
               className="h-9 w-20 rounded-lg border border-[var(--color-gold)]/30 bg-[var(--color-surface-2)] px-2 text-center text-[12px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)]"
             />
-            <span className="text-[11px] text-zinc-400">٪ يُضاف فوق التكلفة</span>
+            <span className="text-[11px] text-zinc-400">اقتراح فقط — لا يُطبَّق إلا بزر ونطاق تختارهما</span>
           </div>
         </div>
 
@@ -827,7 +1051,7 @@ export default function ProvidersPage() {
               </div>
               <div>
                 <label className="mb-1 block text-[11px] font-bold text-zinc-400">رابط API</label>
-                <input value={form.api_url} onChange={(e) => setForm({ ...form, api_url: e.target.value })} className="input-luxe h-10 w-full rounded-xl px-3 text-[13px] text-white" placeholder="https://panel.example.com" required />
+                <input value={form.api_url} onChange={(e) => setForm({ ...form, api_url: e.target.value })} className="input-luxe h-10 w-full rounded-xl px-3 text-[13px] text-white" placeholder="https://panel.example.com أو /api/v2" inputMode="url" autoComplete="url" required />
               </div>
               <div>
                 <label className="mb-1 block text-[11px] font-bold text-zinc-400">مفتاح API</label>
@@ -844,7 +1068,7 @@ export default function ProvidersPage() {
                 <button type="button" onClick={() => { setShowForm(false); setEditing(null); }} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-5 py-2.5 text-[12px] font-bold text-zinc-300">إلغاء</button>
               </div>
               <div className="rounded-xl border border-[var(--color-gold)]/10 bg-[var(--color-surface-2)] p-2.5 text-[10.5px] leading-relaxed text-zinc-400">
-                يدعم النظام أي مزود يستخدم SMM Panel API القياسي (api/v2) مثل JustAnotherPanel و SMMFollowers و SMMKings. عند الحفظ يُختبر الاتصال تلقائيًا، وبعد المزامنة تُستورد خدمات المزود لتختار منها ما تريد.
+                يدعم النظام أي مزود يستخدم SMM Panel API القياسي. يمكنك إدخال رابط اللوحة الأساسي أو الرابط المنتهي بـ /api/v2؛ سيقوم النظام بتطبيع الصيغة واختبار services للقراءة فقط عند الحفظ، ثم يمكنك مزامنة الخدمات دون إنشاء طلب أو خصم رصيد.
               </div>
             </form>
           </div>
@@ -880,88 +1104,99 @@ export default function ProvidersPage() {
                 onEdit={(pp) => { setEditing(pp); setForm({ name: pp.name, api_url: pp.api_url, api_key: pp.api_key, notes: pp.notes || "" }); setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" }); }}
                 onDeleteProvider={deleteProvider}
                 onServiceAction={serviceAction}
-                onMarkup={updateServiceMarkup}
-                onRenameService={renameService}
+                onDeleteService={deleteService}
+                onPricing={updateServicePricing}
+                  onRenameService={renameService}
                 onUpdateAll={updateAllProviderServices}
+                onResetPricing={resetProviderPricing}
+                onDeleteServices={deleteServices}
               />
               {idx < providers.length - 1 && <div className="mt-6 h-px bg-gradient-to-l from-transparent via-[var(--color-gold)]/25 to-transparent" />}
             </section>
           ))}
         </div>
 
-        {/* ═══ مودال الاستعراض الانتقائي ═══ */}
+        {/* ═══ مودال استعراض الخدمات المنظم ═══ */}
         {previewing !== null && (
-          <div key={previewing} className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-2 backdrop-blur-sm sm:items-center" onClick={() => setPreviewing(null)}>
-            <div
-              className="max-h-[85vh] w-full max-w-lg overflow-hidden rounded-t-3xl border border-[var(--color-gold)]/25 bg-[#0c0c0c] sm:rounded-3xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between border-b border-[var(--color-gold)]/15 bg-[var(--color-surface)] p-4">
-                <div>
-                  <div className="text-[16px] font-black text-gradient-luxe">استعراض خدمات المزود</div>
-                  <div className="text-[10px] text-zinc-500">كل خدمات المزود مرتبة حسب النوع — أضِف انتقائيًا وتظهر فورًا، وعدّل الاسم والسعر واحفظ فورًا</div>
+          <div key={previewing} className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 p-1 backdrop-blur-sm sm:items-center sm:p-2" onClick={() => setPreviewing(null)}>
+            <div className="max-h-[calc(100dvh-0.35rem)] w-full max-w-2xl overflow-hidden rounded-t-2xl border border-[var(--color-gold)]/30 bg-[#0a0a0a] shadow-[0_20px_80px_-20px_rgba(212,175,55,0.35)] sm:max-h-[92vh] sm:rounded-3xl" onClick={(e) => e.stopPropagation()}>
+              <div className="border-b border-[var(--color-gold)]/15 bg-[var(--color-surface)] p-2.5 sm:p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-1.5 text-[13px] font-black leading-tight text-gradient-luxe sm:gap-2 sm:text-[16px]"><Layers3 className="shrink-0" size={15} /> <span className="truncate">استعراض كتالوج المزوّد</span></div>
+                    <div className="mt-0.5 text-[9px] leading-relaxed text-zinc-500 sm:mt-1 sm:text-[10px]">تظهر هنا كل الخدمات القادمة من المزوّد. استخدم المنصة والنوع والبحث، ثم حدّد ما تريد حفظه دفعة واحدة.</div>
+                  </div>
+                  <button type="button" onClick={() => setPreviewing(null)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border sm:h-9 sm:w-9 border-[var(--color-border)] bg-[var(--color-surface-2)] text-zinc-400 transition hover:text-white"><XCircle size={17} /></button>
                 </div>
-                <button onClick={() => setPreviewing(null)} className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] text-zinc-400 transition hover:text-white">
-                  <XCircle size={17} />
-                </button>
+                <div className="mt-2 grid grid-cols-2 gap-1 text-center sm:mt-3 sm:grid-cols-4 sm:gap-2">
+                  <div className="rounded-lg border border-[var(--color-gold)]/15 bg-[var(--color-surface-2)] px-1.5 py-1.5 sm:rounded-xl sm:px-2 sm:py-2"><div className="text-[8px] text-zinc-500 sm:text-[9px]">إجمالي الكتالوج</div><b className="text-[12px] text-white sm:text-[14px]">{previewServices.length.toLocaleString("en-US")}</b></div>
+                  <div className="rounded-lg border border-green-500/20 bg-green-500/5 px-1.5 py-1.5 sm:rounded-xl sm:px-2 sm:py-2"><div className="text-[8px] text-zinc-500 sm:text-[9px]">مطابق للفلتر</div><b className="text-[12px] text-green-400 sm:text-[14px]">{filteredPreviewServices.length.toLocaleString("en-US")}</b></div>
+                  <div className="rounded-lg border border-[var(--color-gold)]/15 bg-[var(--color-surface-2)] px-1.5 py-1.5 sm:rounded-xl sm:px-2 sm:py-2"><div className="text-[8px] text-zinc-500 sm:text-[9px]">قابل للإضافة</div><b className="text-[12px] text-[var(--color-gold-bright)] sm:text-[14px]">{selectablePreviewServices.length.toLocaleString("en-US")}</b></div>
+                  <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-1.5 py-1.5 sm:rounded-xl sm:px-2 sm:py-2"><div className="text-[8px] text-zinc-500 sm:text-[9px]">محدد الآن</div><b className="text-[12px] text-sky-300 sm:text-[14px]">{selectedVisibleCount.toLocaleString("en-US")}</b></div>
+                </div>
               </div>
-              <div className="p-3">
-                <div className="relative mb-3">
+
+              <div className="space-y-2 p-2 sm:space-y-3 sm:p-3">
+                <div className="relative">
                   <Search size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-                  <input
-                    value={previewSearch}
-                    onChange={(e) => setPreviewSearch(e.target.value)}
-                    placeholder="ابحث بالاسم أو رقم الخدمة..."
-                    className="h-10 w-full rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-surface-2)] pr-9 pl-3 text-[12px] font-bold text-white placeholder:text-zinc-600 outline-none focus:border-[var(--color-gold)]/60"
-                  />
-                  {/* فلاتر نوع الخدمة: اختر النوع لعرض خدماته فقط */}
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {["الكل", ...previewCats]
-                      .filter((cat) => cat !== "الكل" || previewCats.length > 0)
-                      .map((cat) => (
-                        <button
-                          key={cat}
-                          type="button"
-                          onClick={() => setPreviewCat(cat)}
-                          className={`rounded-full border px-2.5 py-1 text-[9.5px] font-black transition active:scale-[0.95] ${previewCat === cat ? "border-[var(--color-gold)] bg-gradient-to-r from-[var(--color-gold-bright)] to-[var(--color-gold)] text-black shadow-[0_0_12px_-4px_rgba(255,215,0,0.5)]" : "border-[var(--color-gold)]/20 bg-[var(--color-surface-2)] text-zinc-400 hover:border-[var(--color-gold)]/40 hover:text-[var(--color-gold-pale)]"}`}
-                        >
-                          {cat}
-                        </button>
-                      ))}
+                  <input value={previewSearch} onChange={(e) => { setPreviewSearch(e.target.value); setPreviewPage(1); }} placeholder="ابحث باسم الخدمة أو رقمها أو التصنيف..." className="h-9 w-full rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-surface-2)] pr-9 pl-3 text-[11px] font-bold text-white placeholder:text-zinc-600 outline-none focus:border-[var(--color-gold)]/60 sm:h-10 sm:text-[12px]" />
+                </div>
+
+                <div className="rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-surface)] p-2 sm:rounded-2xl sm:p-2.5">
+                  <div className="mb-1 flex items-center gap-1 text-[9px] font-black text-[var(--color-gold-pale)] sm:mb-1.5 sm:gap-1.5 sm:text-[10px]"><Filter size={12} /> المنصة</div>
+                  <div className="no-scrollbar flex gap-1.5 overflow-x-auto pb-1">
+                    {["all", ...previewPlatforms].map((platform) => (
+                      <button key={platform} type="button" onClick={() => { setPreviewPlatform(platform); setPreviewPage(1); }} className={`shrink-0 rounded-full border px-2 py-1 text-[9px] font-black transition active:scale-95 sm:px-2.5 sm:py-1.5 sm:text-[10px] ${previewPlatform === platform ? "border-[var(--color-gold)] bg-gradient-to-r from-[var(--color-gold-bright)] to-[var(--color-gold)] text-black" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-zinc-400 hover:text-[var(--color-gold-pale)]"}`}>{platformLabels[platform] || platform}</button>
+                    ))}
+                  </div>
+                  <div className="mb-1 mt-2 text-[9px] font-black text-[var(--color-gold-pale)] sm:mb-1.5 sm:mt-3 sm:text-[10px]">نوع الخدمة</div>
+                  <div className="no-scrollbar flex gap-1.5 overflow-x-auto pb-1">
+                    {["all", ...previewTypes].map((type) => (
+                      <button key={type} type="button" onClick={() => { setPreviewType(type); setPreviewPage(1); }} className={`shrink-0 rounded-full border px-2 py-1 text-[9px] font-black transition active:scale-95 sm:px-2.5 sm:py-1.5 sm:text-[10px] ${previewType === type ? "border-[var(--color-gold)] bg-gradient-to-r from-[var(--color-gold-bright)] to-[var(--color-gold)] text-black" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-zinc-400 hover:text-[var(--color-gold-pale)]"}`}>{typeLabels[type] || type}</button>
+                    ))}
                   </div>
                 </div>
+
+                <div className="grid grid-cols-3 gap-1 rounded-xl border border-[var(--color-gold)]/20 bg-gradient-to-r from-[var(--color-gold)]/10 to-transparent p-1.5 sm:flex sm:flex-wrap sm:items-center sm:gap-2 sm:rounded-2xl sm:p-2.5">
+                  <button type="button" onClick={toggleSelectAllFiltered} disabled={previewLoading || selectablePreviewServices.length === 0} className="flex h-8 min-w-0 items-center justify-center gap-1 rounded-lg border border-[var(--color-gold)]/35 bg-[var(--color-surface-2)] px-1.5 text-[9px] font-black text-[var(--color-gold-bright)] transition hover:border-[var(--color-gold)] disabled:opacity-45 sm:h-9 sm:gap-1.5 sm:rounded-xl sm:px-3 sm:text-[10.5px]"><CheckSquare size={13} /> <span className="sm:hidden">{allFilteredSelected ? "إلغاء الكل" : "تحديد الكل"}</span><span className="hidden sm:inline">{allFilteredSelected ? "إلغاء تحديد الكل" : "تحديد الكل في الفلتر"}</span></button>
+                  <button type="button" onClick={() => requestBulkAdd("selected")} disabled={selectedVisibleCount === 0 || bulkSaving} className="flex h-8 min-w-0 items-center justify-center gap-1 rounded-lg bg-gradient-to-r from-[var(--color-gold-bright)] to-[var(--color-gold)] px-1 text-[9px] font-black text-black transition hover:brightness-110 disabled:opacity-45 sm:h-9 sm:flex-1 sm:gap-1.5 sm:rounded-xl sm:px-3 sm:text-[10.5px]"><Plus size={13} /> <span className="sm:hidden">المحدد ({selectedVisibleCount})</span><span className="hidden sm:inline">إضافة المحدد ({selectedVisibleCount})</span></button>
+                  <button type="button" onClick={() => requestBulkAdd("filtered")} disabled={selectablePreviewServices.length === 0 || bulkSaving} className="flex h-8 min-w-0 items-center justify-center gap-1 rounded-lg border border-green-500/35 bg-green-500/10 px-1 text-[9px] font-black text-green-300 transition hover:bg-green-500/15 disabled:opacity-45 sm:h-9 sm:flex-1 sm:gap-1.5 sm:rounded-xl sm:px-3 sm:text-[10.5px]"><Layers3 size={13} /> <span className="sm:hidden">كل المطابق ({selectablePreviewServices.length})</span><span className="hidden sm:inline">إضافة كل المطابق ({selectablePreviewServices.length})</span></button>
+                </div>
+
                 {previewLoading ? (
-                  <div className="flex items-center justify-center gap-2 py-10 text-[12px] text-zinc-400">
-                    <Loader2 className="animate-spin" size={16} /> جاري جلب الخدمات من سيرفر المزود...
-                  </div>
+                  <div className="flex items-center justify-center gap-2 py-12 text-[12px] text-zinc-400"><Loader2 className="animate-spin" size={17} /> جاري جلب الكتالوج كاملًا من سيرفر المزوّد...</div>
                 ) : previewServices.length === 0 ? (
-                  <div className="py-8 text-center text-[11px] text-zinc-500">لا توجد خدمات لدى هذا المزود</div>
+                  <div className="py-10 text-center text-[11px] text-zinc-500">لا توجد خدمات لدى هذا المزوّد</div>
+                ) : filteredPreviewServices.length === 0 ? (
+                  <div className="py-10 text-center text-[11px] text-zinc-500">لا توجد خدمات مطابقة للفلاتر الحالية</div>
                 ) : (
-                  <div className="max-h-[55vh] space-y-1.5 overflow-y-auto">
-                    {previewServices
-                      .filter((s: any) => previewCat === "الكل" || s.category === previewCat || s.type === previewCat)
-                      .filter((s: any) => {
-                        const q = previewSearch.trim().toLowerCase();
-                        if (!q) return true;
-                        return `${s.name || ""} ${s.service || ""} ${s.category || ""}`.toLowerCase().includes(q);
-                      })
-                      .map((s: any) => (
-                        <PreviewServiceRow
-                          key={s.service}
-                          s={s}
-                          previewing={previewing!}
-                          services={services}
-                          globalMarkup={globalMarkup}
-                          onAdd={() => addServiceFromPreview(previewing!, String(s.service))}
-                          onSaved={(msg) => setResult({ message: msg })}
-                          onError={(msg) => setResult({ error: msg })}
-                          onRefresh={() => openPreviewOrig(previewing!)}
-                        />
+                  <>
+                    <div className="flex items-center justify-between px-1 text-[9px] text-zinc-500 sm:text-[10px]"><span>عرض {((safePreviewPage - 1) * previewPageSize + 1).toLocaleString("en-US")}–{Math.min(safePreviewPage * previewPageSize, filteredPreviewServices.length).toLocaleString("en-US")} من {filteredPreviewServices.length.toLocaleString("en-US")}</span><span>60 خدمة في الصفحة</span></div>
+                    <div className="max-h-[43vh] space-y-1 overflow-y-auto rounded-2xl border border-[var(--color-gold)]/10 bg-[#080808] p-1 sm:max-h-[47vh] sm:space-y-1.5 sm:p-1.5">
+                      {visiblePreviewServices.map((s: PreviewCatalogService) => (
+                        <PreviewServiceRow key={s.service} s={s} previewing={previewing!} services={services} globalMarkup={globalMarkup} selected={selectedPreviewIds.has(String(s.service))} onSelect={togglePreviewSelection} onAdd={() => addServiceFromPreview(previewing!, String(s.service))} onSaved={(msg) => setResult({ message: msg })} onError={(msg) => setResult({ error: msg })} onRefresh={() => openPreviewOrig(previewing!)} />
                       ))}
-                  </div>
+                    </div>
+                    <div className="flex items-center justify-center gap-1.5 pt-0.5 sm:gap-2 sm:pt-1">
+                      <button type="button" onClick={() => setPreviewPage((page) => Math.max(1, page - 1))} disabled={safePreviewPage <= 1} className="h-7 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 text-[9px] font-black text-zinc-300 disabled:opacity-35 sm:h-8 sm:px-3 sm:text-[10px]">السابق</button>
+                      <span className="rounded-lg bg-[var(--color-surface-2)] px-2 py-1.5 text-[9px] font-black text-[var(--color-gold-pale)] sm:px-3 sm:py-2 sm:text-[10px]">صفحة {safePreviewPage} / {previewTotalPages}</span>
+                      <button type="button" onClick={() => setPreviewPage((page) => Math.min(previewTotalPages, page + 1))} disabled={safePreviewPage >= previewTotalPages} className="h-7 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 text-[9px] font-black text-zinc-300 disabled:opacity-35 sm:h-8 sm:px-3 sm:text-[10px]">التالي</button>
+                    </div>
+                  </>
                 )}
-                <div className="mt-2 pb-1 text-center text-[9.5px] text-zinc-600">الإضافة الانتقائية تظهر فورًا عند كل المستخدمين ومستخدمي API — أي تعديل على الاسم أو السعر يُحفظ فورًا</div>
+                <div className="pb-1 text-center text-[9.5px] leading-relaxed text-zinc-600">الإضافة الجماعية تحفظ الخدمات في Turso دفعة واحدة مع منع التكرار. لا يتم إنشاء طلبات للمزوّد ولا خصم أي رصيد أثناء هذه العملية.</div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ تأكيد الحفظ الجماعي ═══ */}
+        {bulkConfirm && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={() => !bulkSaving && setBulkConfirm(null)}>
+            <div className="w-full max-w-md rounded-3xl border border-[var(--color-gold)]/35 bg-[#0d0d0d] p-5 shadow-[0_20px_80px_-20px_rgba(212,175,55,0.4)]" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[var(--color-gold)]/15 text-[var(--color-gold-bright)]"><CheckSquare size={19} /></span><div><h3 className="text-[16px] font-black text-white">تأكيد إضافة الخدمات</h3><p className="mt-1 text-[11px] leading-relaxed text-zinc-400">سيتم حفظ <b className="text-[var(--color-gold-bright)]">{bulkConfirm.services.length.toLocaleString("en-US")} خدمة</b> في كتالوج المنصة دون هامش ربح تلقائي. يمكنك تطبيق الربح لاحقًا من بطاقة المزود على نطاق محدد فقط.</p></div></div>
+              <div className="mt-4 rounded-2xl border border-yellow-500/20 bg-yellow-500/5 p-3 text-[10.5px] leading-relaxed text-yellow-200/80">تأكد من الفلتر الحالي قبل المتابعة. هذه العملية لا ترسل أي طلبات مدفوعة للمزوّد، لكنها ستضيف الخدمات إلى قاعدة البيانات.</div>
+              <div className="mt-4 flex gap-2"><button type="button" onClick={() => setBulkConfirm(null)} disabled={bulkSaving} className="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] py-2.5 text-[12px] font-black text-zinc-300 disabled:opacity-50">إلغاء</button><button type="button" onClick={saveBulkServices} disabled={bulkSaving} className="flex-1 rounded-xl bg-gradient-to-r from-[var(--color-gold-bright)] to-[var(--color-gold)] py-2.5 text-[12px] font-black text-black disabled:opacity-50">{bulkSaving ? <Loader2 className="mx-auto animate-spin" size={16} /> : `تأكيد إضافة ${bulkConfirm.services.length.toLocaleString("en-US")}`}</button></div>
             </div>
           </div>
         )}

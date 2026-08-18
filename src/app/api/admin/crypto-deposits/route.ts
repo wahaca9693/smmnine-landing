@@ -27,7 +27,11 @@ export async function GET() {
     `);
     return json({ deposits: result.rows });
   } catch (err: any) {
-    return json({ error: err.message }, { status: 500 });
+    const message = String(err?.message || "");
+    if (message === "Unauthorized") return json({ error: "يرجى تسجيل الدخول" }, { status: 401 });
+    if (message === "Forbidden") return json({ error: "غير مصرح" }, { status: 403 });
+    if (message === "Account banned") return json({ error: "الحساب محظور" }, { status: 403 });
+    return json({ error: "تعذر معالجة إيداع الكريبتو حاليًا" }, { status: 500 });
   }
 }
 
@@ -89,6 +93,10 @@ export async function PATCH(request: Request) {
 
     return json({ message: "تم شحن الرصيد للمستخدم" });
   } catch (err: any) {
-    return json({ error: err.message }, { status: 500 });
+    const message = String(err?.message || "");
+    if (message === "Unauthorized") return json({ error: "يرجى تسجيل الدخول" }, { status: 401 });
+    if (message === "Forbidden") return json({ error: "غير مصرح" }, { status: 403 });
+    if (message === "Account banned") return json({ error: "الحساب محظور" }, { status: 403 });
+    return json({ error: "تعذر معالجة إيداع الكريبتو حاليًا" }, { status: 500 });
   }
 }

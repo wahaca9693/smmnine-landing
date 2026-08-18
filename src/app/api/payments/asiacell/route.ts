@@ -43,7 +43,8 @@ export async function POST(request: Request) {
     }
 
     if (action === "topup") {
-      const result = await topupCard(userSession.userId!, body.sessionId, body.voucher, admin);
+      const sessionId = typeof body.sessionId === "string" && body.sessionId.trim() ? body.sessionId.trim() : undefined;
+      const result = await topupCard(userSession.userId!, sessionId, body.voucher, admin);
       return NextResponse.json(result);
     }
 
@@ -53,7 +54,7 @@ export async function POST(request: Request) {
     }
 
     if (action === "confirm") {
-      const result = await confirmTransfer(userSession.userId!, body.sessionId, body.otp);
+      const result = await confirmTransfer(userSession.userId!, body.sessionId, body.otp, admin);
       return NextResponse.json(result);
     }
 

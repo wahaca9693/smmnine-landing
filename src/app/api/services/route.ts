@@ -35,6 +35,9 @@ function json(data: unknown, init?: ResponseInit) {
   });
 }
 
+let servicesCache: { at: number; payload: unknown } | null = null;
+const SERVICES_CACHE_MS = 3_000;
+
 const platforms = [
   { id: "facebook", name: "فيسبوك", color: "#1877F2" },
   { id: "tiktok", name: "تيك توك", color: "#000000" },
@@ -56,14 +59,18 @@ const platforms = [
 
 export async function GET() {
   try {
-    let services: any[] = [];
-    try {
-      services = await getServices();
-    } catch {
-      // مزود Follower غير مربوط بمفتاح — نعمل بالخدمات المحلية ومزودين فقط
-      services = [];
+    if (servicesCache && Date.now() - servicesCache.at < SERVICES_CACHE_MS) {
+      return json(servicesCache.payload);
     }
-    const providerServices = await getProviderServices();
+
+    const [servicesResult, providerServices] = await Promise.all([
+      getServices().catch(() => {
+        // مزود Follower غير مربوط بمفتاح — نعمل بالخدمات المحلية ومزودين فقط
+        return [] as any[];
+      }),
+      getProviderServices(),
+    ]);
+    const services = Array.isArray(servicesResult) ? servicesResult : [];
 
     // دمج خدمات المزودين الخارجيين مع الخدمات المحلية
     const providerMapped = providerServices.map((s: any) => ({
@@ -91,12 +98,14 @@ export async function GET() {
 
     const categories = [...new Set(merged.map((s: any) => s.category || "عام"))].sort();
 
-    return json({
+    const payload = {
       services: enrichedServices,
       categories,
       platforms,
       count: merged.length,
-    });
+    };
+    servicesCache = { at: Date.now(), payload };
+    return json(payload);
   } catch (err: any) {
     return json({ error: err.message }, { status: 500 });
   }

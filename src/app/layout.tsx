@@ -42,10 +42,10 @@ export default async function RootLayout({
 }>) {
   const cookieStore = await cookies();
   const savedLocale = cookieStore.get("follower-locale")?.value;
-  const initialLocale: Locale = savedLocale === "en" ? "en" : "ar";
+  const initialLocale: Locale = ["ar", "en", "ru", "zh", "hi"].includes(savedLocale as Locale) ? (savedLocale as Locale) : "ar";
 
   return (
-    <html lang={initialLocale} dir={initialLocale === "ar" ? "rtl" : "ltr"} className={`${tajawal.variable} h-full antialiased`}>
+    <html lang={initialLocale} dir={initialLocale === "ar" ? "rtl" : "ltr"} className={`${tajawal.variable} h-full antialiased`} data-locale={initialLocale}>
       <body className="min-h-full bg-[var(--color-bg)] text-white">
         <Providers initialLocale={initialLocale}>{children}</Providers>
       </body>

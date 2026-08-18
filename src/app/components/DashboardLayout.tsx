@@ -17,10 +17,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const refreshUser = useCallback(async () => {
     try {
-      const res = await fetch("/api/user", { cache: "no-store" });
+      const res = await fetch("/api/user", {
+        cache: "no-store",
+        credentials: "include",
+      });
+
+      // Only a deliberate/expired session should send the user to login.
+      // A 5xx, proxy hiccup, or temporary Turso failure must not look like logout.
+      if (res.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!res.ok) {
+        return;
+      }
+
       const data = await res.json();
-      if (data.error) {
-        router.push("/login");
+      if (!data?.user) {
         return;
       }
       setUser(data.user);

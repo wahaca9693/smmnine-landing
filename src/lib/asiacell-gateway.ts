@@ -3,7 +3,8 @@ import { randomUUID } from "crypto";
 import fetch, { Response as FetchResponse } from "node-fetch";
 import { HttpsProxyAgent } from "https-proxy-agent";
 
-export const AC_API = "https://odpapp.asiacell.com";
+export const AC_API = "https://app.asiacell.com";
+export const ASIACELL_TRANSFER_FEE_IQD = 500;
 export const AC_API_KEY = "1ccbc4c913bc4ce785a0a2de444aa0d6";
 
 export const BASE_HEADERS: Record<string, string> = {
@@ -310,6 +311,16 @@ export async function setUserVerifiedPhone(userId: number, phone: string): Promi
   await db.execute({ sql: "UPDATE users SET verified_phone = ? WHERE id = ?", args: [cleanPhone(phone), userId] });
 }
 
+export function getAsiacellExchangeRate(admin?: AdminSession | null): number {
+  const configured = Number(admin?.exchange_rate);
+  return Number.isFinite(configured) && configured > 0 ? configured : 1666;
+}
+
+export function convertIqdToUsd(amountIQD: number, exchangeRate: number): number {
+  const value = Number(amountIQD) / Number(exchangeRate);
+  return Number.isFinite(value) && value > 0 ? Math.round(value * 10000) / 10000 : 0;
+}
+
 export async function creditUser(userId: number, amount: number, method: string, description: string, paymentId: string): Promise<void> {
   await db.execute({ sql: "UPDATE users SET balance = balance + ? WHERE id = ?", args: [amount, userId] });
   await db.execute({
@@ -377,15 +388,16 @@ export function extractTopupAmount(data: any): number {
   return 0;
 }
 
-export async function topupCard(userId: number, sessionId: string | undefined, voucher: string, admin?: AdminSession | null): Promise<{ success: boolean; credited?: number; amountIQD?: number; message?: string; error?: string }> {
+export async function topupCard(userId: number, sessionId: string | undefined, voucher: string, admin?: AdminSession | null): Promise<{ success: boolean; credited?: number; amountIQD?: number; exchangeRate?: number; message?: string; error?: string }> {
   let session: CustomerSession | null = null;
   if (sessionId) session = await getCustomerSession(sessionId);
 
-  const effectiveToken = session?.access_token || admin?.access_token || "";
-  const effectiveDeviceId = session?.device_id || admin?.device_id || "";
-
+  // البطاقة لا تحتاج جلسة OTP للمستخدم؛ عند غيابها نتحقق عبر حساب المتجر.
+  // تبقى بيانات الاعتماد على الخادم ولا تُعاد إلى المتصفح.
+  const effectiveToken = session?.access_token || admin?.access_token;
+  const effectiveDeviceId = session?.device_id || admin?.device_id;
   if (!effectiveToken || !effectiveDeviceId) {
-    return { success: false, error: "بوابة آسياسيل غير متصلة - تواصل مع الإدارة" };
+    return { success: false, error: "البوابة غير جاهزة للتحقق من البطاقة - تواصل مع الإدارة" };
   }
 
   const v = String(voucher || "").trim();
@@ -411,10 +423,14 @@ export async function topupCard(userId: number, sessionId: string | undefined, v
     return { success: false, message: "تم شحن الكارت لكن لم يتم تحديد المبلغ - تواصل مع الإدارة" };
   }
 
-  await creditUser(userId, finalAmount, "asiacell", `شحن كرت آسياسيل بقيمة ${finalAmount}`, `card_${v.slice(-4)}_${Date.now()}`);
+  const exchangeRate = getAsiacellExchangeRate(admin);
+  const creditedUsd = convertIqdToUsd(finalAmount, exchangeRate);
+  if (!creditedUsd) return { success: false, error: "تعذر حساب قيمة الشحن بالدولار - تواصل مع الإدارة" };
+
+  await creditUser(userId, creditedUsd, "asiacell", `شحن كرت آسياسيل بقيمة ${finalAmount} د.ع (سعر الصرف ${exchangeRate} د.ع/دولار)`, `card_${v.slice(-4)}_${Date.now()}`);
   if (session) await deleteCustomerSession(session.id);
 
-  return { success: true, amountIQD: finalAmount, credited: finalAmount, message: `تم شحن الكرت وإضافة ${finalAmount} لرصيدك` };
+  return { success: true, amountIQD: finalAmount, credited: creditedUsd, exchangeRate, message: `تم شحن الكرت بقيمة ${finalAmount.toLocaleString("ar-IQ")} د.ع وإضافة ${creditedUsd.toFixed(4)} دولار إلى رصيدك` };
 }
 
 export async function startTransfer(
@@ -422,7 +438,7 @@ export async function startTransfer(
   sessionId: string,
   amountIQD: number,
   admin?: AdminSession | null
-): Promise<{ success: boolean; message?: string; error?: string }> {
+): Promise<{ success: boolean; amountIQD?: number; feeIQD?: number; totalIQD?: number; message?: string; error?: string }> {
   const session = await getCustomerSession(sessionId);
   if (!session || !session.access_token) return { success: false, error: "الجلسة منتهية أو لم يتم التحقق" };
 
@@ -431,9 +447,11 @@ export async function startTransfer(
 
   if (!amountIQD || amountIQD < 250) return { success: false, error: "الحد الأدنى للتحويل 250 د.ع" };
 
+  const transferFeeIQD = ASIACELL_TRANSFER_FEE_IQD;
+  const totalTransferIQD = amountIQD + transferFeeIQD;
   const { json: data, text } = await retryAsiacellFetch(
     `${AC_API}/api/v1/credit-transfer/start?lang=ar`,
-    { method: "POST", body: JSON.stringify({ amount: amountIQD, receiverMsisdn: storePhone }) },
+    { method: "POST", body: JSON.stringify({ amount: totalTransferIQD, receiverMsisdn: storePhone }) },
     authHeaders(session.device_id, session.access_token)
   );
 
@@ -452,10 +470,16 @@ export async function startTransfer(
   }
 
   await updateCustomerSession(session.id, { transfer_pid: transferPid, amount: amountIQD, step: "awaiting_transfer_otp" });
-  return { success: true, message: data.message || "تم بدء التحويل. أدخل رمز التأكيد الذي وصلك من آسيا سيل." };
+  return {
+    success: true,
+    amountIQD,
+    feeIQD: transferFeeIQD,
+    totalIQD: totalTransferIQD,
+    message: data.message || `تم بدء تحويل ${totalTransferIQD.toLocaleString("ar-IQ")} د.ع شامل رسم التحويل. أدخل رمز التأكيد الذي وصلك من آسيا سيل.`,
+  };
 }
 
-export async function confirmTransfer(userId: number, sessionId: string, otp: string): Promise<{ success: boolean; credited?: number; message?: string; error?: string }> {
+export async function confirmTransfer(userId: number, sessionId: string, otp: string, admin?: AdminSession | null): Promise<{ success: boolean; credited?: number; amountIQD?: number; feeIQD?: number; totalIQD?: number; exchangeRate?: number; message?: string; error?: string }> {
   const session = await getCustomerSession(sessionId);
   if (!session || !session.access_token || !session.transfer_pid) {
     return { success: false, error: "الجلسة منتهية أو لم يتم بدء التحويل" };
@@ -479,10 +503,24 @@ export async function confirmTransfer(userId: number, sessionId: string, otp: st
     return { success: false, message: extractAsiacellError(data) || "فشل تأكيد التحويل" };
   }
 
-  await creditUser(userId, session.amount, "asiacell", `تحويل رصيد آسياسيل بقيمة ${session.amount}`, `transfer_${session.phone}_${Date.now()}`);
+  const transferFeeIQD = ASIACELL_TRANSFER_FEE_IQD;
+  const totalTransferIQD = session.amount + transferFeeIQD;
+  const exchangeRate = getAsiacellExchangeRate(admin);
+  const creditedUsd = convertIqdToUsd(session.amount, exchangeRate);
+  if (!creditedUsd) return { success: false, error: "تعذر حساب قيمة التحويل بالدولار - تواصل مع الإدارة" };
+
+  await creditUser(userId, creditedUsd, "asiacell", `تحويل آسياسيل: صافي ${session.amount} د.ع + رسم ${transferFeeIQD} د.ع = إجمالي ${totalTransferIQD} د.ع (سعر الصرف ${exchangeRate} د.ع/دولار)`, `transfer_${session.phone}_${Date.now()}`);
   await deleteCustomerSession(session.id);
 
-  return { success: true, credited: session.amount, message: `تم التحويل بنجاح! تمت إضافة ${session.amount} لرصيدك.` };
+  return {
+    success: true,
+    credited: creditedUsd,
+    amountIQD: session.amount,
+    feeIQD: transferFeeIQD,
+    totalIQD: totalTransferIQD,
+    exchangeRate,
+    message: `تم التحويل بقيمة ${session.amount.toLocaleString("ar-IQ")} د.ع. الرسم ${transferFeeIQD.toLocaleString("ar-IQ")} د.ع، والإجمالي المدفوع ${totalTransferIQD.toLocaleString("ar-IQ")} د.ع. تمت إضافة ${creditedUsd.toFixed(4)} دولار إلى رصيدك.`,
+  };
 }
 
 export async function resendTransferOtp(sessionId: string): Promise<{ success: boolean; message?: string; error?: string }> {
@@ -558,7 +596,11 @@ export async function checkRecordsAndCredit(): Promise<{ checked: boolean; proce
 
           if (result.rows.length > 0) {
             const user = result.rows[0] as any;
-            await creditUser(Number(user.id), amount, "asiacell", `تحويل وارد من ${sender} بقيمة ${amount}`, recordId);
+            const exchangeRate = getAsiacellExchangeRate(admin);
+            const creditedUsd = convertIqdToUsd(amount, exchangeRate);
+            if (creditedUsd > 0) {
+              await creditUser(Number(user.id), creditedUsd, "asiacell", `تحويل وارد من ${sender} بقيمة ${amount} د.ع (سعر الصرف ${exchangeRate} د.ع/دولار)`, recordId);
+            }
             processed++;
           }
         }

@@ -14,7 +14,11 @@ if (!url || (!authToken && !useLocalDb)) {
 
 export const db = createClient({ url, authToken });
 
-export async function initDb() {
+let initPromise: Promise<void> | null = null;
+
+export function initDb(): Promise<void> {
+  if (initPromise) return initPromise;
+  initPromise = (async () => {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,6 +106,31 @@ export async function initDb() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
+
+  const cryptoDepositColumns = await db.execute({ sql: "PRAGMA table_info(crypto_deposits)" });
+  const existingCryptoDepositColumns = new Set((cryptoDepositColumns.rows as any[]).map((c: any) => c.name));
+  if (!existingCryptoDepositColumns.has("payment_id")) {
+    await db.execute(`ALTER TABLE crypto_deposits ADD COLUMN payment_id TEXT`);
+  }
+  if (!existingCryptoDepositColumns.has("order_id")) {
+    await db.execute(`ALTER TABLE crypto_deposits ADD COLUMN order_id TEXT`);
+  }
+  if (!existingCryptoDepositColumns.has("payment_status")) {
+    await db.execute(`ALTER TABLE crypto_deposits ADD COLUMN payment_status TEXT`);
+  }
+  if (!existingCryptoDepositColumns.has("actually_paid")) {
+    await db.execute(`ALTER TABLE crypto_deposits ADD COLUMN actually_paid REAL`);
+  }
+  if (!existingCryptoDepositColumns.has("pay_currency")) {
+    await db.execute(`ALTER TABLE crypto_deposits ADD COLUMN pay_currency TEXT`);
+  }
+  if (!existingCryptoDepositColumns.has("ipn_received_at")) {
+    await db.execute(`ALTER TABLE crypto_deposits ADD COLUMN ipn_received_at DATETIME`);
+  }
+  if (!existingCryptoDepositColumns.has("confirmed_at")) {
+    await db.execute(`ALTER TABLE crypto_deposits ADD COLUMN confirmed_at DATETIME`);
+  }
+  await db.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_crypto_deposits_payment_id ON crypto_deposits(payment_id) WHERE payment_id IS NOT NULL`);
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS auto_refills (
@@ -207,6 +236,11 @@ export async function initDb() {
       cardColor TEXT DEFAULT '#111111',
       surfaceColor TEXT DEFAULT '#1a1a1a',
       borderColor TEXT DEFAULT '#27272a',
+      siteDescription TEXT DEFAULT 'منصة خدمات تسويق اجتماعي احترافية',
+      defaultCurrency TEXT DEFAULT 'USD',
+      cryptoMinAmount REAL DEFAULT 1,
+      asiacellMinAmount REAL DEFAULT 0,
+      apiV2Enabled INTEGER DEFAULT 1,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -276,10 +310,17 @@ export async function initDb() {
     )
   `);
 
-  // عمود وسم "جديد" للخدمات المضافة حديثًا من المزودين
-  const colCheck = await db.execute({ sql: "PRAGMA table_info(provider_services)" });
-  if (!(colCheck.rows as any[]).some((c: any) => c.name === "is_new")) {
+  // ترقيات آمنة للخدمات: نمط التسعير وقيمة البيع اليدوية الدقيقة
+  const serviceColumns = await db.execute({ sql: "PRAGMA table_info(provider_services)" });
+  const existingServiceColumns = new Set((serviceColumns.rows as any[]).map((c: any) => c.name));
+  if (!existingServiceColumns.has("is_new")) {
     await db.execute(`ALTER TABLE provider_services ADD COLUMN is_new INTEGER DEFAULT 1`);
+  }
+  if (!existingServiceColumns.has("pricing_mode")) {
+    await db.execute(`ALTER TABLE provider_services ADD COLUMN pricing_mode TEXT DEFAULT 'markup'`);
+  }
+  if (!existingServiceColumns.has("manual_price")) {
+    await db.execute(`ALTER TABLE provider_services ADD COLUMN manual_price REAL`);
   }
 
   await db.execute(`
@@ -293,6 +334,65 @@ export async function initDb() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // أكواد الهدايا/الدعوة التي تنشئها الإدارة وتضيف رصيدًا للمستخدم عند الاسترداد
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS gift_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL UNIQUE,
+      kind TEXT DEFAULT 'gift',
+      amount REAL NOT NULL,
+      max_uses INTEGER DEFAULT 1,
+      used_count INTEGER DEFAULT 0,
+      expires_at DATETIME,
+      is_active INTEGER DEFAULT 1,
+      created_by INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS gift_code_redemptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(code_id, user_id),
+      FOREIGN KEY (code_id) REFERENCES gift_codes(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  // سجل تدقيق إداري: يوثق الإجراء والهدف دون تخزين أسرار أو كلمات مرور
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS admin_audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      admin_user_id INTEGER,
+      target_user_id INTEGER,
+      action TEXT NOT NULL,
+      details TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (admin_user_id) REFERENCES users(id),
+      FOREIGN KEY (target_user_id) REFERENCES users(id)
+    )
+  `);
+
+  // حماية المصادقة: لا نخزن IP الخام، بل بصمة SHA-256 مع عداد زمني للمحاولات
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS auth_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key_hash TEXT NOT NULL,
+      action TEXT NOT NULL,
+      attempt_count INTEGER DEFAULT 0,
+      window_started_at INTEGER NOT NULL,
+      blocked_until INTEGER DEFAULT 0,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(key_hash, action)
+    )
+  `);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_auth_attempts_updated_at ON auth_attempts(updated_at)`);
 
   // مفاتيح API للمستخدمين (كل مستخدم يمكنه إنشاء مفتاح لاستخدام المنصة من موقعه/بوته)
   await db.execute(`
@@ -312,6 +412,11 @@ export async function initDb() {
   for (const col of [
     "secondaryColor TEXT DEFAULT '#fbbf24'",
     "primaryLight TEXT DEFAULT '#fdba74'",
+    "siteDescription TEXT DEFAULT 'منصة خدمات تسويق اجتماعي احترافية'",
+    "defaultCurrency TEXT DEFAULT 'USD'",
+    "cryptoMinAmount REAL DEFAULT 1",
+    "asiacellMinAmount REAL DEFAULT 0",
+    "apiV2Enabled INTEGER DEFAULT 1",
   ]) {
     try {
       await db.execute(`ALTER TABLE site_settings ADD COLUMN ${col}`);
@@ -319,4 +424,9 @@ export async function initDb() {
       // العمود موجود مسبقًا — تخطى
     }
   }
+  })().catch((error) => {
+    initPromise = null;
+    throw error;
+  });
+  return initPromise;
 }

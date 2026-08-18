@@ -124,9 +124,11 @@ export async function POST(request: Request) {
     return json({ error: `الكمية يجب أن تكون بين ${min} و ${max}` }, { status: 400 });
   }
 
+  const storedMarkup = Number(svc.markup_percent);
+  const safeMarkup = Number.isFinite(storedMarkup) && storedMarkup >= 0 ? storedMarkup : 0;
   const sellRate = svc.sell_rate != null
     ? Number(svc.sell_rate)
-    : Number(svc.rate) * (1 + (Number(svc.markup_percent) || 30) / 100);
+    : Number(svc.rate) * (1 + safeMarkup / 100);
   const cost = (qty / 1000) * sellRate;
   if (!Number.isFinite(cost) || cost < 0) return json({ error: "سعر الخدمة غير صالح" }, { status: 500 });
 

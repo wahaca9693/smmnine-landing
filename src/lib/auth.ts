@@ -9,12 +9,25 @@ export interface SessionData {
   isLoggedIn?: boolean;
 }
 
+const sessionSecret = process.env.SESSION_SECRET;
+
+if (!sessionSecret || sessionSecret.length < 32) {
+  throw new Error("SESSION_SECRET must be configured with at least 32 characters");
+}
+
 const sessionOptions: SessionOptions = {
-  password: process.env.SESSION_SECRET!,
+  password: sessionSecret,
   cookieName: "follower-session",
   cookieOptions: {
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    // Production defaults to secure cookies. Set SESSION_COOKIE_SECURE=0 only
+    // for local HTTP testing; HTTPS deployments should leave it enabled.
+    secure: process.env.SESSION_COOKIE_SECURE === "0"
+      ? false
+      : process.env.NODE_ENV === "production",
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30, // 30 days unless the user logs out
   },
 };
 
