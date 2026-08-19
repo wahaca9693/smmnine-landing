@@ -10,7 +10,7 @@
     "doctor": "node scripts/doctor.mjs",
     "healthcheck": "node scripts/healthcheck.mjs",
     "setup": "pnpm run doctor && pnpm run db:init && pnpm build",
-    "start:checked": "pnpm run doctor && next start -p 3000",
+    "start:checked": "pnpm run doctor && pnpm run db:init && SMMNINE_DB_SCHEMA_READY=1 next start -p 3000",
     "seed": "tsx scripts/seed.ts",
     "db:init": "tsx scripts/init-db.ts"
   },

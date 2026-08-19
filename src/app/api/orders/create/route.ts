@@ -7,6 +7,8 @@ import { executeProviderOrder } from "@/lib/providers";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+type JsonRecord = Record<string, unknown>;
+
 function json(data: unknown, init?: ResponseInit) {
   return NextResponse.json(data, {
     ...init,
@@ -56,7 +58,7 @@ export async function POST(request: Request) {
             LIMIT 1`,
       args: [providerLookupId, requestedServiceId],
     });
-    const providerService = providerResult.rows[0] as any;
+    const providerService = providerResult.rows[0] as unknown as JsonRecord | undefined;
 
     if (providerService) {
       const min = Number(providerService.min) || 0;
@@ -79,7 +81,7 @@ export async function POST(request: Request) {
         sql: "SELECT balance FROM users WHERE id = ?",
         args: [session.userId!],
       });
-      const balance = Number((userResult.rows[0] as any)?.balance || 0);
+      const balance = Number((userResult.rows[0] as unknown as JsonRecord | undefined)?.balance || 0);
       if (balance < cost) {
         return json({ error: "رصيد غير كافٍ" }, { status: 400 });
       }
@@ -90,7 +92,7 @@ export async function POST(request: Request) {
         sql: "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
         args: [cost, session.userId!, cost],
       });
-      if (Number((debit as any).rowsAffected || 0) !== 1) {
+      if (Number(debit.rowsAffected || 0) !== 1) {
         return json({ error: "رصيد غير كافٍ أو تغيّر أثناء المعالجة" }, { status: 409 });
       }
 
@@ -101,7 +103,7 @@ export async function POST(request: Request) {
                 VALUES (?, ?, ?, ?, ?, ?, 'processing', ?)`,
           args: [session.userId!, Number(providerService.id), String(providerService.name), String(link), qty, cost, Number(providerService.provider_id)],
         });
-        localOrderId = Number((orderResult as any).lastInsertRowid);
+        localOrderId = Number(orderResult.lastInsertRowid);
 
         await db.execute({
           sql: "INSERT INTO provider_order_logs (local_order_id, provider_id, remote_order_id, status) VALUES (?, ?, NULL, 'pending')",
@@ -161,13 +163,13 @@ export async function POST(request: Request) {
     }
 
     // Follower-backed services retain the existing remote order flow.
-    let services: any[] = [];
+    let services: JsonRecord[] = [];
     try {
       services = await getServices();
     } catch {
       services = [];
     }
-    const service = services.find((s: any) => String(s.service) === String(serviceId));
+    const service = services.find((s) => String(s.service) === String(serviceId));
     if (!service) {
       return json({ error: "الخدمة غير موجودة أو غير نشطة" }, { status: 404 });
     }
@@ -182,7 +184,7 @@ export async function POST(request: Request) {
     }
 
     const userResult = await db.execute({ sql: "SELECT balance FROM users WHERE id = ?", args: [session.userId!] });
-    const balance = Number((userResult.rows[0] as any)?.balance || 0);
+    const balance = Number((userResult.rows[0] as unknown as JsonRecord | undefined)?.balance || 0);
     if (balance < cost) {
       return json({ error: "رصيد غير كافٍ" }, { status: 400 });
     }
@@ -192,7 +194,7 @@ export async function POST(request: Request) {
       sql: "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
       args: [cost, session.userId!, cost],
     });
-    if (Number((debit as any).rowsAffected || 0) !== 1) {
+    if (Number(debit.rowsAffected || 0) !== 1) {
       return json({ error: "رصيد غير كافٍ أو تغيّر أثناء المعالجة" }, { status: 409 });
     }
 
@@ -213,13 +215,13 @@ export async function POST(request: Request) {
     try {
       const orderResult = await db.execute({
         sql: "INSERT INTO orders (user_id, smmnine_order_id, service_id, service_name, link, quantity, charge, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        args: [session.userId!, smmnineOrderId, Number(serviceId), service.name, link, qty, cost, "Pending"],
+        args: [session.userId!, smmnineOrderId, Number(serviceId), String(service.name), link, qty, cost, "Pending"],
       });
       localOrderId = Number(orderResult.lastInsertRowid);
 
       await db.execute({
         sql: "INSERT INTO transactions (user_id, type, amount, status, description) VALUES (?, ?, ?, ?, ?)",
-        args: [session.userId!, "order", -cost, "completed", `طلب #${smmnineOrderId} - ${service.name}`],
+        args: [session.userId!, "order", -cost, "completed", `طلب #${smmnineOrderId} - ${String(service.name)}`],
       });
     } catch (error) {
       await db.execute({ sql: "UPDATE users SET balance = balance + ? WHERE id = ?", args: [cost, session.userId!] });
@@ -243,9 +245,10 @@ export async function POST(request: Request) {
         status: "Pending",
       },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Create order error:", err);
-    const status = err?.message === "Unauthorized" ? 401 : err?.message === "Account banned" ? 403 : 500;
-    return json({ error: err.message || "حدث خطأ" }, { status });
+    const message = err instanceof Error ? err.message : "حدث خطأ";
+    const status = message === "Unauthorized" ? 401 : message === "Account banned" ? 403 : 500;
+    return json({ error: message }, { status });
   }
 }

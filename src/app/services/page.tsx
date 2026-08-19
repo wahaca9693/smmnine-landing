@@ -3,18 +3,39 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import { Modal } from "../components/Modal";
-import { Search, Layers, ChevronDown, ChevronUp, ShoppingCart, ShieldCheck, Sparkles, Zap, Infinity, RefreshCw } from "lucide-react";
+import { Search, Layers, ChevronDown, ChevronUp, ShoppingCart, ShieldCheck, Sparkles, Zap, Infinity, RefreshCw, type LucideIcon } from "lucide-react";
 import { PlatformIcon } from "../components/Icons";
 import Link from "next/link";
 import { useLiveRefresh } from "../components/useLiveRefresh";
 import { useLanguage, translatePlatform, translateServiceName, translateServiceType } from "../components/LanguageProvider";
 
+type ServiceRecord = {
+  service?: string | number;
+  name?: unknown;
+  serviceType?: string;
+  platform?: string;
+  category?: string;
+  rate?: number | string;
+  min?: number | string;
+  max?: number | string;
+  is_new?: boolean | number | string;
+};
+
+type ServiceBadge = {
+  label: string;
+  icon: LucideIcon;
+  color: string;
+};
+
 type ServicesSnapshot = {
-  services: any[];
+  services: ServiceRecord[];
   categories: string[];
-  platforms: any[];
   at: number;
 };
+
+function isTruthyFlag(value: unknown): boolean {
+  return value === true || value === 1 || value === "1" || value === "true";
+}
 
 let servicesSnapshot: ServicesSnapshot | null = null;
 
@@ -39,9 +60,24 @@ const platformOrder = [
 
 const serviceTypeIds = ["followers", "likes", "views", "comments", "shares", "saves", "votes", "stories", "reels", "live", "other"];
 
-function detectGuarantees(name: string, t: (key: string) => string): { isGuaranteed: boolean; badges: { label: string; icon: any; color: string }[] } {
+function safeServiceText(value: unknown): string {
+  return typeof value === "string" ? value : String(value ?? "");
+}
+
+function formatServiceRate(value: unknown): string {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount.toFixed(5) : "0.00000";
+}
+
+function formatServiceQuantity(value: unknown, locale: string): string {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "—";
+  return new Intl.NumberFormat(locale === "ar" ? "ar-IQ" : locale).format(amount);
+}
+
+function detectGuarantees(name: string, t: (key: string) => string): { isGuaranteed: boolean; badges: ServiceBadge[] } {
   const lower = name.toLowerCase();
-  const badges: { label: string; icon: any; color: string }[] = [];
+  const badges: ServiceBadge[] = [];
 
   if (/مضمون|ضمان|garant|guarantee|ضامن/.test(lower)) {
     badges.push({ label: t("service.badge.guaranteed"), icon: ShieldCheck, color: "bg-green-500/10 text-green-400 border-green-500/20" });
@@ -61,9 +97,7 @@ function detectGuarantees(name: string, t: (key: string) => string): { isGuarant
 
 export default function ServicesPage() {
   const { locale, t } = useLanguage();
-  const [services, setServices] = useState<any[]>(servicesSnapshot?.services || []);
-  const [categories, setCategories] = useState<string[]>(servicesSnapshot?.categories || []);
-  const [platforms, setPlatforms] = useState<any[]>(servicesSnapshot?.platforms || []);
+  const [services, setServices] = useState<ServiceRecord[]>(servicesSnapshot?.services || []);
   const [selectedPlatform, setSelectedPlatform] = useState<string>("all");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -81,8 +115,6 @@ export default function ServicesPage() {
   const loadServices = useCallback(async (silent = false) => {
     if (!silent && servicesSnapshot) {
       setServices(servicesSnapshot.services);
-      setCategories(servicesSnapshot.categories);
-      setPlatforms(servicesSnapshot.platforms);
       setLastSyncedAt(new Date(servicesSnapshot.at));
       setLoading(false);
     } else if (!silent) {
@@ -94,15 +126,16 @@ export default function ServicesPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "تعذر تحميل الخدمات");
       const nextSnapshot: ServicesSnapshot = {
-        services: data.services || [],
-        categories: data.categories || [],
-        platforms: data.platforms || [],
+        services: Array.isArray(data.services) ? data.services as ServiceRecord[] : [],
+        categories: Array.isArray(data.categories) ? data.categories as string[] : [],
         at: Date.now(),
       };
       servicesSnapshot = nextSnapshot;
       setServices(nextSnapshot.services);
-      setCategories(nextSnapshot.categories);
-      setPlatforms(nextSnapshot.platforms);
+      setExpandedCategories((previous) => {
+        if (Object.keys(previous).length > 0) return previous;
+        return Object.fromEntries(nextSnapshot.categories.slice(0, 2).map((category) => [category, true]));
+      });
       setFetchError("");
       setLastSyncedAt(new Date());
     } catch (error) {
@@ -114,29 +147,49 @@ export default function ServicesPage() {
   }, []);
 
   useEffect(() => {
-    void loadServices();
+    const timer = window.setTimeout(() => { void loadServices(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadServices]);
 
   useLiveRefresh(() => loadServices(true), { intervalMs: 120000 });
 
   const filteredServices = useMemo(() => {
+    const normalizedSearch = search.trim().toLocaleLowerCase(locale);
     return services.filter((s) => {
-      const matchesPlatform = selectedPlatform === "all" ? true : s.platform === selectedPlatform;
-      const matchesType = selectedType === "all" ? true : s.serviceType === selectedType;
-      const translatedName = translateServiceName(s.name, locale);
-      const matchesSearch = s.name.toLowerCase().includes(search.toLowerCase()) || translatedName.toLowerCase().includes(search.toLowerCase()) || String(s.service).includes(search);
+      const servicePlatform = safeServiceText(s.platform).toLowerCase();
+      const serviceType = safeServiceText(s.serviceType || "other").toLowerCase();
+      const serviceCategory = safeServiceText(s.category || "عام");
+      const rawName = safeServiceText(s.name);
+      const translatedName = translateServiceName(rawName, locale);
+      const searchableText = [
+        rawName,
+        translatedName,
+        safeServiceText(s.service),
+        servicePlatform,
+        translatePlatform(servicePlatform, locale),
+        serviceType,
+        translateServiceType(serviceType, locale),
+        serviceCategory,
+        translateServiceName(serviceCategory === "عام" ? "other" : serviceCategory, locale),
+      ].join(" ").toLocaleLowerCase(locale);
+      const matchesPlatform = selectedPlatform === "all" ? true : servicePlatform === selectedPlatform;
+      const matchesType = selectedType === "all" ? true : serviceType === selectedType;
+      const matchesSearch = !normalizedSearch || searchableText.includes(normalizedSearch);
       return matchesPlatform && matchesType && matchesSearch;
     }).sort((a, b) => {
       // الخدمات الجديدة (وسم "جديد" / تحديث) تظهر أولًا دائمًا
-      const aNew = !!(a as any).is_new ? 1 : 0;
-      const bNew = !!(b as any).is_new ? 1 : 0;
+      const aNew = isTruthyFlag(a.is_new) ? 1 : 0;
+      const bNew = isTruthyFlag(b.is_new) ? 1 : 0;
       if (aNew !== bNew) return bNew - aNew;
-      return String(a.service).localeCompare(String(b.service));
+      const aType = serviceTypeIds.indexOf(safeServiceText(a.serviceType || "other"));
+      const bType = serviceTypeIds.indexOf(safeServiceText(b.serviceType || "other"));
+      if (aType !== bType) return (aType === -1 ? serviceTypeIds.length : aType) - (bType === -1 ? serviceTypeIds.length : bType);
+      return safeServiceText(a.service).localeCompare(safeServiceText(b.service), locale, { numeric: true });
     });
   }, [services, selectedPlatform, selectedType, search, locale]);
 
   const servicesByCategory = useMemo(() => {
-    const map: Record<string, any[]> = {};
+    const map: Record<string, ServiceRecord[]> = {};
     filteredServices.forEach((s) => {
       const cat = s.category || "عام";
       if (!map[cat]) map[cat] = [];
@@ -150,19 +203,23 @@ export default function ServicesPage() {
     services
       .filter((s) => selectedPlatform === "all" || s.platform === selectedPlatform)
       .forEach((s) => types.add(s.serviceType || "other"));
-    return ["all", ...Array.from(types)];
+    return ["all", ...Array.from(types).sort((a, b) => {
+      const ia = serviceTypeIds.indexOf(a);
+      const ib = serviceTypeIds.indexOf(b);
+      return (ia === -1 ? serviceTypeIds.length : ia) - (ib === -1 ? serviceTypeIds.length : ib);
+    })];
   }, [services, selectedPlatform]);
 
   const guaranteedServices = useMemo(() => {
     return services.filter((s) => {
       const matchesPlatform = !guaranteedPlatform || guaranteedPlatform === "all" ? true : s.platform === guaranteedPlatform;
-      const { isGuaranteed } = detectGuarantees(s.name, t);
+      const { isGuaranteed } = detectGuarantees(safeServiceText(s.name), t);
       return matchesPlatform && isGuaranteed;
     });
   }, [services, guaranteedPlatform, t]);
 
   const guaranteedServicesByType = useMemo(() => {
-    const map: Record<string, any[]> = {};
+    const map: Record<string, ServiceRecord[]> = {};
     guaranteedServices.forEach((s) => {
       const type = s.serviceType || "other";
       if (!map[type]) map[type] = [];
@@ -351,15 +408,25 @@ export default function ServicesPage() {
                 {t("service.retry")}
               </button>
             </div>
+          ) : Object.keys(servicesByCategory).length === 0 ? (
+            <div className="card-luxe rounded-2xl border border-[var(--color-border)] p-8 text-center">
+              <Search size={34} className="mx-auto mb-3 text-[var(--color-primary)] opacity-70" />
+              <p className="font-black text-white">{t("service.noResults")}</p>
+              <p className="mt-1 text-xs text-zinc-500">{search.trim() ? search.trim() : translateServiceType(selectedType, locale)}</p>
+            </div>
           ) : (
             <div className="space-y-3">
-              {Object.entries(servicesByCategory).map(([category, items]) => {
-                      const expanded = expandedCategories[category];
+              {Object.entries(servicesByCategory).map(([category, items], categoryIndex) => {
+                const categoryElementId = `service-category-${categoryIndex}-${category.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+                const expanded = expandedCategories[category];
                 const translatedCategory = translateServiceName(category === "عام" ? "other" : category, locale);
                 return (
                   <div key={category} className="card-luxe rounded-2xl border overflow-hidden">
                     <button
+                      type="button"
                       onClick={() => toggleCategory(category)}
+                      aria-expanded={expanded}
+                      aria-controls={categoryElementId}
                       className="group flex w-full items-center justify-between p-4"
                     >
                       <span className="font-bold text-white text-right line-clamp-1">{translatedCategory}</span>
@@ -369,27 +436,27 @@ export default function ServicesPage() {
                       {expanded ? <ChevronUp size={18} className="text-[var(--color-primary)]" /> : <ChevronDown size={18} className="text-zinc-400" />}
                     </button>
                     {expanded && (
-                      <div className="border-t border-[var(--color-primary)]/10">
+                      <div id={categoryElementId} className="border-t border-[var(--color-primary)]/10">
                         {items.map((s) => (
                           <div key={s.service} className="p-4 border-b border-[var(--color-primary)]/8 last:border-0">
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex-1">
                                 <div className="flex items-center gap-2">
                                   <span className="text-gradient-luxe text-sm font-black">#{s.service}</span>
-                                  {(s as any).is_new && (
+                                  {isTruthyFlag(s.is_new) && (
                                     <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-2 py-0.5 text-[9px] font-black text-black shadow-[0_0_12px_-2px_#f59e0b]">
                                       <Sparkles size={9} /> {t("service.new")}
                                     </span>
                                   )}
                                 </div>
-                                <div className="mt-1 text-sm text-zinc-400 leading-relaxed">{translateServiceName(s.name, locale)}</div>
-                                <div className="mt-2 flex gap-2 text-[10px] text-zinc-500">
-                                  <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">min: {s.min}</span>
-                                  <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">max: {s.max}</span>
+                                <div className="mt-1 text-sm text-zinc-400 leading-relaxed">{translateServiceName(safeServiceText(s.name), locale)}</div>
+                                <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-zinc-500">
+                                  <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">min: {formatServiceQuantity(s.min, locale)}</span>
+                                  <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">max: {formatServiceQuantity(s.max, locale)}</span>
                                 </div>
                               </div>
                               <div className="text-left">
-                                <div className="text-lg font-black text-gradient-luxe">${Number(s.rate).toFixed(5)}</div>
+                                <div className="text-lg font-black text-gradient-luxe">${formatServiceRate(s.rate)}</div>
                                 <div className="text-xs text-zinc-500">{t("service.per1000")}</div>
                               </div>
                             </div>
@@ -492,13 +559,13 @@ export default function ServicesPage() {
                                 <span className="h-px flex-1 bg-[var(--color-border)]" />
                               </div>
                               {typeServices.map((s) => {
-                                const { badges } = detectGuarantees(s.name, t);
+                                const { badges } = detectGuarantees(safeServiceText(s.name), t);
                                 return (
                                   <div key={s.service} className="rounded-2xl border border-[var(--color-success)]/20 bg-[var(--color-success)]/5 p-4">
                                     <div className="flex items-start justify-between gap-3">
                                       <div className="flex-1">
                                         <div className="font-bold text-white">#{s.service}</div>
-                                        <div className="mt-1 text-sm text-zinc-300 leading-relaxed">{translateServiceName(s.name, locale)}</div>
+                                        <div className="mt-1 text-sm text-zinc-300 leading-relaxed">{translateServiceName(safeServiceText(s.name), locale)}</div>
                                         <div className="mt-2 flex flex-wrap gap-1.5">
                                           {badges.map((badge, idx) => {
                                             const Icon = badge.icon;
@@ -511,13 +578,13 @@ export default function ServicesPage() {
                                         </div>
                                       </div>
                                       <div className="text-left">
-                                        <div className="text-lg font-black text-[var(--color-primary)]">${Number(s.rate).toFixed(5)}</div>
+                                        <div className="text-lg font-black text-[var(--color-primary)]">${formatServiceRate(s.rate)}</div>
                                         <div className="text-xs text-zinc-500">{t("service.per1000")}</div>
                                       </div>
                                     </div>
                                     <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
-                                      <span>min: {s.min}</span>
-                                      <span>max: {s.max}</span>
+                                      <span>min: {formatServiceQuantity(s.min, locale)}</span>
+                                      <span>max: {formatServiceQuantity(s.max, locale)}</span>
                                     </div>
                                     <Link
                                       href={`/orders/new?service=${s.service}`}

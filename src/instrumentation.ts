@@ -3,7 +3,7 @@
  * لا تُنفّذ أي طلبات إلى مزودي الخدمات الخارجيين.
  */
 export async function register() {
-  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  if (process.env.NEXT_RUNTIME === "edge") return;
 
   try {
     const { initDb } = await import("./lib/db");

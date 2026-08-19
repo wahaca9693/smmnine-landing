@@ -4,6 +4,13 @@ import { db, initDb } from "@/lib/db";
 import { invalidateServicesCache } from "@/lib/services-cache";
 
 const DEFAULT_MARKUP = 0; // لا يوجد هامش تلقائي؛ يفعّله الأدمن صراحةً فقط
+type JsonObject = Record<string, unknown>;
+type SqlStatement = { sql: string; args: Array<string | number | null> };
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 const SERVICE_MUTATING_ACTIONS = new Set([
   "sync",
   "delete",
@@ -17,7 +24,7 @@ const SERVICE_MUTATING_ACTIONS = new Set([
 ]);
 
 function authErrorStatus(error: unknown): number {
-  const message = String((error as any)?.message || error || "");
+  const message = error instanceof Error ? error.message : String(error ?? "");
   if (message === "Unauthorized") return 401;
   if (message === "Forbidden" || message === "Account banned") return 403;
   return 500;
@@ -39,7 +46,7 @@ function resolveSellRate(rate: number, markup: number, pricingMode?: string, man
   return applyMarkup(rate, markup);
 }
 
-function parsePricing(body: any, fallbackMarkup = DEFAULT_MARKUP, fallbackMode = "markup", fallbackManual: number | null = null) {
+function parsePricing(body: JsonObject, fallbackMarkup = DEFAULT_MARKUP, fallbackMode = "markup", fallbackManual: number | null = null) {
   const rawMarkup = body?.markup_percent;
   const markup = rawMarkup === undefined || rawMarkup === "" ? fallbackMarkup : Number(rawMarkup);
   const safeMarkup = Number.isFinite(markup) && markup >= 0 ? markup : fallbackMarkup;
@@ -52,7 +59,7 @@ function parsePricing(body: any, fallbackMarkup = DEFAULT_MARKUP, fallbackMode =
 
 type ProviderProbe = { ok: boolean; balance?: string; error?: string; endpoint?: string };
 
-type ProviderResponse = { response: Response; data: any; endpoint: string };
+type ProviderResponse = { response: Response; data: unknown; endpoint: string };
 
 /**
  * يدعم الرابط الأساسي ورابط endpoint كاملًا، ويمنع الحالات الشائعة مثل
@@ -103,7 +110,7 @@ async function postProviderAction(apiUrl: string, apiKey: string, action: string
         redirect: "follow",
       });
       const text = await response.text();
-      let data: any = null;
+      let data: unknown = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text.slice(0, 240) }; }
       last = { response, data, endpoint };
       // 404 يعني أن هذه الصيغة ليست endpoint الصحيح؛ نجرب الصيغة البديلة فقط.
@@ -116,8 +123,9 @@ async function postProviderAction(apiUrl: string, apiKey: string, action: string
   throw lastError instanceof Error ? lastError : new Error("تعذر الاتصال بالمزود");
 }
 
-function providerError(data: any, status: number): string {
-  const message = String(data?.error || data?.message || "").trim();
+function providerError(data: unknown, status: number): string {
+  const record = isJsonObject(data) ? data : {};
+  const message = String(record.error || record.message || "").trim();
   const lower = message.toLowerCase();
   if (status === 401 || lower.includes("invalid key") || lower.includes("invalid api key") || lower.includes("api key") || lower.includes("key is")) {
     return "مفتاح API غير صالح — تأكد من نسخه من لوحة المزود وأنه مفعّل";
@@ -132,28 +140,31 @@ function providerError(data: any, status: number): string {
 async function testProvider(apiUrl: string, apiKey: string, timeoutMs = 8000): Promise<ProviderProbe> {
   try {
     const { response, data, endpoint } = await postProviderAction(apiUrl, apiKey, "services", timeoutMs);
-    if (!response.ok || data?.error) return { ok: false, error: providerError(data, response.status), endpoint };
+    const record = isJsonObject(data) ? data : {};
+    if (!response.ok || record.error) return { ok: false, error: providerError(data, response.status), endpoint };
     if (Array.isArray(data)) return { ok: true, balance: `${data.length} خدمة`, endpoint };
     return { ok: false, error: "المزود استجاب، لكن تنسيق services غير قياسي — يجب أن يعيد قائمة JSON", endpoint };
-  } catch (err: any) {
-    const message = String(err?.message || "").toLowerCase();
+  } catch (err: unknown) {
+    const message = String(err instanceof Error ? err.message : "").toLowerCase();
     if (message.includes("timeout") || message.includes("aborted")) return { ok: false, error: "انتهت مهلة الاتصال بالمزود — تحقق من الرابط أو جدار الحماية" };
     if (message.includes("invalid url") || message.includes("url")) return { ok: false, error: "رابط API غير صالح — استخدم عنوانًا يبدأ بـ https://" };
     return { ok: false, error: "تعذر الوصول إلى المزود — تحقق من DNS وSSL والسماح بالاتصال الخارجي" };
   }
 }
 
-async function fetchProviderServices(apiUrl: string, apiKey: string): Promise<any[]> {
+async function fetchProviderServices(apiUrl: string, apiKey: string): Promise<JsonObject[]> {
   const { response, data } = await postProviderAction(apiUrl, apiKey, "services", 20000);
-  if (!response.ok || data?.error) throw new Error(providerError(data, response.status));
+  const record = isJsonObject(data) ? data : {};
+  if (!response.ok || record.error) throw new Error(providerError(data, response.status));
   if (!Array.isArray(data)) throw new Error("استجابة services غير صالحة؛ يجب أن تكون قائمة JSON");
-  return data;
+  return data.filter(isJsonObject);
 }
 
 async function fetchProviderBalance(apiUrl: string, apiKey: string): Promise<string> {
   try {
     const { response, data } = await postProviderAction(apiUrl, apiKey, "balance", 15000);
-    if (response.ok && !data?.error) return String(data?.balance ?? data?.remaining ?? "");
+    const record = isJsonObject(data) ? data : {};
+    if (response.ok && !record.error) return String(record.balance ?? record.remaining ?? "");
     return "غير متاح";
   } catch {
     return "غير متاح";
@@ -200,24 +211,24 @@ export async function GET(request: Request) {
     if (mode === "preview") {
       const providerId = url.searchParams.get("providerId");
       const prov = await db.execute({ sql: "SELECT * FROM providers WHERE id = ?", args: [Number(providerId)] });
-      const p = prov.rows[0] as any;
+      const p = prov.rows[0] as JsonObject | undefined;
       if (!p) return NextResponse.json({ error: "المزود غير موجود" }, { status: 404 });
-      let services: any[] = [];
+      let services: JsonObject[] = [];
       let fetchError: string | null = null;
       try {
-        services = await fetchProviderServices(p.api_url, p.api_key);
-      } catch (err: any) {
-        fetchError = err.message || "";
+        services = await fetchProviderServices(String(p.api_url), String(p.api_key));
+      } catch (err: unknown) {
+        fetchError = err instanceof Error ? err.message : "";
       }
       // جلب الخدمات المضافة مسبقًا من هذا المزود لتحديد المضافة منها
       const existing = await db.execute({
         sql: "SELECT id, remote_service_id, name, category, rate, min, max, type, markup_percent, sell_rate, is_active, is_new FROM provider_services WHERE provider_id = ?",
         args: [Number(providerId)],
       });
-      const localRows = existing.rows as any[];
+      const localRows = existing.rows as JsonObject[];
       const added = new Set(localRows.map((r) => String(r.remote_service_id)));
       // إذا نجح الجلب من السيرفر نعرض خدماته؛ وإلا نعرض الخدمات المضافة محليًا (كي يعمل المزود عند تعذر الاتصال)
-      const base = services.length > 0 ? services.map((s: any) => ({
+      const base = services.length > 0 ? services.map((s: JsonObject) => ({
         ...s,
         added: added.has(String(s.service)),
         category: String(s.category || ""),
@@ -255,10 +266,16 @@ export async function GET(request: Request) {
       return NextResponse.json({ logs: rows.rows });
     }
 
-    const rows = await db.execute({ sql: "SELECT * FROM providers ORDER BY id DESC" });
+    const rows = await db.execute({
+      sql: `SELECT id, name, api_url, balance, balance_fetched_at, notes, is_active,
+                   connection_status, last_error, last_probe_at, created_at, updated_at
+            FROM providers ORDER BY id DESC`,
+      args: [],
+    });
     return NextResponse.json({ providers: rows.rows });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || "حدث خطأ" }, { status: authErrorStatus(err) });
+  } catch (err: unknown) {
+    const status = authErrorStatus(err);
+    return NextResponse.json({ error: status >= 500 ? "تعذر تحميل بيانات المزودين حاليًا" : status === 401 ? "غير مصرح" : "ممنوع" }, { status });
   }
 }
 
@@ -266,31 +283,41 @@ export async function POST(request: Request) {
   try {
     await requireAdmin();
     await initDb();
-    const body = await request.json();
+    const body = (await request.json()) as JsonObject;
     const { action } = body;
     if (SERVICE_MUTATING_ACTIONS.has(String(action))) invalidateServicesCache();
 
     // 1) إضافة/تعديل مزود — حفظ محلي سريع، والفحص الخارجي مستقل عبر action=probe.
     if (action === "save") {
       const { id, name, api_url, api_key, notes } = body;
-      if (!name || !api_url || !api_key) {
-        return NextResponse.json({ error: "جميع الحقول مطلوبة" }, { status: 400 });
+      if (!name || !api_url) {
+        return NextResponse.json({ error: "اسم المزود والرابط مطلوبان" }, { status: 400 });
       }
       let normalizedUrl = "";
       try {
         normalizedUrl = normalizeProviderBaseUrl(String(api_url));
-      } catch (err: any) {
-        return NextResponse.json({ error: err?.message || "رابط API غير صالح" }, { status: 400 });
+      } catch (err: unknown) {
+        return NextResponse.json({ error: err instanceof Error ? err.message : "رابط API غير صالح" }, { status: 400 });
+      }
+      const incomingApiKey = String(api_key ?? "").trim();
+      let resolvedApiKey = incomingApiKey;
+      if (id && !resolvedApiKey) {
+        const existing = await db.execute({ sql: "SELECT api_key FROM providers WHERE id = ?", args: [Number(id)] });
+        const existingKey = existing.rows[0] as { api_key?: unknown } | undefined;
+        resolvedApiKey = String(existingKey?.api_key ?? "").trim();
+      }
+      if (!resolvedApiKey) {
+        return NextResponse.json({ error: "مفتاح API مطلوب عند إضافة مزود جديد" }, { status: 400 });
+      }
+      if (resolvedApiKey.length < 8) {
+        return NextResponse.json({ error: "مفتاح API قصير جدًا — أدخل المفتاح الكامل من لوحة المزود" }, { status: 400 });
       }
       const trimmed = {
         name: String(name).trim(),
         api_url: normalizedUrl,
-        api_key: String(api_key).trim(),
+        api_key: resolvedApiKey,
         notes: notes ? String(notes).trim() : "",
       };
-      if (trimmed.api_key.length < 8) {
-        return NextResponse.json({ error: "مفتاح API قصير جدًا — أدخل المفتاح الكامل من لوحة المزود" }, { status: 400 });
-      }
       let providerId: number;
       if (id) {
         await db.execute({
@@ -305,7 +332,12 @@ export async function POST(request: Request) {
         });
         providerId = Number(r.lastInsertRowid);
       }
-      const saved = await db.execute({ sql: "SELECT * FROM providers WHERE id = ?", args: [providerId] });
+      const saved = await db.execute({
+        sql: `SELECT id, name, api_url, balance, balance_fetched_at, notes, is_active,
+                     connection_status, last_error, last_probe_at, created_at, updated_at
+              FROM providers WHERE id = ?`,
+        args: [providerId],
+      });
       return NextResponse.json({ provider: saved.rows[0], queued: true });
     }
 
@@ -313,7 +345,7 @@ export async function POST(request: Request) {
     if (action === "probe") {
       const providerId = Number(body.providerId ?? body.id);
       const row = await db.execute({ sql: "SELECT * FROM providers WHERE id = ?", args: [providerId] });
-      const p = row.rows[0] as any;
+      const p = row.rows[0] as JsonObject | undefined;
       if (!p) return NextResponse.json({ error: "المزود غير موجود" }, { status: 404 });
       const probe = await testProvider(String(p.api_url), String(p.api_key), 8000);
       const status = probe.ok ? "online" : "offline";
@@ -328,9 +360,9 @@ export async function POST(request: Request) {
     if (action === "sync") {
       const { providerId, markup } = body;
       const prov = await db.execute({ sql: "SELECT * FROM providers WHERE id = ?", args: [Number(providerId)] });
-      const p = prov.rows[0] as any;
+      const p = prov.rows[0] as JsonObject | undefined;
       if (!p) return NextResponse.json({ error: "المزود غير موجود" }, { status: 404 });
-      const services = await fetchProviderServices(p.api_url, p.api_key);
+      const services = await fetchProviderServices(String(p.api_url), String(p.api_key));
       const pricingEnabled = body?.pricing_enabled === true;
       const pricing = parsePricing({ markup_percent: markup }, pricingEnabled ? Number(p.markup_percent ?? DEFAULT_MARKUP) : 0);
       const markupPct = pricingEnabled ? pricing.markup : 0;
@@ -339,7 +371,7 @@ export async function POST(request: Request) {
         sql: "SELECT id, remote_service_id, markup_percent, sell_rate, pricing_mode, manual_price, is_active, name FROM provider_services WHERE provider_id = ?",
         args: [Number(providerId)],
       });
-      const existing = new Map((existingRows.rows as any[]).map((row) => [String(row.remote_service_id), row]));
+      const existing = new Map((existingRows.rows as JsonObject[]).map((row) => [String(row.remote_service_id), row]));
       let inserted = 0;
       let updated = 0;
       for (const s of services) {
@@ -364,42 +396,43 @@ export async function POST(request: Request) {
           inserted++;
         }
       }
-      const balance = await fetchProviderBalance(p.api_url, p.api_key);
+      const balance = await fetchProviderBalance(String(p.api_url), String(p.api_key));
       await db.execute({
         sql: `UPDATE providers SET balance=?, balance_fetched_at=CURRENT_TIMESTAMP WHERE id=?`,
         args: [balance, Number(providerId)],
       });
-      return NextResponse.json({ imported: inserted, balance, services: inserted });
+      return NextResponse.json({ imported: inserted, updated, balance, services: inserted });
     }
 
     // 3) تحديث رصيد جميع المزودين من سيرفراتهم الخارجية
     if (action === "refresh-balances") {
       const rows = await db.execute({ sql: "SELECT * FROM providers WHERE is_active = 1" });
-      const providersToRefresh = rows.rows as any[];
-      const updated: any[] = [];
+      const providersToRefresh = rows.rows as JsonObject[];
+      const updated: Array<{ id: number; name: string; balance: string }> = [];
       // تزامن محدود: يقلل زمن تحديث مئات المزودين دون فتح مئات الاتصالات دفعة واحدة.
       const concurrency = 4;
       for (let offset = 0; offset < providersToRefresh.length; offset += concurrency) {
         const batch = providersToRefresh.slice(offset, offset + concurrency);
         const batchResults = await Promise.all(batch.map(async (p) => {
-          const balance = await fetchProviderBalance(p.api_url, p.api_key);
+          const providerId = Number(p.id);
+          const balance = await fetchProviderBalance(String(p.api_url), String(p.api_key));
           // الحفاظ على آخر رصيد معروف بدلًا من الكتابة بـ"غير متاح" عند فشل الاتصال المؤقت
           const isUnavailable = balance === "غير متاح" || balance === "";
-          const knownBalance =
-            typeof p.balance === "string" && p.balance !== "غير متاح" && p.balance !== "";
-          const finalBalance = isUnavailable && knownBalance ? p.balance : balance;
+          const previousBalance = typeof p.balance === "string" ? p.balance : "";
+          const knownBalance = previousBalance !== "غير متاح" && previousBalance !== "";
+          const finalBalance = isUnavailable && knownBalance ? previousBalance : String(balance);
           const keepOldFetched = isUnavailable && knownBalance;
           await db.execute({
             sql: `UPDATE providers SET balance=?, balance_fetched_at=CURRENT_TIMESTAMP WHERE id=?`,
-            args: [finalBalance, p.id],
+            args: [finalBalance, providerId],
           });
           if (keepOldFetched && p.balance_fetched_at) {
             await db.execute({
               sql: `UPDATE providers SET balance_fetched_at=? WHERE id=?`,
-              args: [String(p.balance_fetched_at), p.id],
+              args: [String(p.balance_fetched_at), providerId],
             });
           }
-          return { id: p.id, name: p.name, balance: finalBalance };
+          return { id: providerId, name: String(p.name ?? ""), balance: finalBalance };
         }));
         updated.push(...batchResults);
       }
@@ -434,15 +467,15 @@ export async function POST(request: Request) {
       const providerId = Number(body.provider_id ?? body.providerId);
       const { remote_service_id } = body;
       const prov = await db.execute({ sql: "SELECT * FROM providers WHERE id = ?", args: [Number(providerId)] });
-      const p = prov.rows[0] as any;
+      const p = prov.rows[0] as JsonObject | undefined;
       if (!p) return NextResponse.json({ error: "المزود غير موجود" }, { status: 404 });
       try {
         // إذا أرسلت الواجهة بيانات المعاينة، نحفظها مباشرة ولا نعيد استدعاء المزود لكل خدمة.
-        const incoming = body.service && typeof body.service === "object" ? body.service : null;
-        let target: any = incoming;
+        const incoming = isJsonObject(body.service) ? body.service : null;
+        let target: JsonObject | null = incoming;
         if (!target || String(target.service ?? target.remote_service_id) !== String(remote_service_id)) {
-          const services = await fetchProviderServices(p.api_url, p.api_key);
-          target = services.find((s: any) => String(s.service) === String(remote_service_id));
+          const services = await fetchProviderServices(String(p.api_url), String(p.api_key));
+          target = services.find((s: JsonObject) => String(s.service) === String(remote_service_id)) ?? null;
         }
         if (!target) return NextResponse.json({ error: "الخدمة غير موجودة لدى المزود" }, { status: 404 });
         const pricing = parsePricing(body, DEFAULT_MARKUP);
@@ -453,7 +486,7 @@ export async function POST(request: Request) {
           sql: "SELECT id FROM provider_services WHERE provider_id = ? AND remote_service_id = ?",
           args: [Number(providerId), String(remote_service_id)],
         });
-        if ((exists.rows as any[]).length > 0) return NextResponse.json({ error: "الخدمة مضافة مسبقًا" }, { status: 409 });
+        if (exists.rows.length > 0) return NextResponse.json({ error: "الخدمة مضافة مسبقًا" }, { status: 409 });
         await db.execute({
           sql: `INSERT INTO provider_services (provider_id, remote_service_id, name, category, rate, min, max, type, markup_percent, sell_rate, pricing_mode, manual_price, is_active, is_new)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,1)`,
@@ -471,9 +504,9 @@ export async function POST(request: Request) {
                 WHERE ps.provider_id = ? AND ps.remote_service_id = ? LIMIT 1`,
           args: [Number(providerId), String(target.service)],
         });
-        return NextResponse.json({ ok: true, service: (inserted.rows as any[])[0] || { ...target, provider_id: Number(providerId), remote_service_id: String(target.service), markup_percent: markupPct, sell_rate: sellRate, is_active: 1, is_new: 1 } });
-      } catch (err: any) {
-        return NextResponse.json({ error: "تعذر إضافة الخدمة: " + (err.message || "") }, { status: 502 });
+        return NextResponse.json({ ok: true, service: (inserted.rows as JsonObject[])[0] || { ...target, provider_id: Number(providerId), remote_service_id: String(target.service), markup_percent: markupPct, sell_rate: sellRate, is_active: 1, is_new: 1 } });
+      } catch (err: unknown) {
+        return NextResponse.json({ error: "تعذر إضافة الخدمة: " + (err instanceof Error ? err.message : "") }, { status: 502 });
       }
     }
 
@@ -497,11 +530,11 @@ export async function POST(request: Request) {
         sql: "SELECT remote_service_id FROM provider_services WHERE provider_id = ?",
         args: [providerId],
       });
-      const knownIds = new Set((existingRows.rows as any[]).map((row) => String(row.remote_service_id)));
+      const knownIds = new Set((existingRows.rows as JsonObject[]).map((row) => String(row.remote_service_id)));
       const pricingEnabled = body?.pricing_enabled === true;
       const pricing = parsePricing(body, pricingEnabled ? DEFAULT_MARKUP : 0);
       const markupPct = pricingEnabled ? pricing.markup : 0;
-      const statements: any[] = [];
+      const statements: SqlStatement[] = [];
       const insertedRemoteIds: string[] = [];
       let skipped = 0;
       let invalid = 0;
@@ -534,7 +567,7 @@ export async function POST(request: Request) {
       }
 
       if (statements.length) await db.batch(statements, "write");
-      let insertedServices: any[] = [];
+      let insertedServices: JsonObject[] = [];
       if (insertedRemoteIds.length) {
         const placeholders = insertedRemoteIds.map(() => "?").join(",");
         const insertedRows = await db.execute({
@@ -546,7 +579,7 @@ export async function POST(request: Request) {
                 ORDER BY ps.id ASC`,
           args: [providerId, ...insertedRemoteIds],
         });
-        insertedServices = insertedRows.rows as any[];
+        insertedServices = insertedRows.rows as JsonObject[];
       }
       return NextResponse.json({ ok: true, added: statements.length, skipped, invalid, services: insertedServices });
     }
@@ -559,11 +592,11 @@ export async function POST(request: Request) {
       if (ids.length > 5000) return NextResponse.json({ error: "عدد الخدمات كبير جدًا — نفذ الحذف على دفعات" }, { status: 413 });
       if (ids.length === 0) {
         const result = await db.execute({ sql: "DELETE FROM provider_services WHERE provider_id = ?", args: [providerId] });
-        return NextResponse.json({ ok: true, deleted: Number((result as any).rowsAffected || 0), scope: "provider" });
+        return NextResponse.json({ ok: true, deleted: Number((result as { rowsAffected?: number }).rowsAffected || 0), scope: "provider" });
       }
       const placeholders = ids.map(() => "?").join(",");
       const result = await db.execute({ sql: `DELETE FROM provider_services WHERE provider_id = ? AND id IN (${placeholders})`, args: [providerId, ...ids] });
-      return NextResponse.json({ ok: true, deleted: Number((result as any).rowsAffected || 0), scope: "selected" });
+      return NextResponse.json({ ok: true, deleted: Number((result as { rowsAffected?: number }).rowsAffected || 0), scope: "selected" });
     }
 
     // 6-ج) تعديل اسم أي خدمة (ينطبق فورًا على كل المستخدمين)
@@ -584,7 +617,7 @@ export async function POST(request: Request) {
     if (action === "update-service") {
       const { id, is_active } = body;
       const svc = await db.execute({ sql: "SELECT rate, markup_percent, pricing_mode, manual_price FROM provider_services WHERE id = ?", args: [Number(id)] });
-      const s = svc.rows[0] as any;
+      const s = svc.rows[0] as JsonObject | undefined;
       if (!s) return NextResponse.json({ error: "الخدمة غير موجودة" }, { status: 404 });
       const pricing = parsePricing(body, Number(s.markup_percent ?? DEFAULT_MARKUP), String(s.pricing_mode || "markup"), s.manual_price == null ? null : Number(s.manual_price));
       const sellRate = resolveSellRate(Number(s.rate) || 0, pricing.markup, pricing.mode, pricing.manual ?? undefined);
@@ -624,7 +657,7 @@ export async function POST(request: Request) {
         sql: `UPDATE provider_services SET markup_percent=?, pricing_mode=?, manual_price=?, sell_rate=CASE WHEN ? = 'manual' THEN ? ELSE ROUND(rate * (1 + ? / 100), 6) END, updated_at=CURRENT_TIMESTAMP ${where}`,
         args,
       });
-      return NextResponse.json({ ok: true, updated: Number((result as any).rowsAffected || 0), scope, pricing_mode: pricing.mode, manual_price: pricing.manual });
+      return NextResponse.json({ ok: true, updated: Number((result as { rowsAffected?: number }).rowsAffected || 0), scope, pricing_mode: pricing.mode, manual_price: pricing.manual });
     }
 
     // 9) إلغاء أي هامش أو سعر مباشر وإعادة كل الخدمات إلى تكلفة المزود
@@ -646,12 +679,14 @@ export async function POST(request: Request) {
           : "WHERE provider_id=?";
       const args = scope === "selected" ? [providerId, ...ids] : scope === "category" ? [providerId, category, category] : [providerId];
       const result = await db.execute({ sql: `UPDATE provider_services SET markup_percent=0, pricing_mode='markup', manual_price=NULL, sell_rate=ROUND(rate, 6), updated_at=CURRENT_TIMESTAMP ${where}`, args });
-      return NextResponse.json({ ok: true, updated: Number((result as any).rowsAffected || 0), scope });
+      return NextResponse.json({ ok: true, updated: Number((result as { rowsAffected?: number }).rowsAffected || 0), scope });
     }
 
     return NextResponse.json({ error: "إجراء غير معروف" }, { status: 400 });
-  } catch (err: any) {
-    console.error("Provider API error:", err);
-    return NextResponse.json({ error: err.message || "حدث خطأ" }, { status: 500 });
+  } catch (err: unknown) {
+    const status = authErrorStatus(err);
+    if (status >= 500) console.error("Provider API error:", err);
+    const message = err instanceof Error ? err.message : "حدث خطأ";
+    return NextResponse.json({ error: message }, { status });
   }
 }

@@ -7,6 +7,14 @@ import { canRequestOrderCancellation, normalizeOrderStatus, orderStatusKey } fro
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+type JsonRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as JsonRecord
+    : {};
+}
+
 function json(data: unknown, init?: ResponseInit) {
   return NextResponse.json(data, {
     ...init,
@@ -34,12 +42,12 @@ async function resolveApiKey(request: Request): Promise<{ userId: number; keyId:
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : null;
   const key = keyParam || bearer;
   if (!key) return null;
-  const res = await db.execute({ sql: "SELECT id, user_id, is_active FROM api_keys WHERE api_key = ?", args: [key] });
-  const row = res.rows[0] as any;
+  const res = await db.execute({ sql: "SELECT id, user_id, is_active FROM api_keys WHERE api_key = ?", args: [String(key)] });
+  const row = res.rows[0] as unknown as JsonRecord | undefined;
   if (!row || !Number(row.is_active)) return null;
   await db.execute({
     sql: "UPDATE api_keys SET requests_count = requests_count + 1, last_used_at = CURRENT_TIMESTAMP WHERE id = ?",
-    args: [row.id],
+    args: [Number(row.id)],
   });
   return { userId: Number(row.user_id), keyId: Number(row.id) };
 }
@@ -59,7 +67,7 @@ export async function GET(request: Request) {
       sql: "SELECT id, service_id, service_name, link, quantity, charge, status, smmnine_order_id, provider_id, start_count, remains, cancel_requested_at, refunded_at, created_at, updated_at FROM orders WHERE id = ? AND user_id = ?",
       args: [Number(orderId), resolved.userId],
     });
-    const row = result.rows[0] as any;
+    const row = result.rows[0] as unknown as JsonRecord | undefined;
     if (!row) return json({ error: "الطلب غير موجود" }, { status: 404 });
     const normalizedStatus = normalizeOrderStatus(row.status);
     return json({
@@ -93,7 +101,7 @@ export async function GET(request: Request) {
     WHERE p.is_active = 1 AND ps.is_active = 1
     ORDER BY ps.id
   `);
-  const services = (servicesResult.rows as any[]).map((service) => ({ ...service, source: "provider" }));
+  const services = (servicesResult.rows as unknown as JsonRecord[]).map((service) => ({ ...service, source: "provider" }));
   return json({ services, count: services.length });
 }
 
@@ -101,7 +109,7 @@ export async function POST(request: Request) {
   const resolved = await resolveApiKey(request);
   if (!resolved) return json({ error: "مفتاح API غير صالح أو غير نشط" }, { status: 401 });
 
-  const body = await request.json().catch(() => ({}));
+  const body = asRecord(await request.json().catch(() => ({})));
 
   if (body.action === "cancel") {
     const orderId = Number(body.id);
@@ -111,7 +119,7 @@ export async function POST(request: Request) {
       sql: "SELECT * FROM orders WHERE id = ? AND user_id = ?",
       args: [orderId, resolved.userId],
     });
-    const order = orderResult.rows[0] as any;
+    const order = orderResult.rows[0] as unknown as JsonRecord | undefined;
     if (!order) return json({ error: "الطلب غير موجود" }, { status: 404 });
     if (!order.smmnine_order_id) return json({ error: "لم يُسجّل الطلب لدى المزود بعد" }, { status: 409 });
     if (order.refunded_at) return json({ error: "تمت إعادة رصيد هذا الطلب مسبقًا" }, { status: 409 });
@@ -162,7 +170,7 @@ export async function POST(request: Request) {
         args: [resolved.userId, charge, `استرداد طلب API الملغى #${order.smmnine_order_id}`],
       },
     ], "write");
-    if (Number((batchResult[0] as any)?.rowsAffected || 0) !== 1) {
+    if (Number(batchResult[0]?.rowsAffected || 0) !== 1) {
       return json({ error: "تمت معالجة إلغاء الطلب مسبقًا أو تعذر تحديثه" }, { status: 409 });
     }
 
@@ -197,7 +205,7 @@ export async function POST(request: Request) {
           LIMIT 1`,
     args: [String(service), String(service)],
   });
-  const svc = serviceResult.rows[0] as any;
+  const svc = serviceResult.rows[0] as unknown as JsonRecord | undefined;
   if (!svc) return json({ error: "الخدمة غير متوفرة أو غير نشطة" }, { status: 400 });
 
   const min = Number(svc.min) || 0;
@@ -215,7 +223,7 @@ export async function POST(request: Request) {
   if (!Number.isFinite(cost) || cost < 0) return json({ error: "سعر الخدمة غير صالح" }, { status: 500 });
 
   const userResult = await db.execute({ sql: "SELECT balance FROM users WHERE id = ?", args: [resolved.userId] });
-  const user = userResult.rows[0] as any;
+  const user = userResult.rows[0] as unknown as JsonRecord | undefined;
   if (!user || Number(user.balance) < cost) {
     return json({ error: "رصيد المحفظة غير كافٍ" }, { status: 400 });
   }
@@ -224,7 +232,7 @@ export async function POST(request: Request) {
     sql: "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
     args: [cost, resolved.userId, cost],
   });
-  if (Number((debit as any).rowsAffected || 0) !== 1) {
+  if (Number(debit.rowsAffected || 0) !== 1) {
     return json({ error: "رصيد المحفظة غير كافٍ أو تغيّر أثناء المعالجة" }, { status: 409 });
   }
 
@@ -232,10 +240,10 @@ export async function POST(request: Request) {
   try {
     const order = await db.execute({
       sql: `INSERT INTO orders (user_id, provider_id, service_id, service_name, link, quantity, charge, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'processing')`,
-      args: [resolved.userId, Number(svc.provider_id), svc.id, svc.name, String(link), qty, cost],
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'processing')`,
+      args: [resolved.userId, Number(svc.provider_id), Number(svc.id), String(svc.name), String(link), qty, cost],
     });
-    orderId = Number((order as any).lastInsertRowid);
+    orderId = Number(order.lastInsertRowid);
     await db.execute({
       sql: "INSERT INTO provider_order_logs (local_order_id, provider_id, remote_order_id, status) VALUES (?, ?, NULL, 'pending')",
       args: [orderId, Number(svc.provider_id)],

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Server,
@@ -36,7 +36,7 @@ interface Provider {
   id: number;
   name: string;
   api_url: string;
-  api_key: string;
+  api_key?: string;
   balance: string;
   balance_fetched_at: string;
   notes: string;
@@ -75,6 +75,16 @@ interface PreviewCatalogService {
   min?: number;
   max?: number;
   added?: boolean;
+}
+
+interface ExecutionLog {
+  id: number | string;
+  status: "sent" | "failed" | string;
+  provider_name?: string;
+  local_order_id?: number | string | null;
+  remote_order_id?: number | string | null;
+  error?: string | null;
+  created_at: string | number;
 }
 
 /* ══════════ صف الخدمة: بطاقة أفقية واحدة مضغوطة ══════════ */
@@ -122,7 +132,7 @@ function ServiceRow({ s, selected, onSelect, onNameSave, onPricing, onToggle, on
     if (!unchanged) onPricing(s.id, { pricing_mode: mode, markup_percent: markup, manual_price: mode === "manual" ? direct : null });
   };
 
-  const isNew = Number((s as any).is_new) === 1;
+  const isNew = Number(s.is_new) === 1;
 
   return (
     <div className={`mx-2.5 my-1.5 rounded-2xl border bg-[var(--color-surface-2)] px-3 py-3 transition ${s.is_active ? "border-[var(--color-gold)]/25" : "border-red-500/20 opacity-70"}`}>
@@ -400,9 +410,13 @@ interface ProviderCardProps {
   onDeleteServices: (id: number, ids?: number[]) => void;
 }
 
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 function ProviderCard(props: ProviderCardProps) {
   const {
-    p, services, serviceCount = 0, servicesLoaded = false, servicesLoading = false, onLoadServices, syncing, globalMarkup, onSync, onToggleProvider,
+    p, services, serviceCount = 0, servicesLoaded = false, servicesLoading = false, onLoadServices, syncing, onSync, onToggleProvider,
     onPreview, onEdit, onDeleteProvider, onServiceAction, onDeleteService, onPricing, onRenameService, onUpdateAll, onResetPricing, onDeleteServices,
   } = props;
 
@@ -641,9 +655,10 @@ export default function ProvidersPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [services, setServices] = useState<ProviderService[]>([]);
   const [serviceCounts, setServiceCounts] = useState<Record<number, number>>({});
+  const [serviceStats, setServiceStats] = useState<Record<number, { total: number; active: number; paused: number }>>({});
   const [loadedServiceProviders, setLoadedServiceProviders] = useState<Set<number>>(new Set());
   const [loadingServiceProviders, setLoadingServiceProviders] = useState<Set<number>>(new Set());
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<ExecutionLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Provider | null>(null);
@@ -652,7 +667,6 @@ export default function ProvidersPage() {
   const [syncing, setSyncing] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [result, setResult] = useState<{ message?: string; error?: string } | null>(null);
-  const [deletedServiceIds, setDeletedServiceIds] = useState<Set<number>>(new Set());
   const [previewing, setPreviewing] = useState<number | null>(null);
   const [previewServices, setPreviewServices] = useState<PreviewCatalogService[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -665,7 +679,7 @@ export default function ProvidersPage() {
   const [bulkSaving, setBulkSaving] = useState(false);
   const [providerSearch, setProviderSearch] = useState("");
   const [providerMode, setProviderMode] = useState<"all" | "active" | "paused">("all");
-  const previewCacheRef = useRef<Map<number, { services: PreviewCatalogService[]; fetchedAt: number }>>(new Map());
+  const previewCacheRef = useRef<Map<number, { services: PreviewCatalogService[] }>>(new Map());
   const previewRequestRef = useRef(0);
   const loadRequestRef = useRef(0);
   const loadAbortRef = useRef<AbortController | null>(null);
@@ -694,7 +708,7 @@ export default function ProvidersPage() {
     return [...set].sort();
   }, [previewServices]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     // التحميل الأولي خفيف: لا نجلب كتالوج كل المزودين قبل أن يطلبه المدير.
     loadAbortRef.current?.abort();
     const controller = new AbortController();
@@ -709,21 +723,30 @@ export default function ProvidersPage() {
       if (requestId !== loadRequestRef.current) return;
       setProviders(providerData.providers || []);
       const counts: Record<number, number> = {};
-      for (const row of statsData.stats || []) counts[Number(row.provider_id)] = Number(row.total || 0);
+      const nextServiceStats: Record<number, { total: number; active: number; paused: number }> = {};
+      for (const row of statsData.stats || []) {
+        const providerId = Number(row.provider_id);
+        const total = Number(row.total || 0);
+        const active = Number(row.active || 0);
+        const paused = Number(row.paused || Math.max(0, total - active));
+        counts[providerId] = total;
+        nextServiceStats[providerId] = { total, active, paused };
+      }
       setServiceCounts(counts);
+      setServiceStats(nextServiceStats);
       setLogs(logsData.logs || []);
-    } catch (error) {
+    } catch {
       if (!controller.signal.aborted && requestId === loadRequestRef.current) setResult({ error: "تعذر تحميل بيانات المزودين" });
     } finally {
       if (loadAbortRef.current === controller) loadAbortRef.current = null;
     }
-  };
+  }, []);
 
   useEffect(() => {
-    void load();
+    const timer = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(timer);
     // لا نحدّث أرصدة المزودين خارجيًا تلقائيًا عند فتح الصفحة؛ هذا الطلب قد يستغرق 20 ثانية لكل مزود.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [load]);
 
   const loadProviderServices = async (providerId: number) => {
     if (loadedServiceProviders.has(providerId) || loadingServiceProviders.has(providerId)) return;
@@ -732,7 +755,11 @@ export default function ProvidersPage() {
       const res = await fetch(`/api/admin/providers?mode=services&providerId=${providerId}`);
       const data = await res.json();
       if (res.ok) {
-        setServices((prev) => [...prev.filter((s) => s.provider_id !== providerId), ...(data.services || [])]);
+        const loaded = Array.isArray(data.services) ? data.services as ProviderService[] : [];
+        const active = loaded.filter((service) => Number(service.is_active) === 1).length;
+        setServices((prev) => [...prev.filter((s) => s.provider_id !== providerId), ...loaded]);
+        setServiceCounts((prev) => ({ ...prev, [providerId]: loaded.length }));
+        setServiceStats((prev) => ({ ...prev, [providerId]: { total: loaded.length, active, paused: Math.max(0, loaded.length - active) } }));
         setLoadedServiceProviders((prev) => new Set(prev).add(providerId));
       } else setResult({ error: data.error || "تعذر تحميل خدمات المزود" });
     } finally {
@@ -820,7 +847,9 @@ export default function ProvidersPage() {
       if (data.error) setResult({ error: data.error });
       else {
         setResult({ message: `تمت مزامنة ${data.imported} خدمة جديدة وتحديث ${data.updated ?? 0} خدمة دون حذف الأسعار المخصصة` });
-        setServiceCounts((prev) => ({ ...prev, [providerId]: Number(data.services ?? data.imported ?? 0) }));
+        const syncedTotal = Number(data.services ?? data.imported ?? 0);
+        setServiceCounts((prev) => ({ ...prev, [providerId]: syncedTotal }));
+        setServiceStats((prev) => ({ ...prev, [providerId]: { total: syncedTotal, active: syncedTotal, paused: 0 } }));
         setLoadedServiceProviders((prev) => { const next = new Set(prev); next.delete(providerId); return next; });
         setServices((prev) => prev.filter((s) => s.provider_id !== providerId));
       }
@@ -841,9 +870,9 @@ export default function ProvidersPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "تعذر تغيير الحالة");
       if (data.provider) setProviders((prev) => prev.map((p) => p.id === id ? { ...p, is_active: Number(data.provider.is_active) } : p));
-    } catch (err: any) {
+    } catch (err: unknown) {
       setProviders((prev) => prev.map((p) => p.id === id ? { ...p, is_active: Number(previous ?? p.is_active) } : p));
-      setResult({ error: err?.message || "تعذر تغيير حالة المزود" });
+      setResult({ error: errorMessage(err, "تعذر تغيير حالة المزود") });
     }
   };
 
@@ -864,6 +893,11 @@ export default function ProvidersPage() {
         delete next[id];
         return next;
       });
+      setServiceStats((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       setLoadedServiceProviders((prev) => {
         const next = new Set(prev);
         next.delete(id);
@@ -875,8 +909,8 @@ export default function ProvidersPage() {
         setPreviewServices([]);
       }
       setResult({ message: "تم حذف المزود وخدماته محليًا فورًا" });
-    } catch (err: any) {
-      setResult({ error: err?.message || "تعذر حذف المزود" });
+    } catch (err: unknown) {
+      setResult({ error: errorMessage(err, "تعذر حذف المزود") });
     }
   };
 
@@ -904,6 +938,10 @@ export default function ProvidersPage() {
     const previous = s.is_active;
     const nextActive = previous ? 0 : 1;
     setServices((prev) => prev.map((x) => x.id === id ? { ...x, is_active: nextActive } : x));
+    setServiceStats((prev) => {
+      const current = prev[s.provider_id] || { total: 0, active: 0, paused: 0 };
+      return { ...prev, [s.provider_id]: { ...current, active: Math.max(0, current.active + (nextActive ? 1 : -1)), paused: Math.max(0, current.paused + (nextActive ? -1 : 1)) } };
+    });
     try {
       const res = await fetch("/api/admin/providers", {
         method: "POST",
@@ -911,9 +949,13 @@ export default function ProvidersPage() {
         body: JSON.stringify({ action: "update-service", id, is_active: nextActive }),
       });
       if (!res.ok) throw new Error("تعذر تغيير حالة الخدمة");
-    } catch (err: any) {
+    } catch (err: unknown) {
       setServices((prev) => prev.map((x) => x.id === id ? { ...x, is_active: previous } : x));
-      setResult({ error: err?.message || "تعذر تغيير حالة الخدمة" });
+      setServiceStats((prev) => {
+        const current = prev[s.provider_id] || { total: 0, active: 0, paused: 0 };
+        return { ...prev, [s.provider_id]: { ...current, active: Math.max(0, current.active + (previous ? 1 : -1)), paused: Math.max(0, current.paused + (previous ? -1 : 1)) } };
+      });
+      setResult({ error: errorMessage(err, "تعذر تغيير حالة الخدمة") });
     }
   };
 
@@ -921,6 +963,14 @@ export default function ProvidersPage() {
     if (!confirm("هل أنت متأكد من حذف هذه الخدمة نهائيًا؟")) return;
     const removed = services.find((s) => s.id === id);
     setServices((prev) => prev.filter((s) => s.id !== id));
+    if (removed) {
+      setServiceCounts((prev) => ({ ...prev, [removed.provider_id]: Math.max(0, Number(prev[removed.provider_id] || 0) - 1) }));
+      setServiceStats((prev) => {
+        const current = prev[removed.provider_id] || { total: 0, active: 0, paused: 0 };
+        const wasActive = Number(removed.is_active) === 1;
+        return { ...prev, [removed.provider_id]: { total: Math.max(0, current.total - 1), active: Math.max(0, current.active - (wasActive ? 1 : 0)), paused: Math.max(0, current.paused - (wasActive ? 0 : 1)) } };
+      });
+    }
     try {
       const res = await fetch("/api/admin/providers", {
         method: "POST",
@@ -929,10 +979,17 @@ export default function ProvidersPage() {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "فشل حذف الخدمة");
-      setDeletedServiceIds((prev) => new Set([...prev, id]));
-    } catch (err: any) {
-      if (removed) setServices((prev) => [...prev, removed]);
-      setResult({ error: err?.message || "فشل حذف الخدمة" });
+    } catch (err: unknown) {
+      if (removed) {
+        setServices((prev) => [...prev, removed]);
+        setServiceCounts((prev) => ({ ...prev, [removed.provider_id]: Number(prev[removed.provider_id] || 0) + 1 }));
+        setServiceStats((prev) => {
+          const current = prev[removed.provider_id] || { total: 0, active: 0, paused: 0 };
+          const wasActive = Number(removed.is_active) === 1;
+          return { ...prev, [removed.provider_id]: { total: current.total + 1, active: current.active + (wasActive ? 1 : 0), paused: current.paused + (wasActive ? 0 : 1) } };
+        });
+      }
+      setResult({ error: errorMessage(err, "فشل حذف الخدمة") });
     }
   };
 
@@ -999,6 +1056,13 @@ export default function ProvidersPage() {
         ...prev,
         [providerId]: isAll ? 0 : Math.max(0, Number(prev[providerId] || 0) - deleted),
       }));
+      setServiceStats((prev) => {
+        const current = prev[providerId] || { total: Number(serviceCounts[providerId] || 0), active: 0, paused: 0 };
+        if (isAll) return { ...prev, [providerId]: { total: 0, active: 0, paused: 0 } };
+        const removedPaused = [...selectedIds].filter((serviceId) => services.some((service) => service.id === serviceId && Number(service.is_active) === 0)).length;
+        const removedActive = Math.max(0, deleted - removedPaused);
+        return { ...prev, [providerId]: { total: Math.max(0, current.total - deleted), active: Math.max(0, current.active - removedActive), paused: Math.max(0, current.paused - removedPaused) } };
+      });
       if (isAll) setLoadedServiceProviders((prev) => { const next = new Set(prev); next.delete(providerId); return next; });
       setResult({ message: `تم حذف ${deleted} خدمة` });
     } else setResult({ error: data.error || "تعذر حذف الخدمات" });
@@ -1030,7 +1094,7 @@ export default function ProvidersPage() {
       const data = await res.json();
       if (res.ok) {
         const nextServices = Array.isArray(data.services) ? data.services : [];
-        previewCacheRef.current.set(providerId, { services: nextServices, fetchedAt: Date.now() });
+        previewCacheRef.current.set(providerId, { services: nextServices });
         if (requestId === previewRequestRef.current) setPreviewServices(nextServices);
       } else if (!cached && requestId === previewRequestRef.current) {
         setPreviewServices([]);
@@ -1056,6 +1120,10 @@ export default function ProvidersPage() {
       if (added?.id) {
         setServices((prev) => prev.some((service) => service.id === added.id) ? prev.map((service) => service.id === added.id ? added : service) : [...prev, added]);
         setServiceCounts((prev) => ({ ...prev, [providerId]: Number(prev[providerId] || 0) + 1 }));
+        setServiceStats((prev) => {
+          const current = prev[providerId] || { total: 0, active: 0, paused: 0 };
+          return { ...prev, [providerId]: { total: current.total + 1, active: current.active + 1, paused: current.paused } };
+        });
       }
       setPreviewServices((prev) => prev.map((service) => String(service.service) === String(remote_service_id) ? { ...service, added: true } : service));
       const cached = previewCacheRef.current.get(providerId);
@@ -1132,13 +1200,31 @@ export default function ProvidersPage() {
     setSelectedPreviewIds((previous) => {
       const next = new Set(previous);
       if (allFilteredSelected) {
-        selectablePreviewServices.forEach((s: any) => next.delete(String(s.service)));
+        selectablePreviewServices.forEach((s) => next.delete(String(s.service)));
       } else {
-        selectablePreviewServices.forEach((s: any) => next.add(String(s.service)));
+        selectablePreviewServices.forEach((s) => next.add(String(s.service)));
       }
       return next;
     });
   };
+
+  const providerSummary = useMemo(() => {
+    const online = providers.filter((provider) => provider.connection_status === "online").length;
+    const offline = providers.filter((provider) => provider.connection_status === "offline").length;
+    const totalServices = Object.values(serviceStats).reduce((sum, stat) => sum + stat.total, 0);
+    const activeServices = Object.values(serviceStats).reduce((sum, stat) => sum + stat.active, 0);
+    const pausedServices = Object.values(serviceStats).reduce((sum, stat) => sum + stat.paused, 0);
+    return {
+      totalProviders: providers.length,
+      activeProviders: providers.filter((provider) => Number(provider.is_active) === 1).length,
+      online,
+      offline,
+      pending: Math.max(0, providers.length - online - offline),
+      totalServices,
+      activeServices,
+      pausedServices,
+    };
+  }, [providers, serviceStats]);
 
   const requestBulkAdd = (mode: "selected" | "filtered") => {
     const candidates = mode === "selected"
@@ -1176,7 +1262,12 @@ export default function ProvidersPage() {
         const incoming = addedServices.filter((service) => !prev.some((current) => current.id === service.id));
         return incoming.length ? [...prev, ...incoming] : prev;
       });
-      setServiceCounts((prev) => ({ ...prev, [previewing]: Number(prev[previewing] || 0) + Number(data.added || addedServices.length || 0) }));
+      const addedCount = Number(data.added || addedServices.length || 0);
+      setServiceCounts((prev) => ({ ...prev, [previewing]: Number(prev[previewing] || 0) + addedCount }));
+      setServiceStats((prev) => {
+        const current = prev[previewing] || { total: 0, active: 0, paused: 0 };
+        return { ...prev, [previewing]: { total: current.total + addedCount, active: current.active + addedCount, paused: current.paused } };
+      });
       setPreviewServices((prev) => prev.map((service) => addedRemoteIds.has(String(service.service)) ? { ...service, added: true } : service));
       const cached = previewCacheRef.current.get(previewing);
       if (cached) previewCacheRef.current.set(previewing, { ...cached, services: cached.services.map((service) => addedRemoteIds.has(String(service.service)) ? { ...service, added: true } : service) });
@@ -1217,6 +1308,29 @@ export default function ProvidersPage() {
           >
             <ArrowLeft size={14} /> الرئيسية
           </Link>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-2xl border border-[var(--color-gold)]/20 bg-[var(--color-surface)] p-3">
+            <div className="flex items-center justify-between text-[10px] text-zinc-500"><span>المزودون</span><Server size={14} className="text-[var(--color-gold)]" /></div>
+            <div className="mt-1 text-lg font-black text-white">{providerSummary.totalProviders}</div>
+            <div className="text-[9px] text-zinc-500">{providerSummary.activeProviders} مفعّل · {providerSummary.pending} قيد الفحص</div>
+          </div>
+          <div className="rounded-2xl border border-green-500/20 bg-green-500/5 p-3">
+            <div className="flex items-center justify-between text-[10px] text-zinc-500"><span>الاتصال</span><CheckCircle2 size={14} className="text-green-400" /></div>
+            <div className="mt-1 text-lg font-black text-green-400">{providerSummary.online}</div>
+            <div className="text-[9px] text-zinc-500">{providerSummary.offline} غير متصل</div>
+          </div>
+          <div className="rounded-2xl border border-[var(--color-gold)]/20 bg-[var(--color-surface)] p-3">
+            <div className="flex items-center justify-between text-[10px] text-zinc-500"><span>الخدمات</span><ListChecks size={14} className="text-[var(--color-gold)]" /></div>
+            <div className="mt-1 text-lg font-black text-[var(--color-gold-bright)]">{providerSummary.totalServices.toLocaleString("en-US")}</div>
+            <div className="text-[9px] text-zinc-500">{providerSummary.activeServices} مفعّلة</div>
+          </div>
+          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-3">
+            <div className="flex items-center justify-between text-[10px] text-zinc-500"><span>الموقوفة</span><EyeOff size={14} className="text-amber-300" /></div>
+            <div className="mt-1 text-lg font-black text-amber-300">{providerSummary.pausedServices.toLocaleString("en-US")}</div>
+            <div className="text-[9px] text-zinc-500">تحتاج مراجعة أو تفعيل</div>
+          </div>
         </div>
 
         {/* ═══ هامش الربح العام ═══ */}
@@ -1284,7 +1398,7 @@ export default function ProvidersPage() {
               </div>
               <div>
                 <label className="mb-1 block text-[11px] font-bold text-zinc-400">مفتاح API</label>
-                <input value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} className="input-luxe h-10 w-full rounded-xl px-3 text-[13px] text-white" placeholder="key-xxxxxxxxxxxx" required />
+                <input value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} className="input-luxe h-10 w-full rounded-xl px-3 text-[13px] text-white" placeholder={editing ? "اتركه فارغًا للإبقاء على المفتاح المحفوظ" : "key-xxxxxxxxxxxx"} required={!editing} />
               </div>
               <div>
                 <label className="mb-1 block text-[11px] font-bold text-zinc-400">ملاحظات (اختياري)</label>
@@ -1339,7 +1453,7 @@ export default function ProvidersPage() {
                 onSync={syncServices}
                 onToggleProvider={toggleProvider}
                 onPreview={openPreviewSafe}
-                onEdit={(pp) => { setEditing(pp); setForm({ name: pp.name, api_url: pp.api_url, api_key: pp.api_key, notes: pp.notes || "" }); setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                onEdit={(pp) => { setEditing(pp); setForm({ name: pp.name, api_url: pp.api_url, api_key: "", notes: pp.notes || "" }); setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" }); }}
                 onDeleteProvider={deleteProvider}
                 onServiceAction={serviceAction}
                 onDeleteService={deleteService}
