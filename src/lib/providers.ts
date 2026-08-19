@@ -44,6 +44,48 @@ function providerError(data: unknown, status: number): string {
  * Sends an order to an active provider that implements the standard SMM
  * Panel API v2 contract. Secrets are kept server-side and never returned.
  */
+async function providerAction(providerId: number, params: Record<string, string>): Promise<Record<string, unknown>> {
+  const providerResult = await db.execute({
+    sql: "SELECT api_url, api_key FROM providers WHERE id = ? AND is_active = 1",
+    args: [providerId],
+  });
+  const provider = providerResult.rows[0] as unknown as { api_url: string; api_key: string } | undefined;
+  if (!provider) throw new Error("المزود غير موجود أو معطّل");
+
+  let lastData: unknown = null;
+  let lastStatus = 0;
+  const endpoints = providerEndpointCandidates(provider.api_url);
+  for (const endpoint of endpoints) {
+    const body = new URLSearchParams({ key: String(provider.api_key), ...params });
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body,
+      cache: "no-store",
+      redirect: "follow",
+      signal: AbortSignal.timeout(20000),
+    });
+    const text = await response.text();
+    let data: unknown = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text.slice(0, 240) }; }
+    lastData = data;
+    lastStatus = response.status;
+    const record = data && typeof data === "object" ? data as Record<string, unknown> : {};
+    if (response.status === 404 && endpoint !== endpoints.at(-1)) continue;
+    if (!response.ok || record.error) throw new Error(providerError(data, response.status));
+    return record;
+  }
+  throw new Error(providerError(lastData, lastStatus));
+}
+
+export async function getProviderOrderStatus(providerId: number, remoteOrderId: string) {
+  return providerAction(providerId, { action: "status", order: remoteOrderId });
+}
+
+export async function cancelProviderOrder(providerId: number, remoteOrderId: string) {
+  return providerAction(providerId, { action: "cancel", order: remoteOrderId });
+}
+
 export async function executeProviderOrder(params: ProviderOrderParams): Promise<ProviderOrderResult> {
   const providerResult = await db.execute({
     sql: "SELECT api_url, api_key FROM providers WHERE id = ? AND is_active = 1",
@@ -63,7 +105,8 @@ export async function executeProviderOrder(params: ProviderOrderParams): Promise
   let lastData: unknown = null;
   let lastStatus = 0;
   try {
-    for (const endpoint of providerEndpointCandidates(provider.api_url)) {
+    const endpoints = providerEndpointCandidates(provider.api_url);
+    for (const endpoint of endpoints) {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
@@ -78,7 +121,7 @@ export async function executeProviderOrder(params: ProviderOrderParams): Promise
       lastData = data;
       lastStatus = response.status;
       const record = data && typeof data === "object" ? data as Record<string, unknown> : {};
-      if (response.status === 404 && endpoint !== providerEndpointCandidates(provider.api_url).at(-1)) continue;
+      if (response.status === 404 && endpoint !== endpoints.at(-1)) continue;
       if (!response.ok || record.error) return { ok: false, error: providerError(data, response.status) };
       if (record.order === undefined || record.order === null || String(record.order) === "") {
         return { ok: false, error: "استجابة غير صالحة من المزود: لم يُرجع رقم الطلب" };

@@ -9,6 +9,15 @@ import Link from "next/link";
 import { useLiveRefresh } from "../components/useLiveRefresh";
 import { useLanguage, translatePlatform, translateServiceName, translateServiceType } from "../components/LanguageProvider";
 
+type ServicesSnapshot = {
+  services: any[];
+  categories: string[];
+  platforms: any[];
+  at: number;
+};
+
+let servicesSnapshot: ServicesSnapshot | null = null;
+
 const platformOrder = [
   { id: "facebook" },
   { id: "tiktok" },
@@ -52,13 +61,13 @@ function detectGuarantees(name: string, t: (key: string) => string): { isGuarant
 
 export default function ServicesPage() {
   const { locale, t } = useLanguage();
-  const [services, setServices] = useState<any[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [platforms, setPlatforms] = useState<any[]>([]);
+  const [services, setServices] = useState<any[]>(servicesSnapshot?.services || []);
+  const [categories, setCategories] = useState<string[]>(servicesSnapshot?.categories || []);
+  const [platforms, setPlatforms] = useState<any[]>(servicesSnapshot?.platforms || []);
   const [selectedPlatform, setSelectedPlatform] = useState<string>("all");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!servicesSnapshot);
   const [syncing, setSyncing] = useState(false);
   const [fetchError, setFetchError] = useState("");
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
@@ -70,15 +79,30 @@ export default function ServicesPage() {
   const [guaranteedTypeFilter, setGuaranteedTypeFilter] = useState<string>("all");
 
   const loadServices = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent && servicesSnapshot) {
+      setServices(servicesSnapshot.services);
+      setCategories(servicesSnapshot.categories);
+      setPlatforms(servicesSnapshot.platforms);
+      setLastSyncedAt(new Date(servicesSnapshot.at));
+      setLoading(false);
+    } else if (!silent) {
+      setLoading(true);
+    }
     setSyncing(true);
     try {
       const res = await fetch("/api/services", { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "تعذر تحميل الخدمات");
-      setServices(data.services || []);
-      setCategories(data.categories || []);
-      setPlatforms(data.platforms || []);
+      const nextSnapshot: ServicesSnapshot = {
+        services: data.services || [],
+        categories: data.categories || [],
+        platforms: data.platforms || [],
+        at: Date.now(),
+      };
+      servicesSnapshot = nextSnapshot;
+      setServices(nextSnapshot.services);
+      setCategories(nextSnapshot.categories);
+      setPlatforms(nextSnapshot.platforms);
       setFetchError("");
       setLastSyncedAt(new Date());
     } catch (error) {
@@ -93,7 +117,7 @@ export default function ServicesPage() {
     void loadServices();
   }, [loadServices]);
 
-  useLiveRefresh(() => loadServices(true), { intervalMs: 30000 });
+  useLiveRefresh(() => loadServices(true), { intervalMs: 120000 });
 
   const filteredServices = useMemo(() => {
     return services.filter((s) => {

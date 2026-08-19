@@ -35,6 +35,19 @@ export function initDb(): Promise<void> {
   `);
 
   await db.execute(`
+    CREATE TABLE IF NOT EXISTS user_preferences (
+      user_id INTEGER PRIMARY KEY,
+      email_notifications INTEGER DEFAULT 1,
+      order_status_notifications INTEGER DEFAULT 1,
+      auto_refresh_orders INTEGER DEFAULT 1,
+      refresh_interval_seconds INTEGER DEFAULT 30,
+      compact_mode INTEGER DEFAULT 0,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -50,6 +63,20 @@ export function initDb(): Promise<void> {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
+
+  const orderColumns = await db.execute({ sql: "PRAGMA table_info(orders)" });
+  const existingOrderColumns = new Set((orderColumns.rows as any[]).map((c: any) => c.name));
+  for (const [name, definition] of [
+    ["provider_id", "INTEGER"],
+    ["start_count", "INTEGER"],
+    ["remains", "INTEGER"],
+    ["cancel_requested_at", "DATETIME"],
+    ["refunded_at", "DATETIME"],
+  ] as const) {
+    if (!existingOrderColumns.has(name)) {
+      await db.execute(`ALTER TABLE orders ADD COLUMN ${name} ${definition}`);
+    }
+  }
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS transactions (
@@ -241,6 +268,7 @@ export function initDb(): Promise<void> {
       cryptoMinAmount REAL DEFAULT 1,
       asiacellMinAmount REAL DEFAULT 0,
       apiV2Enabled INTEGER DEFAULT 1,
+      registrationEnabled INTEGER DEFAULT 1,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -290,6 +318,19 @@ export function initDb(): Promise<void> {
     )
   `);
 
+  // حقول حالة الاتصال: تُحدّث بشكل مستقل عن حفظ بيانات المزود
+  const providerColumns = await db.execute({ sql: "PRAGMA table_info(providers)" });
+  const existingProviderColumns = new Set((providerColumns.rows as any[]).map((c: any) => c.name));
+  if (!existingProviderColumns.has("connection_status")) {
+    await db.execute(`ALTER TABLE providers ADD COLUMN connection_status TEXT DEFAULT 'unknown'`);
+  }
+  if (!existingProviderColumns.has("last_error")) {
+    await db.execute(`ALTER TABLE providers ADD COLUMN last_error TEXT`);
+  }
+  if (!existingProviderColumns.has("last_probe_at")) {
+    await db.execute(`ALTER TABLE providers ADD COLUMN last_probe_at DATETIME`);
+  }
+
   await db.execute(`
     CREATE TABLE IF NOT EXISTS provider_services (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -334,6 +375,15 @@ export function initDb(): Promise<void> {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  // فهارس القراءة المتكررة في لوحة الإدارة وكتالوج المستخدمين
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_provider_services_provider ON provider_services(provider_id)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_provider_services_provider_remote ON provider_services(provider_id, remote_service_id)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_provider_services_active ON provider_services(is_active, provider_id)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_orders_user_created ON orders(user_id, created_at DESC)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_orders_provider_status ON orders(provider_id, status, updated_at DESC)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_api_keys_user_active ON api_keys(user_id, is_active)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read, created_at DESC)`);
 
   // أكواد الهدايا/الدعوة التي تنشئها الإدارة وتضيف رصيدًا للمستخدم عند الاسترداد
   await db.execute(`
@@ -417,6 +467,7 @@ export function initDb(): Promise<void> {
     "cryptoMinAmount REAL DEFAULT 1",
     "asiacellMinAmount REAL DEFAULT 0",
     "apiV2Enabled INTEGER DEFAULT 1",
+    "registrationEnabled INTEGER DEFAULT 1",
   ]) {
     try {
       await db.execute(`ALTER TABLE site_settings ADD COLUMN ${col}`);

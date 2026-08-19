@@ -16,6 +16,40 @@ function json(data: unknown, init?: ResponseInit) {
   });
 }
 
+type DepositMethodRow = Record<string, unknown> & {
+  id: number;
+  icon?: string;
+  min_amount?: number;
+  is_active?: number;
+};
+
+let methodsCache: { methods: DepositMethodRow[]; expiresAt: number } | null = null;
+let methodsCacheRequest: Promise<DepositMethodRow[]> | null = null;
+const METHODS_CACHE_TTL_MS = 30_000;
+
+async function loadActiveMethods(): Promise<DepositMethodRow[]> {
+  if (methodsCache && methodsCache.expiresAt > Date.now()) return methodsCache.methods;
+  if (methodsCacheRequest) return methodsCacheRequest;
+
+  methodsCacheRequest = (async () => {
+    const result = await db.execute("SELECT * FROM payment_methods WHERE is_active = 1 ORDER BY id");
+    const methods = result.rows.map((row: any) => ({
+      ...row,
+      id: Number(row.id),
+      min_amount: ["usdt", "bnb", "btc"].includes(String(row.icon || "").toLowerCase()) ? 1 : Number(row.min_amount),
+      is_active: Number(row.is_active),
+    })) as DepositMethodRow[];
+    methodsCache = { methods, expiresAt: Date.now() + METHODS_CACHE_TTL_MS };
+    return methods;
+  })();
+
+  try {
+    return await methodsCacheRequest;
+  } finally {
+    methodsCacheRequest = null;
+  }
+}
+
 function resolvePayCurrency(config: Record<string, unknown>) {
   const configured = String(config.pay_currency || "").trim().toLowerCase();
   if (configured) return configured;
@@ -32,14 +66,10 @@ function resolvePayCurrency(config: Record<string, unknown>) {
 
 export async function GET() {
   try {
-    const result = await db.execute("SELECT * FROM payment_methods WHERE is_active = 1 ORDER BY id");
-    const methods = result.rows.map((row: any) => ({
-      ...row,
-      id: Number(row.id),
-      min_amount: ["usdt", "bnb", "btc"].includes(String(row.icon || "").toLowerCase()) ? 1 : Number(row.min_amount),
-      is_active: Number(row.is_active),
-    }));
-    return json({ methods });
+    const methods = await loadActiveMethods();
+    return json({ methods }, {
+      headers: { "Cache-Control": "public, max-age=15, stale-while-revalidate=60" },
+    });
   } catch (err: any) {
     return json({ error: err.message }, { status: 500 });
   }

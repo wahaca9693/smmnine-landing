@@ -19,6 +19,7 @@ const keys = [
   "cryptoMinAmount",
   "asiacellMinAmount",
   "apiV2Enabled",
+  "registrationEnabled",
 ] as const;
 
 type SettingKey = (typeof keys)[number];
@@ -32,6 +33,7 @@ const aliases: Record<string, SettingKey> = {
   crypto_min_amount: "cryptoMinAmount",
   asiacell_min_amount: "asiacellMinAmount",
   api_v2_enabled: "apiV2Enabled",
+  registration_enabled: "registrationEnabled",
 };
 
 const defaults: Record<SettingKey, string | number> = {
@@ -48,6 +50,7 @@ const defaults: Record<SettingKey, string | number> = {
   cryptoMinAmount: 1,
   asiacellMinAmount: 0,
   apiV2Enabled: 1,
+  registrationEnabled: 1,
 };
 
 function json(data: unknown, status = 200) {
@@ -62,12 +65,22 @@ function readSettings(row: any) {
   for (const key of keys) {
     const fallback = defaults[key];
     const value = row?.[key] ?? fallback;
-    settings[key] = key === "apiV2Enabled" ? Boolean(Number(value)) : value;
+    settings[key] = ["apiV2Enabled", "registrationEnabled"].includes(key) ? Boolean(Number(value)) : value;
   }
   settings.site_name = String(settings.siteName);
   settings.theme_primary = String(settings.primaryColor);
   settings.theme_gold = String(settings.secondaryColor);
   return settings;
+}
+
+let settingsCache: { expiresAt: number; value: Record<string, string | number | boolean> } | null = null;
+const SETTINGS_CACHE_MS = 30_000;
+
+async function loadSettingsFromDatabase() {
+  const result = await db.execute("SELECT * FROM site_settings LIMIT 1");
+  const value = readSettings(result.rows[0] || {});
+  settingsCache = { expiresAt: Date.now() + SETTINGS_CACHE_MS, value };
+  return value;
 }
 
 function validColor(value: unknown) {
@@ -82,7 +95,7 @@ function normalizeValue(key: SettingKey, value: unknown): string | number | null
     const number = Number(value);
     return Number.isFinite(number) && number >= 0 && number <= 1000000 ? number : null;
   }
-  if (key === "apiV2Enabled") return value === true || value === 1 || value === "1" ? 1 : 0;
+  if (["apiV2Enabled", "registrationEnabled"].includes(key)) return value === true || value === 1 || value === "1" ? 1 : 0;
   if (key === "defaultCurrency") {
     const currency = String(value || "").trim().toUpperCase();
     return /^[A-Z]{3}$/.test(currency) ? currency : null;
@@ -93,8 +106,10 @@ function normalizeValue(key: SettingKey, value: unknown): string | number | null
 
 export async function GET() {
   try {
-    const result = await db.execute("SELECT * FROM site_settings LIMIT 1");
-    return json({ settings: readSettings(result.rows[0] || {}) });
+    if (settingsCache && settingsCache.expiresAt > Date.now()) {
+      return json({ settings: settingsCache.value });
+    }
+    return json({ settings: await loadSettingsFromDatabase() });
   } catch (err: any) {
     return json({ error: err?.message || "تعذر تحميل الإعدادات" }, 500);
   }
@@ -133,7 +148,9 @@ export async function POST(request: Request) {
     }
 
     const result = await db.execute("SELECT * FROM site_settings LIMIT 1");
-    return json({ success: true, settings: readSettings(result.rows[0] || {}) });
+    const settings = readSettings(result.rows[0] || {});
+    settingsCache = { expiresAt: Date.now() + SETTINGS_CACHE_MS, value: settings };
+    return json({ success: true, settings });
   } catch (err: any) {
     const message = String(err?.message || "");
     const status = message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500;

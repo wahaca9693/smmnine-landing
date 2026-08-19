@@ -1,8 +1,27 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { db, initDb } from "@/lib/db";
+import { invalidateServicesCache } from "@/lib/services-cache";
 
 const DEFAULT_MARKUP = 0; // لا يوجد هامش تلقائي؛ يفعّله الأدمن صراحةً فقط
+const SERVICE_MUTATING_ACTIONS = new Set([
+  "sync",
+  "delete",
+  "delete-service",
+  "add-service",
+  "bulk-add-services",
+  "delete-services",
+  "update-service",
+  "update-provider-services",
+  "reset-provider-pricing",
+]);
+
+function authErrorStatus(error: unknown): number {
+  const message = String((error as any)?.message || error || "");
+  if (message === "Unauthorized") return 401;
+  if (message === "Forbidden" || message === "Account banned") return 403;
+  return 500;
+}
 
 function roundRate(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
@@ -110,9 +129,9 @@ function providerError(data: any, status: number): string {
 }
 
 // اختبار الاتصال بالمزود عبر services فقط؛ لا ينشئ طلبًا ولا يخصم رصيدًا.
-async function testProvider(apiUrl: string, apiKey: string): Promise<ProviderProbe> {
+async function testProvider(apiUrl: string, apiKey: string, timeoutMs = 8000): Promise<ProviderProbe> {
   try {
-    const { response, data, endpoint } = await postProviderAction(apiUrl, apiKey, "services", 15000);
+    const { response, data, endpoint } = await postProviderAction(apiUrl, apiKey, "services", timeoutMs);
     if (!response.ok || data?.error) return { ok: false, error: providerError(data, response.status), endpoint };
     if (Array.isArray(data)) return { ok: true, balance: `${data.length} خدمة`, endpoint };
     return { ok: false, error: "المزود استجاب، لكن تنسيق services غير قياسي — يجب أن يعيد قائمة JSON", endpoint };
@@ -143,21 +162,38 @@ async function fetchProviderBalance(apiUrl: string, apiKey: string): Promise<str
 
 export async function GET(request: Request) {
   try {
+    await requireAdmin();
     await initDb();
-    const session = await requireAdmin();
     const url = new URL(request.url);
     const mode = url.searchParams.get("mode");
 
+    if (mode === "service-stats") {
+      const rows = await db.execute({
+        sql: `SELECT provider_id, COUNT(*) AS total,
+              SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active,
+              SUM(CASE WHEN is_active = 0 THEN 1 ELSE 0 END) AS paused
+              FROM provider_services GROUP BY provider_id`,
+        args: [],
+      });
+      return NextResponse.json({ stats: rows.rows });
+    }
+
     if (mode === "services") {
       const providerId = url.searchParams.get("providerId");
+      const rawLimit = Number(url.searchParams.get("limit") || "0");
+      const limit = rawLimit > 0 ? Math.min(rawLimit, 1000) : 0;
+      const rawOffset = Math.max(0, Number(url.searchParams.get("offset") || "0"));
+      const where = providerId ? "WHERE ps.provider_id = ?" : "";
+      const args: (number | string)[] = providerId ? [Number(providerId)] : [];
+      const paging = limit > 0 ? ` LIMIT ${limit} OFFSET ${rawOffset}` : "";
       const rows = await db.execute({
         sql: `SELECT ps.*, p.name AS provider_name FROM provider_services ps
               LEFT JOIN providers p ON p.id = ps.provider_id
-              ${providerId ? "WHERE ps.provider_id = ?" : ""}
-              ORDER BY ps.provider_id, ps.remote_service_id`,
-        args: providerId ? [Number(providerId)] : [],
+              ${where}
+              ORDER BY ps.provider_id, ps.remote_service_id${paging}`,
+        args,
       });
-      return NextResponse.json({ services: rows.rows });
+      return NextResponse.json({ services: rows.rows, limit, offset: rawOffset });
     }
 
     // استعراض خدمات مزود من سيرفره الخارجي دون إدخالها (للمعاينة قبل الإضافة)
@@ -222,20 +258,21 @@ export async function GET(request: Request) {
     const rows = await db.execute({ sql: "SELECT * FROM providers ORDER BY id DESC" });
     return NextResponse.json({ providers: rows.rows });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 401 });
+    return NextResponse.json({ error: err.message || "حدث خطأ" }, { status: authErrorStatus(err) });
   }
 }
 
 export async function POST(request: Request) {
   try {
+    await requireAdmin();
     await initDb();
-    const session = await requireAdmin();
     const body = await request.json();
     const { action } = body;
+    if (SERVICE_MUTATING_ACTIONS.has(String(action))) invalidateServicesCache();
 
-    // 1) إضافة/تعديل مزود
+    // 1) إضافة/تعديل مزود — حفظ محلي سريع، والفحص الخارجي مستقل عبر action=probe.
     if (action === "save") {
-      const { id, name, api_url, api_key, notes, test } = body;
+      const { id, name, api_url, api_key, notes } = body;
       if (!name || !api_url || !api_key) {
         return NextResponse.json({ error: "جميع الحقول مطلوبة" }, { status: 400 });
       }
@@ -254,26 +291,37 @@ export async function POST(request: Request) {
       if (trimmed.api_key.length < 8) {
         return NextResponse.json({ error: "مفتاح API قصير جدًا — أدخل المفتاح الكامل من لوحة المزود" }, { status: 400 });
       }
-      // اختبار services للقراءة فقط قبل الحفظ؛ لا يتم إنشاء أي طلب.
-      const probe = await testProvider(trimmed.api_url, trimmed.api_key);
-      if (!probe.ok) {
-        return NextResponse.json({ error: `فشل الاتصال بالمزود: ${probe.error}` }, { status: 400 });
-      }
-      // نحفظ المسار الذي نجح فعليًا كي تبقى المزامنة متوافقة مع index.php أو المسارات المخصصة.
-      if (probe.endpoint) trimmed.api_url = probe.endpoint;
-      const balance = await fetchProviderBalance(trimmed.api_url, trimmed.api_key);
+      let providerId: number;
       if (id) {
         await db.execute({
-          sql: `UPDATE providers SET name=?, api_url=?, api_key=?, notes=?, balance=?, balance_fetched_at=CURRENT_TIMESTAMP WHERE id=?`,
-          args: [trimmed.name, trimmed.api_url, trimmed.api_key, trimmed.notes, balance, id],
+          sql: `UPDATE providers SET name=?, api_url=?, api_key=?, notes=?, connection_status='pending', last_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+          args: [trimmed.name, trimmed.api_url, trimmed.api_key, trimmed.notes, Number(id)],
         });
-        return NextResponse.json({ provider: { id }, balance, probe });
+        providerId = Number(id);
+      } else {
+        const r = await db.execute({
+          sql: `INSERT INTO providers (name, api_url, api_key, notes, balance, connection_status, last_error) VALUES (?,?,?,?,?,?,?)`,
+          args: [trimmed.name, trimmed.api_url, trimmed.api_key, trimmed.notes, "غير متاح", "pending", null],
+        });
+        providerId = Number(r.lastInsertRowid);
       }
-      const r = await db.execute({
-        sql: `INSERT INTO providers (name, api_url, api_key, notes, balance, balance_fetched_at) VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)`,
-        args: [trimmed.name, trimmed.api_url, trimmed.api_key, trimmed.notes, balance],
+      const saved = await db.execute({ sql: "SELECT * FROM providers WHERE id = ?", args: [providerId] });
+      return NextResponse.json({ provider: saved.rows[0], queued: true });
+    }
+
+    // فحص مستقل للاتصال؛ لا يمنع الحفظ أو ظهور البطاقة ولا يجلب الرصيد.
+    if (action === "probe") {
+      const providerId = Number(body.providerId ?? body.id);
+      const row = await db.execute({ sql: "SELECT * FROM providers WHERE id = ?", args: [providerId] });
+      const p = row.rows[0] as any;
+      if (!p) return NextResponse.json({ error: "المزود غير موجود" }, { status: 404 });
+      const probe = await testProvider(String(p.api_url), String(p.api_key), 8000);
+      const status = probe.ok ? "online" : "offline";
+      await db.execute({
+        sql: "UPDATE providers SET connection_status=?, last_error=?, last_probe_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        args: [status, probe.ok ? null : String(probe.error || "تعذر الاتصال"), providerId],
       });
-      return NextResponse.json({ provider: { id: Number(r.lastInsertRowid) }, balance, probe });
+      return NextResponse.json({ ok: probe.ok, providerId, connection_status: status, error: probe.error || null, endpoint: probe.endpoint || null }, { status: probe.ok ? 200 : 502 });
     }
 
     // 2) مزامنة خدمات المزود
@@ -286,31 +334,35 @@ export async function POST(request: Request) {
       const pricingEnabled = body?.pricing_enabled === true;
       const pricing = parsePricing({ markup_percent: markup }, pricingEnabled ? Number(p.markup_percent ?? DEFAULT_MARKUP) : 0);
       const markupPct = pricingEnabled ? pricing.markup : 0;
-      // حذف خدمات المزود القديمة واستيراد الجديدة
-      await db.execute({ sql: "DELETE FROM provider_services WHERE provider_id = ?", args: [Number(providerId)] });
+      // مزامنة غير مدمرة: لا نحذف الخدمات ولا نعيد ضبط الأسعار/الإخفاء اليدوي.
+      const existingRows = await db.execute({
+        sql: "SELECT id, remote_service_id, markup_percent, sell_rate, pricing_mode, manual_price, is_active, name FROM provider_services WHERE provider_id = ?",
+        args: [Number(providerId)],
+      });
+      const existing = new Map((existingRows.rows as any[]).map((row) => [String(row.remote_service_id), row]));
       let inserted = 0;
+      let updated = 0;
       for (const s of services) {
+        const remoteId = String(s.service);
+        const current = existing.get(remoteId);
         const costRate = Number(s.rate) || 0;
-        const sellRate = pricingEnabled ? applyMarkup(costRate, markupPct) : roundRate(costRate);
-        await db.execute({
-          sql: `INSERT INTO provider_services (provider_id, remote_service_id, name, category, rate, min, max, type, markup_percent, sell_rate, pricing_mode, manual_price, is_new)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)`,
-          args: [
-            Number(providerId),
-            String(s.service),
-            String(s.name || ""),
-            String(s.category || ""),
-            Number(s.rate) || 0,
-            Number(s.min) || 0,
-            Number(s.max) || 0,
-            String(s.type || ""),
-            markupPct,
-            sellRate,
-            "markup",
-            pricingEnabled ? null : null,
-          ],
-        });
-        inserted++;
+        if (current) {
+          const keepManual = String(current.pricing_mode || "markup") === "manual";
+          const sellRate = keepManual ? Number(current.manual_price ?? current.sell_rate ?? costRate) : (pricingEnabled ? applyMarkup(costRate, markupPct) : roundRate(costRate));
+          await db.execute({
+            sql: `UPDATE provider_services SET name=?, category=?, rate=?, min=?, max=?, type=?, sell_rate=?, is_new=0 WHERE id=?`,
+            args: [String(s.name || current.name || ""), String(s.category || ""), costRate, Number(s.min) || 0, Number(s.max) || 0, String(s.type || ""), sellRate, Number(current.id)],
+          });
+          updated++;
+        } else {
+          const sellRate = pricingEnabled ? applyMarkup(costRate, markupPct) : roundRate(costRate);
+          await db.execute({
+            sql: `INSERT INTO provider_services (provider_id, remote_service_id, name, category, rate, min, max, type, markup_percent, sell_rate, pricing_mode, manual_price, is_new)
+                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)`,
+            args: [Number(providerId), remoteId, String(s.name || ""), String(s.category || ""), costRate, Number(s.min) || 0, Number(s.max) || 0, String(s.type || ""), markupPct, sellRate, "markup", null],
+          });
+          inserted++;
+        }
       }
       const balance = await fetchProviderBalance(p.api_url, p.api_key);
       await db.execute({
@@ -323,37 +375,46 @@ export async function POST(request: Request) {
     // 3) تحديث رصيد جميع المزودين من سيرفراتهم الخارجية
     if (action === "refresh-balances") {
       const rows = await db.execute({ sql: "SELECT * FROM providers WHERE is_active = 1" });
+      const providersToRefresh = rows.rows as any[];
       const updated: any[] = [];
-      for (const p of rows.rows as any[]) {
-        const balance = await fetchProviderBalance(p.api_url, p.api_key);
-        // الحفاظ على آخر رصيد معروف بدلًا من الكتابة بـ"غير متاح" عند فشل الاتصال المؤقت
-        const isUnavailable = balance === "غير متاح" || balance === "";
-        const knownBalance =
-          typeof p.balance === "string" && p.balance !== "غير متاح" && p.balance !== "";
-        const finalBalance = isUnavailable && knownBalance ? p.balance : balance;
-        const keepOldFetched = isUnavailable && knownBalance;
-        await db.execute({
-          sql: `UPDATE providers SET balance=?, balance_fetched_at=CURRENT_TIMESTAMP WHERE id=?`,
-          args: [finalBalance, p.id],
-        });
-        if (keepOldFetched && p.balance_fetched_at) {
+      // تزامن محدود: يقلل زمن تحديث مئات المزودين دون فتح مئات الاتصالات دفعة واحدة.
+      const concurrency = 4;
+      for (let offset = 0; offset < providersToRefresh.length; offset += concurrency) {
+        const batch = providersToRefresh.slice(offset, offset + concurrency);
+        const batchResults = await Promise.all(batch.map(async (p) => {
+          const balance = await fetchProviderBalance(p.api_url, p.api_key);
+          // الحفاظ على آخر رصيد معروف بدلًا من الكتابة بـ"غير متاح" عند فشل الاتصال المؤقت
+          const isUnavailable = balance === "غير متاح" || balance === "";
+          const knownBalance =
+            typeof p.balance === "string" && p.balance !== "غير متاح" && p.balance !== "";
+          const finalBalance = isUnavailable && knownBalance ? p.balance : balance;
+          const keepOldFetched = isUnavailable && knownBalance;
           await db.execute({
-            sql: `UPDATE providers SET balance_fetched_at=? WHERE id=?`,
-            args: [String(p.balance_fetched_at), p.id],
+            sql: `UPDATE providers SET balance=?, balance_fetched_at=CURRENT_TIMESTAMP WHERE id=?`,
+            args: [finalBalance, p.id],
           });
-        }
-        updated.push({ id: p.id, name: p.name, balance: finalBalance });
+          if (keepOldFetched && p.balance_fetched_at) {
+            await db.execute({
+              sql: `UPDATE providers SET balance_fetched_at=? WHERE id=?`,
+              args: [String(p.balance_fetched_at), p.id],
+            });
+          }
+          return { id: p.id, name: p.name, balance: finalBalance };
+        }));
+        updated.push(...batchResults);
       }
       return NextResponse.json({ ok: true, updated });
     }
 
-    // 4) تفعيل/إيقاف مزود
+    // 4) تفعيل/إيقاف مزود — تحديث محلي فوري مستقل عن حالة الاتصال الخارجي.
     if (action === "toggle") {
+      const providerId = Number(body.id);
       await db.execute({
         sql: "UPDATE providers SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        args: [Number(body.id)],
+        args: [providerId],
       });
-      return NextResponse.json({ ok: true });
+      const row = await db.execute({ sql: "SELECT id, is_active FROM providers WHERE id = ?", args: [providerId] });
+      return NextResponse.json({ ok: true, provider: row.rows[0] || { id: providerId } });
     }
 
     // 5) حذف مزود
@@ -376,14 +437,18 @@ export async function POST(request: Request) {
       const p = prov.rows[0] as any;
       if (!p) return NextResponse.json({ error: "المزود غير موجود" }, { status: 404 });
       try {
-        const services = await fetchProviderServices(p.api_url, p.api_key);
-        const target = services.find((s: any) => String(s.service) === String(remote_service_id));
+        // إذا أرسلت الواجهة بيانات المعاينة، نحفظها مباشرة ولا نعيد استدعاء المزود لكل خدمة.
+        const incoming = body.service && typeof body.service === "object" ? body.service : null;
+        let target: any = incoming;
+        if (!target || String(target.service ?? target.remote_service_id) !== String(remote_service_id)) {
+          const services = await fetchProviderServices(p.api_url, p.api_key);
+          target = services.find((s: any) => String(s.service) === String(remote_service_id));
+        }
         if (!target) return NextResponse.json({ error: "الخدمة غير موجودة لدى المزود" }, { status: 404 });
         const pricing = parsePricing(body, DEFAULT_MARKUP);
         const markupPct = pricing.markup;
         const costRate = Number.isFinite(Number(target.rate)) ? Number(target.rate) : 0;
         const sellRate = resolveSellRate(costRate, markupPct, pricing.mode, pricing.manual ?? undefined);
-        console.error("DEBUG add-service target:", JSON.stringify(target));
         const exists = await db.execute({
           sql: "SELECT id FROM provider_services WHERE provider_id = ? AND remote_service_id = ?",
           args: [Number(providerId), String(remote_service_id)],
@@ -398,7 +463,15 @@ export async function POST(request: Request) {
             markupPct, sellRate, pricing.mode, pricing.manual,
           ],
         });
-        return NextResponse.json({ ok: true, service: { ...target, markup_percent: markupPct, sell_rate: sellRate } });
+        const inserted = await db.execute({
+          sql: `SELECT ps.id, ps.provider_id, p.name AS provider_name, ps.remote_service_id, ps.name, ps.category,
+                       ps.rate, ps.min, ps.max, ps.type, ps.markup_percent, ps.sell_rate, ps.pricing_mode,
+                       ps.manual_price, ps.is_active, ps.is_new
+                FROM provider_services ps JOIN providers p ON p.id = ps.provider_id
+                WHERE ps.provider_id = ? AND ps.remote_service_id = ? LIMIT 1`,
+          args: [Number(providerId), String(target.service)],
+        });
+        return NextResponse.json({ ok: true, service: (inserted.rows as any[])[0] || { ...target, provider_id: Number(providerId), remote_service_id: String(target.service), markup_percent: markupPct, sell_rate: sellRate, is_active: 1, is_new: 1 } });
       } catch (err: any) {
         return NextResponse.json({ error: "تعذر إضافة الخدمة: " + (err.message || "") }, { status: 502 });
       }
@@ -429,6 +502,7 @@ export async function POST(request: Request) {
       const pricing = parsePricing(body, pricingEnabled ? DEFAULT_MARKUP : 0);
       const markupPct = pricingEnabled ? pricing.markup : 0;
       const statements: any[] = [];
+      const insertedRemoteIds: string[] = [];
       let skipped = 0;
       let invalid = 0;
 
@@ -455,11 +529,26 @@ export async function POST(request: Request) {
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,1)`,
           args: [providerId, remoteId, name, category, rate, Number.isFinite(min) ? min : 0, Number.isFinite(max) ? max : 0, type, markupPct, sellRate, pricing.mode, pricing.manual],
         });
+        insertedRemoteIds.push(remoteId);
         knownIds.add(remoteId);
       }
 
       if (statements.length) await db.batch(statements, "write");
-      return NextResponse.json({ ok: true, added: statements.length, skipped, invalid });
+      let insertedServices: any[] = [];
+      if (insertedRemoteIds.length) {
+        const placeholders = insertedRemoteIds.map(() => "?").join(",");
+        const insertedRows = await db.execute({
+          sql: `SELECT ps.id, ps.provider_id, p.name AS provider_name, ps.remote_service_id, ps.name, ps.category,
+                       ps.rate, ps.min, ps.max, ps.type, ps.markup_percent, ps.sell_rate, ps.pricing_mode,
+                       ps.manual_price, ps.is_active, ps.is_new
+                FROM provider_services ps JOIN providers p ON p.id = ps.provider_id
+                WHERE ps.provider_id = ? AND ps.remote_service_id IN (${placeholders})
+                ORDER BY ps.id ASC`,
+          args: [providerId, ...insertedRemoteIds],
+        });
+        insertedServices = insertedRows.rows as any[];
+      }
+      return NextResponse.json({ ok: true, added: statements.length, skipped, invalid, services: insertedServices });
     }
 
     // 6-ب-3) حذف مجموعة خدمات محددة أو كل خدمات مزود

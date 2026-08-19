@@ -81,19 +81,32 @@ export default function ApiAccessPage() {
   const [apiBaseUrl, setApiBaseUrl] = useState("/api/v2");
 
   const refresh = async () => {
-    try {
-      const [keyResponse, userResponse] = await Promise.all([
-        fetch("/api/api-access", { cache: "no-store" }),
-        fetch("/api/user", { cache: "no-store" }),
-      ]);
-      const data = await keyResponse.json();
-      const userData = await userResponse.json();
-      if (data.keys) setKeys(data.keys);
-      if (data.apiBaseUrl) setApiBaseUrl(String(data.apiBaseUrl));
-      setBalance(Number(userData.user?.balance || 0));
-      if (data.error) setMessage(String(data.error));
-    } catch {
-      setMessage("تعذر تحميل بيانات API مؤقتًا. اضغط إعادة المحاولة أو حدّث الصفحة.");
+    setMessage(null);
+    const [keyResult, userResult] = await Promise.allSettled([
+      fetch("/api/api-access", { cache: "no-store" }),
+      fetch("/api/user", { cache: "no-store" }),
+    ]);
+
+    if (keyResult.status === "fulfilled") {
+      try {
+        const data = await keyResult.value.json();
+        if (data.keys) setKeys(data.keys);
+        if (data.apiBaseUrl) setApiBaseUrl(String(data.apiBaseUrl));
+        if (data.error) setMessage(String(data.error));
+      } catch {
+        setMessage("تعذر قراءة مفاتيح API. اضغط إعادة المحاولة.");
+      }
+    } else {
+      setMessage("تعذر تحميل مفتاح API مؤقتًا. اضغط إعادة المحاولة.");
+    }
+
+    if (userResult.status === "fulfilled") {
+      try {
+        const userData = await userResult.value.json();
+        setBalance(Number(userData.user?.balance || 0));
+      } catch {
+        // الرصيد ثانوي ولا يمنع عرض عنوان API والمفتاح.
+      }
     }
   };
 

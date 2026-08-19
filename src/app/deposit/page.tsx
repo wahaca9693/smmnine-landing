@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "../components/DashboardLayout";
 import { useLiveRefresh } from "../components/useLiveRefresh";
@@ -17,6 +17,8 @@ interface DepositMethod {
   min_amount: number;
   config?: string;
 }
+
+const DEPOSIT_METHODS_CACHE_KEY = "smmnine:deposit-methods:v1";
 
 const coinMeta: Record<string, { color: string; label: string; logo: string }> = {
   usdt: { color: "#26a17b", label: "USDT", logo: "/coins/coin-usdt.png" },
@@ -45,6 +47,7 @@ const networkOf = (cfg: { coin?: string; network?: string } | null): string => {
 export default function DepositPage() {
   const router = useRouter();
   const [methods, setMethods] = useState<DepositMethod[]>([]);
+  const [methodsLoading, setMethodsLoading] = useState(true);
   const [selected, setSelected] = useState<DepositMethod | null>(null);
   const [amount, setAmount] = useState("");
   const [balance, setBalance] = useState(0);
@@ -58,28 +61,65 @@ export default function DepositPage() {
   const [giftCode, setGiftCode] = useState("");
   const [redeemingGift, setRedeemingGift] = useState(false);
   const [giftMessage, setGiftMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  const refreshingRef = useRef(false);
 
   const refreshData = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
     try {
-      const [methodsRes, userRes, asiacellRes] = await Promise.all([
-        fetch("/api/deposit", { cache: "no-store", credentials: "include" }),
-        fetch("/api/user", { cache: "no-store", credentials: "include" }),
-        fetch("/api/payments/asiacell", { cache: "no-store", credentials: "include" }),
-      ]);
-      const [methodsData, userData, asiacellData] = await Promise.all([methodsRes.json(), userRes.json(), asiacellRes.json()]);
-      setMethods(methodsData.methods || []);
-      setBalance(Number(userData.user?.balance || 0));
-      setAsiacell({
-        connected: Boolean(asiacellData.connected),
-        store_phone: asiacellData.store_phone,
-        exchange_rate: Number(asiacellData.exchange_rate || 1666),
-      });
-    } catch {
-      // Preserve the last known wallet state if the refresh is temporarily unavailable.
+      const methodsRequest = fetch("/api/deposit", { cache: "no-store", credentials: "include" })
+        .then((response) => response.json())
+        .then((data) => {
+          if (Array.isArray(data.methods)) {
+            setMethods(data.methods);
+            setMethodsLoading(false);
+            try {
+              window.localStorage.setItem(DEPOSIT_METHODS_CACHE_KEY, JSON.stringify(data.methods));
+            } catch {
+              // Local storage may be disabled; the live response remains usable.
+            }
+          }
+        })
+        .catch(() => setMethodsLoading(false));
+
+      const userRequest = fetch("/api/user", { cache: "no-store", credentials: "include" })
+        .then((response) => response.json())
+        .then((data) => {
+          if (data?.user) setBalance(Number(data.user.balance || 0));
+        })
+        .catch(() => undefined);
+
+      const asiacellRequest = fetch("/api/payments/asiacell", { cache: "no-store", credentials: "include" })
+        .then((response) => response.json())
+        .then((data) => {
+          setAsiacell({
+            connected: Boolean(data.connected),
+            store_phone: data.store_phone,
+            exchange_rate: Number(data.exchange_rate || 1666),
+          });
+        })
+        .catch(() => undefined);
+
+      await Promise.allSettled([methodsRequest, userRequest, asiacellRequest]);
+    } finally {
+      refreshingRef.current = false;
     }
   }, []);
 
   useEffect(() => {
+    try {
+      const cached = window.localStorage.getItem(DEPOSIT_METHODS_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          setMethods(parsed);
+          setMethodsLoading(false);
+        }
+      }
+    } catch {
+      // Ignore malformed or unavailable local cache.
+    }
+
     const timer = window.setTimeout(() => {
       void refreshData();
     }, 0);
@@ -182,6 +222,18 @@ export default function DepositPage() {
             <Zap size={16} className="text-[var(--color-gold)]" /> اختر العملة والشبكة
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {methodsLoading && cryptoMethods.length === 0 && Object.entries(coinMeta).map(([icon, meta]) => (
+              <div key={`loading-${icon}`} aria-busy="true" className="glass-card flex min-h-[148px] flex-col items-center justify-center gap-2 rounded-2xl border border-[var(--color-border)] p-3 text-center animate-fadeIn">
+                <img src={meta.logo} alt={meta.label} className="h-10 w-10 rounded-full object-cover opacity-70 grayscale" />
+                <span className="text-sm font-black" style={{ color: meta.color }}>{meta.label}</span>
+                <span className="text-[10px] font-bold text-zinc-500">جارٍ تجهيز البوابة...</span>
+              </div>
+            ))}
+            {!methodsLoading && cryptoMethods.length === 0 && (
+              <div className="col-span-2 rounded-2xl border border-amber-400/20 bg-amber-400/5 p-4 text-center text-xs font-bold text-amber-200 sm:col-span-3">
+                لا توجد بوابة عملات رقمية مفعلة حاليًا. ستظهر البوابات فور تفعيلها من لوحة الإدارة.
+              </div>
+            )}
             {cryptoMethods.map((m) => (
               <button
                 key={m.id}

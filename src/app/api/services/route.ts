@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { getServices } from "@/lib/follower";
 import { detectPlatform, detectServiceType } from "@/lib/platform-mapping";
-import { db, initDb } from "@/lib/db";
+import { db } from "@/lib/db";
+import { readServicesCache, writeServicesCache } from "@/lib/services-cache";
 
 async function getProviderServices(): Promise<any[]> {
   try {
-    await initDb();
     const rows = await db.execute({
       sql: `SELECT ps.remote_service_id AS service, ps.name, ps.type, ps.sell_rate AS rate, ps.min, ps.max,
                    CASE WHEN ps.category <> '' THEN ps.category ELSE COALESCE(p.notes, 'عام') END AS category, 0 AS refill,
@@ -35,9 +35,6 @@ function json(data: unknown, init?: ResponseInit) {
   });
 }
 
-let servicesCache: { at: number; payload: unknown } | null = null;
-const SERVICES_CACHE_MS = 3_000;
-
 const platforms = [
   { id: "facebook", name: "فيسبوك", color: "#1877F2" },
   { id: "tiktok", name: "تيك توك", color: "#000000" },
@@ -59,9 +56,8 @@ const platforms = [
 
 export async function GET() {
   try {
-    if (servicesCache && Date.now() - servicesCache.at < SERVICES_CACHE_MS) {
-      return json(servicesCache.payload);
-    }
+    const cached = readServicesCache();
+    if (cached) return json(cached);
 
     const [servicesResult, providerServices] = await Promise.all([
       getServices().catch(() => {
@@ -104,7 +100,7 @@ export async function GET() {
       platforms,
       count: merged.length,
     };
-    servicesCache = { at: Date.now(), payload };
+    writeServicesCache(payload);
     return json(payload);
   } catch (err: any) {
     return json({ error: err.message }, { status: 500 });

@@ -45,6 +45,8 @@ export default function Sidebar({ open, onClose, user }: SidebarProps) {
 
   const menuItems: MenuItem[] = [
     { type: "link", label: t("sidebar.menu"), href: "/dashboard" },
+    { type: "link", label: t("sidebar.profile"), href: "/profile", icon: User },
+    { type: "link", label: t("sidebar.language"), href: "/settings/language", icon: Globe2 },
     { type: "link", label: t("sidebar.settings"), href: "/settings", icon: Settings },
     { type: "link", label: t("sidebar.services"), href: "/services", icon: Boxes },
     { type: "link", label: t("sidebar.orders"), href: "/orders", icon: ShoppingCart },

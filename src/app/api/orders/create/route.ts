@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db, initDb } from "@/lib/db";
-import { createOrder, getServices } from "@/lib/follower";
+import { cancelOrder, createOrder, getServices } from "@/lib/follower";
 import { executeProviderOrder } from "@/lib/providers";
 
 export const dynamic = "force-dynamic";
@@ -21,10 +21,19 @@ export async function POST(request: Request) {
   try {
     const session = await requireAuth();
     await initDb();
-    const { serviceId, link, quantity } = await request.json();
+    const body = await request.json();
+    const serviceId = String(body?.serviceId ?? "").trim();
+    const link = String(body?.link ?? "").trim();
+    const quantity = body?.quantity;
 
-    if (!serviceId || !link || !quantity) {
+    if (!serviceId || !link || quantity === undefined || quantity === null || quantity === "") {
       return json({ error: "جميع الحقول مطلوبة" }, { status: 400 });
+    }
+    if (serviceId.length > 128) {
+      return json({ error: "معرّف الخدمة غير صالح" }, { status: 400 });
+    }
+    if (link.length > 2048) {
+      return json({ error: "الرابط طويل جدًا" }, { status: 400 });
     }
 
     const qty = Number(quantity);
@@ -88,9 +97,9 @@ export async function POST(request: Request) {
       let localOrderId: number | null = null;
       try {
         const orderResult = await db.execute({
-          sql: `INSERT INTO orders (user_id, service_id, service_name, link, quantity, charge, status)
-                VALUES (?, ?, ?, ?, ?, ?, 'processing')`,
-          args: [session.userId!, Number(providerService.id), String(providerService.name), String(link), qty, cost],
+          sql: `INSERT INTO orders (user_id, service_id, service_name, link, quantity, charge, status, provider_id)
+                VALUES (?, ?, ?, ?, ?, ?, 'processing', ?)`,
+          args: [session.userId!, Number(providerService.id), String(providerService.name), String(link), qty, cost, Number(providerService.provider_id)],
         });
         localOrderId = Number((orderResult as any).lastInsertRowid);
 
@@ -178,30 +187,57 @@ export async function POST(request: Request) {
       return json({ error: "رصيد غير كافٍ" }, { status: 400 });
     }
 
-    const smmnineResult = await createOrder(String(serviceId), String(link), String(qty));
-    if (!smmnineResult.order) {
-      return json({ error: "فشل إنشاء الطلب في Follower" }, { status: 502 });
-    }
-
-    await db.execute({
+    // احجز الرصيد قبل الاتصال بالمزود لمنع إنفاق الرصيد نفسه في طلبين متزامنين.
+    const debit = await db.execute({
       sql: "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
       args: [cost, session.userId!, cost],
     });
+    if (Number((debit as any).rowsAffected || 0) !== 1) {
+      return json({ error: "رصيد غير كافٍ أو تغيّر أثناء المعالجة" }, { status: 409 });
+    }
 
-    const orderResult = await db.execute({
-      sql: "INSERT INTO orders (user_id, smmnine_order_id, service_id, service_name, link, quantity, charge, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      args: [session.userId!, smmnineResult.order, Number(serviceId), service.name, link, qty, cost, "Pending"],
-    });
+    let smmnineOrderId: string | null = null;
+    try {
+      const smmnineResult = await createOrder(String(serviceId), String(link), String(qty));
+      smmnineOrderId = smmnineResult.order ? String(smmnineResult.order) : null;
+      if (!smmnineOrderId) {
+        await db.execute({ sql: "UPDATE users SET balance = balance + ? WHERE id = ?", args: [cost, session.userId!] });
+        return json({ error: "فشل إنشاء الطلب في Follower" }, { status: 502 });
+      }
+    } catch (error) {
+      await db.execute({ sql: "UPDATE users SET balance = balance + ? WHERE id = ?", args: [cost, session.userId!] });
+      throw error;
+    }
 
-    await db.execute({
-      sql: "INSERT INTO transactions (user_id, type, amount, status, description) VALUES (?, ?, ?, ?, ?)",
-      args: [session.userId!, "order", -cost, "completed", `طلب #${smmnineResult.order} - ${service.name}`],
-    });
+    let localOrderId: number | null = null;
+    try {
+      const orderResult = await db.execute({
+        sql: "INSERT INTO orders (user_id, smmnine_order_id, service_id, service_name, link, quantity, charge, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        args: [session.userId!, smmnineOrderId, Number(serviceId), service.name, link, qty, cost, "Pending"],
+      });
+      localOrderId = Number(orderResult.lastInsertRowid);
+
+      await db.execute({
+        sql: "INSERT INTO transactions (user_id, type, amount, status, description) VALUES (?, ?, ?, ?, ?)",
+        args: [session.userId!, "order", -cost, "completed", `طلب #${smmnineOrderId} - ${service.name}`],
+      });
+    } catch (error) {
+      await db.execute({ sql: "UPDATE users SET balance = balance + ? WHERE id = ?", args: [cost, session.userId!] });
+      if (localOrderId) {
+        await db.execute({ sql: "UPDATE orders SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", args: [localOrderId] }).catch(() => undefined);
+      }
+      try {
+        await cancelOrder(smmnineOrderId);
+      } catch {
+        console.error("Legacy order rollback failed", { remoteOrderId: smmnineOrderId, userId: session.userId });
+      }
+      throw error;
+    }
 
     return json({
       order: {
-        id: Number(orderResult.lastInsertRowid),
-        smmnine_order_id: smmnineResult.order,
+        id: localOrderId,
+        smmnine_order_id: smmnineOrderId,
         service_name: service.name,
         charge: cost,
         status: "Pending",

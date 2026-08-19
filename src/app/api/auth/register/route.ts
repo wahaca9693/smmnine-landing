@@ -31,6 +31,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "يرجى إدخال اسم المستخدم والبريد الإلكتروني وكلمة المرور" }, { status: 400 });
     }
 
+    const registrationSetting = await db.execute("SELECT registrationEnabled FROM site_settings LIMIT 1");
+    const registrationEnabled = registrationSetting.rows.length === 0 || Boolean(Number((registrationSetting.rows[0] as any)?.registrationEnabled ?? 1));
+    if (!registrationEnabled) {
+      return NextResponse.json({ error: "التسجيل الجديد متوقف مؤقتًا من الإدارة. يرجى المحاولة لاحقًا." }, { status: 403 });
+    }
+
     // ارفض الإرسال الآلي الواضح قبل لمس قاعدة البيانات أو استهلاك حصة المحدد.
     if (isSuspiciousRegistration({ honeypot: body.website, formStartedAt: body.formStartedAt })) {
       return NextResponse.json({ error: securityErrorMessage() }, { status: 400 });

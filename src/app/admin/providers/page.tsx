@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Server,
@@ -41,6 +41,9 @@ interface Provider {
   balance_fetched_at: string;
   notes: string;
   is_active: number;
+  connection_status?: "pending" | "online" | "offline" | string;
+  last_error?: string | null;
+  last_probe_at?: string | null;
 }
 
 interface ProviderService {
@@ -205,10 +208,10 @@ interface PreviewServiceRowProps {
   onAdd: () => void;
   onSaved: (msg: string) => void;
   onError: (msg: string) => void;
-  onRefresh: () => void;
+  onLocalChange: (id: number, patch: Partial<ProviderService>) => void;
 }
 
-function PreviewServiceRow({ s, previewing, services, globalMarkup, selected, onSelect, onAdd, onSaved, onError, onRefresh }: PreviewServiceRowProps) {
+function PreviewServiceRow({ s, previewing, services, globalMarkup, selected, onSelect, onAdd, onSaved, onError, onLocalChange }: PreviewServiceRowProps) {
   // الخدمة المضافة محليًا (نطابقها بـ provider_id + remote_service_id)
   const local = useMemo(
     () => services.find((l) => l.provider_id === previewing && String(l.remote_service_id) === String(s.service)),
@@ -229,6 +232,7 @@ function PreviewServiceRow({ s, previewing, services, globalMarkup, selected, on
     if (!local) return;
     setSaving(true);
     try {
+      const patch: Partial<ProviderService> = {};
       const n = name.trim();
       if (dirtyName && n && n !== local.name) {
         const r = await fetch("/api/admin/providers", {
@@ -236,7 +240,10 @@ function PreviewServiceRow({ s, previewing, services, globalMarkup, selected, on
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "rename-service", id: local.id, name: n }),
         });
-        if (r.ok) onSaved("حُفظ الاسم: " + n);
+        if (r.ok) {
+          patch.name = n;
+          onSaved("حُفظ الاسم: " + n);
+        }
       }
       const v = Number(mark);
       if (dirtyMark && !isNaN(v) && v >= 0 && v !== local.markup_percent) {
@@ -245,11 +252,15 @@ function PreviewServiceRow({ s, previewing, services, globalMarkup, selected, on
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "update-service", id: local.id, markup_percent: v }),
         });
-        if (r.ok) onSaved("حُفظ سعر العرض: " + v + "% فوق التكلفة");
+        if (r.ok) {
+          patch.markup_percent = v;
+          patch.sell_rate = Math.round(Number(s.rate || 0) * (1 + v / 100) * 1_000_000) / 1_000_000;
+          onSaved("حُفظ سعر العرض: " + v + "% فوق التكلفة");
+        }
       }
+      if (Object.keys(patch).length) onLocalChange(local.id, patch);
       setDirtyName(false);
       setDirtyMark(false);
-      onRefresh();
     } finally {
       setSaving(false);
     }
@@ -266,8 +277,8 @@ function PreviewServiceRow({ s, previewing, services, globalMarkup, selected, on
         body: JSON.stringify({ action: "update-service", id: local.id, is_active: newActive }),
       });
       if (r.ok) {
+        onLocalChange(local.id, { is_active: newActive });
         onSaved(newActive ? "أُعيدت الخدمة للعرض — ظاهرة للمستخدمين" : "أُخفيت الخدمة — غائبة عن كل المستخدمين");
-        onRefresh();
       } else { onError("تعذر إخفاء الخدمة"); }
     } finally {
       setToggling(false);
@@ -369,6 +380,10 @@ function PreviewServiceRow({ s, previewing, services, globalMarkup, selected, on
 interface ProviderCardProps {
   p: Provider;
   services: ProviderService[];
+  serviceCount?: number;
+  servicesLoaded?: boolean;
+  servicesLoading?: boolean;
+  onLoadServices: (id: number) => void;
   syncing: number | null;
   globalMarkup: number;
   onSync: (id: number) => void;
@@ -387,7 +402,7 @@ interface ProviderCardProps {
 
 function ProviderCard(props: ProviderCardProps) {
   const {
-    p, services, syncing, globalMarkup, onSync, onToggleProvider,
+    p, services, serviceCount = 0, servicesLoaded = false, servicesLoading = false, onLoadServices, syncing, globalMarkup, onSync, onToggleProvider,
     onPreview, onEdit, onDeleteProvider, onServiceAction, onDeleteService, onPricing, onRenameService, onUpdateAll, onResetPricing, onDeleteServices,
   } = props;
 
@@ -434,7 +449,10 @@ function ProviderCard(props: ProviderCardProps) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate text-[15px] font-black text-white">{p.name}</span>
-            <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8.5px] font-black ${p.is_active ? "bg-green-500/15 text-green-400" : "bg-zinc-700/50 text-zinc-400"}`}>{p.is_active ? "متصل" : "معطل"}</span>
+            <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8.5px] font-black ${p.is_active ? "bg-green-500/15 text-green-400" : "bg-zinc-700/50 text-zinc-400"}`}>{p.is_active ? "مفعّل" : "معطل"}</span>
+            {p.connection_status === "pending" && <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[8.5px] font-black text-amber-300">يفحص...</span>}
+            {p.connection_status === "online" && <span className="shrink-0 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[8.5px] font-black text-emerald-300">الاتصال سليم</span>}
+            {p.connection_status === "offline" && <span className="shrink-0 rounded-full bg-red-500/15 px-1.5 py-0.5 text-[8.5px] font-black text-red-300">فحص الاتصال فشل</span>}
           </div>
           <div className="truncate text-[10px] text-zinc-500">{p.api_url}</div>
         </div>
@@ -498,13 +516,23 @@ function ProviderCard(props: ProviderCardProps) {
           <div className="flex items-center gap-2 text-[11px] font-black text-zinc-300">
             <Activity size={13} className="text-[var(--color-gold-bright)]" />
             خدمات المزود
-            <span className="rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 text-[10px] text-zinc-400">{all.length} خدمة</span>
+            <span className="rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 text-[10px] text-zinc-400">{servicesLoaded ? all.length : serviceCount} خدمة</span>
           </div>
-          <span className="text-[9.5px] text-zinc-500">مضافة {activeCount} · موقوفة {pausedCount}</span>
+          <span className="text-[9.5px] text-zinc-500">مضافة {servicesLoaded ? activeCount : "—"} · موقوفة {servicesLoaded ? pausedCount : "—"}</span>
         </div>
 
+        {!servicesLoaded ? (
+          <div className="rounded-2xl border border-dashed border-[var(--color-gold)]/25 bg-[var(--color-surface-2)] px-3 py-5 text-center">
+            <div className="mb-2 text-[11px] text-zinc-500">لا تُحمّل خدمات المزود إلا عند طلبها لتبقى اللوحة سريعة حتى مع مئات المزودين.</div>
+            <button onClick={() => onLoadServices(p.id)} disabled={servicesLoading} className="mx-auto flex h-9 items-center justify-center gap-2 rounded-xl border border-[var(--color-gold)]/40 bg-[var(--color-gold)]/10 px-4 text-[11px] font-black text-[var(--color-gold-bright)] disabled:opacity-60">
+              {servicesLoading ? <Loader2 className="animate-spin" size={14} /> : <ListChecks size={14} />}
+              {servicesLoading ? "جاري تحميل خدمات هذا المزود..." : `تحميل ${serviceCount} خدمة`}
+            </button>
+          </div>
+        ) : null}
+
         {/* البحث */}
-        <div className="relative px-2.5">
+        <div className={`relative px-2.5 ${servicesLoaded ? "" : "pointer-events-none opacity-45"}`}>
           <Search size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500" />
           <input
             value={svcSearch}
@@ -520,7 +548,7 @@ function ProviderCard(props: ProviderCardProps) {
         </div>
 
         {/* فلاتر التصنيفات */}
-        <div className="no-scrollbar mt-2 flex gap-1.5 overflow-x-auto px-2.5 pb-1">
+        <div className={`no-scrollbar mt-2 flex gap-1.5 overflow-x-auto px-2.5 pb-1 ${servicesLoaded ? "" : "pointer-events-none opacity-45"}`}>
           {categories.map((c) => (
             <button
               key={c}
@@ -533,7 +561,7 @@ function ProviderCard(props: ProviderCardProps) {
         </div>
 
         {/* التبويب بين المفعلة والموقوفة */}
-        <div className="mt-2 flex items-center gap-1.5 px-2.5">
+        <div className={`mt-2 flex items-center gap-1.5 px-2.5 ${servicesLoaded ? "" : "pointer-events-none opacity-45"}`}>
           <button
             onClick={() => setSvcMode("active")}
             className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-xl border text-[11px] font-black transition active:scale-[0.97] ${svcMode === "active" ? "border-green-500/40 bg-green-500/10 text-green-400" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-zinc-500"}`}
@@ -549,8 +577,8 @@ function ProviderCard(props: ProviderCardProps) {
         </div>
 
         {/* قائمة الخدمات */}
-        <div className="mt-2 max-h-[420px] overflow-y-auto rounded-2xl border border-[var(--color-gold)]/10 bg-[var(--color-surface)]">
-          {filtered.length === 0 && (
+        <div className={`mt-2 max-h-[420px] overflow-y-auto rounded-2xl border border-[var(--color-gold)]/10 bg-[var(--color-surface)] ${servicesLoaded ? "" : "opacity-45"}`}>
+          {servicesLoaded && filtered.length === 0 && (
             <div className="flex flex-col items-center gap-2 px-3 py-8 text-center text-[11px] text-zinc-500">
               <Search size={22} className="text-zinc-600" />
               {all.length === 0
@@ -558,7 +586,7 @@ function ProviderCard(props: ProviderCardProps) {
                 : "لا توجد خدمات مطابقة للبحث"}
             </div>
           )}
-          {filtered.map((s) => (
+          {servicesLoaded && filtered.map((s) => (
             <ServiceRow
               key={s.id}
               s={s}
@@ -612,6 +640,9 @@ function ProviderCard(props: ProviderCardProps) {
 export default function ProvidersPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [services, setServices] = useState<ProviderService[]>([]);
+  const [serviceCounts, setServiceCounts] = useState<Record<number, number>>({});
+  const [loadedServiceProviders, setLoadedServiceProviders] = useState<Set<number>>(new Set());
+  const [loadingServiceProviders, setLoadingServiceProviders] = useState<Set<number>>(new Set());
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -632,6 +663,24 @@ export default function ProvidersPage() {
   const [selectedPreviewIds, setSelectedPreviewIds] = useState<Set<string>>(new Set());
   const [bulkConfirm, setBulkConfirm] = useState<{ mode: "selected" | "filtered"; services: PreviewCatalogService[] } | null>(null);
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [providerSearch, setProviderSearch] = useState("");
+  const [providerMode, setProviderMode] = useState<"all" | "active" | "paused">("all");
+  const previewCacheRef = useRef<Map<number, { services: PreviewCatalogService[]; fetchedAt: number }>>(new Map());
+  const previewRequestRef = useRef(0);
+  const loadRequestRef = useRef(0);
+  const loadAbortRef = useRef<AbortController | null>(null);
+
+  const visibleProviders = useMemo(() => {
+    const query = providerSearch.trim().toLowerCase();
+    return providers.filter((provider) => {
+      const matchesMode = providerMode === "all"
+        || (providerMode === "active" && Number(provider.is_active) === 1)
+        || (providerMode === "paused" && Number(provider.is_active) === 0);
+      if (!matchesMode) return false;
+      if (!query) return true;
+      return `${provider.name} ${provider.api_url} ${provider.notes || ""}`.toLowerCase().includes(query);
+    });
+  }, [providers, providerMode, providerSearch]);
 
   const previewPlatforms = useMemo(() => {
     const set = new Set<string>();
@@ -645,35 +694,84 @@ export default function ProvidersPage() {
     return [...set].sort();
   }, [previewServices]);
 
-  const load = () => {
-    fetch("/api/admin/providers")
-      .then((res) => (res.ok ? res.json() : { providers: [] }))
-      .then((d) => setProviders(d.providers || []));
-    fetch("/api/admin/providers?mode=services")
-      .then((res) => (res.ok ? res.json() : { services: [] }))
-      .then((d) => setServices(d.services || []));
-    fetch("/api/admin/providers?mode=logs")
-      .then((res) => (res.ok ? res.json() : { logs: [] }))
-      .then((d) => setLogs(d.logs || []));
+  const load = async () => {
+    // التحميل الأولي خفيف: لا نجلب كتالوج كل المزودين قبل أن يطلبه المدير.
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    const requestId = ++loadRequestRef.current;
+    loadAbortRef.current = controller;
+    try {
+      const [providerData, statsData, logsData] = await Promise.all([
+        fetch("/api/admin/providers", { signal: controller.signal }).then((res) => (res.ok ? res.json() : { providers: [] })),
+        fetch("/api/admin/providers?mode=service-stats", { signal: controller.signal }).then((res) => (res.ok ? res.json() : { stats: [] })),
+        fetch("/api/admin/providers?mode=logs", { signal: controller.signal }).then((res) => (res.ok ? res.json() : { logs: [] })),
+      ]);
+      if (requestId !== loadRequestRef.current) return;
+      setProviders(providerData.providers || []);
+      const counts: Record<number, number> = {};
+      for (const row of statsData.stats || []) counts[Number(row.provider_id)] = Number(row.total || 0);
+      setServiceCounts(counts);
+      setLogs(logsData.logs || []);
+    } catch (error) {
+      if (!controller.signal.aborted && requestId === loadRequestRef.current) setResult({ error: "تعذر تحميل بيانات المزودين" });
+    } finally {
+      if (loadAbortRef.current === controller) loadAbortRef.current = null;
+    }
   };
 
   useEffect(() => {
-    load();
-    refreshBalances();
+    void load();
+    // لا نحدّث أرصدة المزودين خارجيًا تلقائيًا عند فتح الصفحة؛ هذا الطلب قد يستغرق 20 ثانية لكل مزود.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const loadProviderServices = async (providerId: number) => {
+    if (loadedServiceProviders.has(providerId) || loadingServiceProviders.has(providerId)) return;
+    setLoadingServiceProviders((prev) => new Set(prev).add(providerId));
+    try {
+      const res = await fetch(`/api/admin/providers?mode=services&providerId=${providerId}`);
+      const data = await res.json();
+      if (res.ok) {
+        setServices((prev) => [...prev.filter((s) => s.provider_id !== providerId), ...(data.services || [])]);
+        setLoadedServiceProviders((prev) => new Set(prev).add(providerId));
+      } else setResult({ error: data.error || "تعذر تحميل خدمات المزود" });
+    } finally {
+      setLoadingServiceProviders((prev) => { const next = new Set(prev); next.delete(providerId); return next; });
+    }
+  };
 
   const refreshBalances = async () => {
     setRefreshing(true);
     try {
-      await fetch("/api/admin/providers", {
+      const res = await fetch("/api/admin/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "refresh-balances" }),
       });
-      load();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setResult({ error: data.error || "تعذر تحديث أرصدة المزودين" });
+        return;
+      }
+      await load();
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const probeProvider = async (providerId: number) => {
+    try {
+      const res = await fetch("/api/admin/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "probe", providerId }),
+      });
+      const data = await res.json();
+      setProviders((prev) => prev.map((p) => p.id === providerId ? { ...p, connection_status: data.connection_status || (res.ok ? "online" : "offline"), last_error: data.error || null, last_probe_at: new Date().toISOString() } : p));
+      if (!res.ok) setResult({ error: data.error || "تم حفظ المزود، لكن فشل فحص الاتصال" });
+    } catch {
+      setProviders((prev) => prev.map((p) => p.id === providerId ? { ...p, connection_status: "offline", last_error: "تعذر الوصول إلى المزود" } : p));
+      setResult({ error: "تم حفظ المزود، لكن تعذر فحص الاتصال الآن" });
     }
   };
 
@@ -692,13 +790,15 @@ export default function ProvidersPage() {
       if (data.error) {
         setResult({ error: data.error });
       } else {
-        setResult({
-          message: `تم الربط بنجاح ✓ الاتصال سليم — الرصيد لدى المزود: $${Number(data.balance ?? 0).toFixed(2)} — تم اعتماد الرابط: ${data.api_url || "endpoint المكتشف"} — اضغط «عرض الخدمات» لإضافة ما تعجبك انتقائيًا`,
-        });
+        const saved = data.provider as Provider;
+        setProviders((prev) => editing
+          ? prev.map((p) => p.id === Number(editing.id) ? { ...p, ...saved, connection_status: "pending" } : p)
+          : [{ ...saved, connection_status: "pending" }, ...prev]);
+        setResult({ message: "تم حفظ المزود فورًا. جارٍ فحص الاتصال في الخلفية؛ يمكنك متابعة العمل دون انتظار." });
         setShowForm(false);
         setEditing(null);
         setForm({ name: "", api_url: "", api_key: "", notes: "" });
-        load();
+        if (saved?.id) void probeProvider(Number(saved.id));
       }
     } catch {
       setResult({ error: "تعذر الوصول إلى الخادم. تحقق من الاتصال ثم أعد المحاولة." });
@@ -719,8 +819,10 @@ export default function ProvidersPage() {
       const data = await res.json();
       if (data.error) setResult({ error: data.error });
       else {
-        setResult({ message: `تم استيراد ${data.imported} خدمة بنجاح دون هامش تلقائي — اختر نطاقًا لتطبيق الربح اختياريًا` });
-        load();
+        setResult({ message: `تمت مزامنة ${data.imported} خدمة جديدة وتحديث ${data.updated ?? 0} خدمة دون حذف الأسعار المخصصة` });
+        setServiceCounts((prev) => ({ ...prev, [providerId]: Number(data.services ?? data.imported ?? 0) }));
+        setLoadedServiceProviders((prev) => { const next = new Set(prev); next.delete(providerId); return next; });
+        setServices((prev) => prev.filter((s) => s.provider_id !== providerId));
       }
     } finally {
       setSyncing(null);
@@ -728,22 +830,54 @@ export default function ProvidersPage() {
   };
 
   const toggleProvider = async (id: number) => {
-    await fetch("/api/admin/providers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "toggle", id }),
-    });
-    load();
+    const previous = providers.find((p) => p.id === id)?.is_active;
+    setProviders((prev) => prev.map((p) => p.id === id ? { ...p, is_active: p.is_active ? 0 : 1 } : p));
+    try {
+      const res = await fetch("/api/admin/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "toggle", id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "تعذر تغيير الحالة");
+      if (data.provider) setProviders((prev) => prev.map((p) => p.id === id ? { ...p, is_active: Number(data.provider.is_active) } : p));
+    } catch (err: any) {
+      setProviders((prev) => prev.map((p) => p.id === id ? { ...p, is_active: Number(previous ?? p.is_active) } : p));
+      setResult({ error: err?.message || "تعذر تغيير حالة المزود" });
+    }
   };
 
   const deleteProvider = async (id: number) => {
     if (!confirm("هل أنت متأكد من حذف هذا المزود وجميع خدماته؟")) return;
-    await fetch("/api/admin/providers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "delete", id }),
-    });
-    load();
+    try {
+      const res = await fetch("/api/admin/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "تعذر حذف المزود");
+      setProviders((prev) => prev.filter((p) => p.id !== id));
+      setServices((prev) => prev.filter((s) => s.provider_id !== id));
+      setServiceCounts((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setLoadedServiceProviders((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      previewCacheRef.current.delete(id);
+      if (previewing === id) {
+        setPreviewing(null);
+        setPreviewServices([]);
+      }
+      setResult({ message: "تم حذف المزود وخدماته محليًا فورًا" });
+    } catch (err: any) {
+      setResult({ error: err?.message || "تعذر حذف المزود" });
+    }
   };
 
   const renameService = async (id: number, name: string) => {
@@ -767,29 +901,38 @@ export default function ProvidersPage() {
   const serviceAction = async (id: number) => {
     const s = services.find((x) => x.id === id);
     if (!s) return;
-    const deactivate = s.is_active ? 1 : 0; // 1 = حذف/إيقاف (نفس منطق الواجهة السابقة)
-    const updated = services.map((x) => (x.id === id ? { ...x, is_active: deactivate ? 0 : 1 } : x));
-    setServices(updated);
-    await fetch("/api/admin/providers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "update-service", id, markup_percent: undefined as unknown as number, is_active: deactivate }),
-    });
+    const previous = s.is_active;
+    const nextActive = previous ? 0 : 1;
+    setServices((prev) => prev.map((x) => x.id === id ? { ...x, is_active: nextActive } : x));
+    try {
+      const res = await fetch("/api/admin/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update-service", id, is_active: nextActive }),
+      });
+      if (!res.ok) throw new Error("تعذر تغيير حالة الخدمة");
+    } catch (err: any) {
+      setServices((prev) => prev.map((x) => x.id === id ? { ...x, is_active: previous } : x));
+      setResult({ error: err?.message || "تعذر تغيير حالة الخدمة" });
+    }
   };
 
   const deleteService = async (id: number) => {
     if (!confirm("هل أنت متأكد من حذف هذه الخدمة نهائيًا؟")) return;
-    const res = await fetch("/api/admin/providers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "delete-service", id }),
-    });
-    const data = await res.json();
-    if (data.ok) {
+    const removed = services.find((s) => s.id === id);
+    setServices((prev) => prev.filter((s) => s.id !== id));
+    try {
+      const res = await fetch("/api/admin/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete-service", id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "فشل حذف الخدمة");
       setDeletedServiceIds((prev) => new Set([...prev, id]));
-      setServices((prev) => prev.filter((s) => s.id !== id));
-    } else {
-      setResult({ error: data.error || "فشل حذف الخدمة" });
+    } catch (err: any) {
+      if (removed) setServices((prev) => [...prev, removed]);
+      setResult({ error: err?.message || "فشل حذف الخدمة" });
     }
   };
 
@@ -802,8 +945,22 @@ export default function ProvidersPage() {
       body: JSON.stringify({ action: "update-provider-services", providerId, scope, ids, category, pricing_mode: mode, markup_percent: mode === "markup" ? numeric : 0, manual_price: mode === "manual" ? numeric : undefined }),
     });
     const data = await res.json();
-    if (res.ok) { setResult({ message: mode === "manual" ? `تم تطبيق سعر بيع مباشر $${numeric.toFixed(6)} على النطاق المحدد` : `تم تطبيق هامش ${numeric}% على النطاق المحدد` }); load(); }
-    else setResult({ error: data.error || "تعذر تحديث الأسعار" });
+    if (res.ok) {
+      const selectedIds = new Set(ids);
+      setServices((prev) => prev.map((service) => {
+        const matches = service.provider_id === providerId && (
+          scope === "provider" ||
+          (scope === "selected" && selectedIds.has(service.id)) ||
+          (scope === "category" && (service.category === category || service.type === category))
+        );
+        if (!matches) return service;
+        if (mode === "manual") {
+          return { ...service, pricing_mode: "manual", markup_percent: 0, manual_price: numeric, sell_rate: Math.round(numeric * 1_000_000) / 1_000_000 };
+        }
+        return { ...service, pricing_mode: "markup", markup_percent: numeric, manual_price: null, sell_rate: Math.round(Number(service.rate) * (1 + numeric / 100) * 1_000_000) / 1_000_000 };
+      }));
+      setResult({ message: mode === "manual" ? `تم تطبيق سعر بيع مباشر $${numeric.toFixed(6)} على النطاق المحدد` : `تم تطبيق هامش ${numeric}% على النطاق المحدد` });
+    } else setResult({ error: data.error || "تعذر تحديث الأسعار" });
   };
 
   const resetProviderPricing = async (providerId: number, scope: "provider" | "category" | "selected", ids: number[] = [], category?: string) => {
@@ -812,8 +969,20 @@ export default function ProvidersPage() {
     if (!confirm("سيتم إلغاء النسبة والسعر المباشر عن النطاق المحدد وإرجاعه إلى تكلفة المزود. هل تريد المتابعة؟")) return;
     const res = await fetch("/api/admin/providers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reset-provider-pricing", providerId, scope, ids, category }) });
     const data = await res.json();
-    if (res.ok) { setResult({ message: `تم إلغاء التسعير الإضافي عن ${data.updated ?? 0} خدمة` }); load(); }
-    else setResult({ error: data.error || "تعذر إلغاء النسبة" });
+    if (res.ok) {
+      const selectedIds = new Set(ids);
+      setServices((prev) => prev.map((service) => {
+        const matches = service.provider_id === providerId && (
+          scope === "provider" ||
+          (scope === "selected" && selectedIds.has(service.id)) ||
+          (scope === "category" && (service.category === category || service.type === category))
+        );
+        return matches
+          ? { ...service, pricing_mode: "markup", markup_percent: 0, manual_price: null, sell_rate: Math.round(Number(service.rate) * 1_000_000) / 1_000_000 }
+          : service;
+      }));
+      setResult({ message: `تم إلغاء التسعير الإضافي عن ${data.updated ?? 0} خدمة` });
+    } else setResult({ error: data.error || "تعذر إلغاء النسبة" });
   };
 
   const deleteServices = async (providerId: number, ids?: number[]) => {
@@ -822,8 +991,17 @@ export default function ProvidersPage() {
     if (!confirm(message)) return;
     const res = await fetch("/api/admin/providers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete-services", providerId, ids: ids || [] }) });
     const data = await res.json();
-    if (res.ok) { setResult({ message: `تم حذف ${data.deleted ?? 0} خدمة` }); load(); }
-    else setResult({ error: data.error || "تعذر حذف الخدمات" });
+    if (res.ok) {
+      const deleted = Number(data.deleted ?? 0);
+      const selectedIds = new Set(ids || []);
+      setServices((prev) => prev.filter((service) => service.provider_id !== providerId || (!isAll && !selectedIds.has(service.id))));
+      setServiceCounts((prev) => ({
+        ...prev,
+        [providerId]: isAll ? 0 : Math.max(0, Number(prev[providerId] || 0) - deleted),
+      }));
+      if (isAll) setLoadedServiceProviders((prev) => { const next = new Set(prev); next.delete(providerId); return next; });
+      setResult({ message: `تم حذف ${deleted} خدمة` });
+    } else setResult({ error: data.error || "تعذر حذف الخدمات" });
   };
 
   // فتح نافذة جديدة يعيد كل فلاتر المعاينة والتحديد إلى الحالة الافتراضية.
@@ -832,34 +1010,57 @@ export default function ProvidersPage() {
   };
 
   const openPreviewOrig = async (providerId: number) => {
+    const requestId = ++previewRequestRef.current;
+    const cached = previewCacheRef.current.get(providerId);
     setPreviewing(providerId);
-    setPreviewLoading(true);
     setPreviewSearch("");
     setPreviewPlatform("all");
     setPreviewType("all");
     setPreviewPage(1);
     setSelectedPreviewIds(new Set());
+    if (cached?.services?.length) {
+      setPreviewServices(cached.services);
+      setPreviewLoading(false);
+    } else {
+      setPreviewServices([]);
+      setPreviewLoading(true);
+    }
     try {
       const res = await fetch(`/api/admin/providers?mode=preview&providerId=${providerId}`);
       const data = await res.json();
-      if (res.ok) setPreviewServices(data.services || []);
-      else { setPreviewServices([]); setResult({ error: data.error || "تعذر جلب الخدمات" }); }
+      if (res.ok) {
+        const nextServices = Array.isArray(data.services) ? data.services : [];
+        previewCacheRef.current.set(providerId, { services: nextServices, fetchedAt: Date.now() });
+        if (requestId === previewRequestRef.current) setPreviewServices(nextServices);
+      } else if (!cached && requestId === previewRequestRef.current) {
+        setPreviewServices([]);
+        setResult({ error: data.error || "تعذر جلب الخدمات" });
+      }
+    } catch {
+      if (!cached && requestId === previewRequestRef.current) setResult({ error: "تعذر الوصول إلى كتالوج المزود" });
     } finally {
-      setPreviewLoading(false);
+      if (requestId === previewRequestRef.current) setPreviewLoading(false);
     }
   };
 
   const addServiceFromPreview = async (providerId: number, remote_service_id: string) => {
+    const selected = previewServices.find((s) => String(s.service ?? s.remote_service_id) === String(remote_service_id));
     const res = await fetch("/api/admin/providers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "add-service", providerId, remote_service_id, pricing_enabled: false }),
+      body: JSON.stringify({ action: "add-service", providerId, remote_service_id, service: selected, pricing_enabled: false }),
     });
     const data = await res.json();
     if (res.ok) {
+      const added = data.service as ProviderService | undefined;
+      if (added?.id) {
+        setServices((prev) => prev.some((service) => service.id === added.id) ? prev.map((service) => service.id === added.id ? added : service) : [...prev, added]);
+        setServiceCounts((prev) => ({ ...prev, [providerId]: Number(prev[providerId] || 0) + 1 }));
+      }
+      setPreviewServices((prev) => prev.map((service) => String(service.service) === String(remote_service_id) ? { ...service, added: true } : service));
+      const cached = previewCacheRef.current.get(providerId);
+      if (cached) previewCacheRef.current.set(providerId, { ...cached, services: cached.services.map((service) => String(service.service) === String(remote_service_id) ? { ...service, added: true } : service) });
       setResult({ message: "أُضيفت الخدمة — ظاهرة للمستخدمين الآن" });
-      openPreviewOrig(providerId);
-      load();
     } else {
       setResult({ error: data.error || "تعذرت الإضافة" });
     }
@@ -969,11 +1170,19 @@ export default function ProvidersPage() {
         setResult({ error: data.error || "تعذر حفظ الخدمات الجماعية" });
         return;
       }
+      const addedServices = Array.isArray(data.services) ? data.services as ProviderService[] : [];
+      const addedRemoteIds = new Set(bulkConfirm.services.map((service) => String(service.service)));
+      setServices((prev) => {
+        const incoming = addedServices.filter((service) => !prev.some((current) => current.id === service.id));
+        return incoming.length ? [...prev, ...incoming] : prev;
+      });
+      setServiceCounts((prev) => ({ ...prev, [previewing]: Number(prev[previewing] || 0) + Number(data.added || addedServices.length || 0) }));
+      setPreviewServices((prev) => prev.map((service) => addedRemoteIds.has(String(service.service)) ? { ...service, added: true } : service));
+      const cached = previewCacheRef.current.get(previewing);
+      if (cached) previewCacheRef.current.set(previewing, { ...cached, services: cached.services.map((service) => addedRemoteIds.has(String(service.service)) ? { ...service, added: true } : service) });
       setBulkConfirm(null);
       setSelectedPreviewIds(new Set());
       setResult({ message: `تمت إضافة ${data.added} خدمة${data.skipped ? `، وتجاوز ${data.skipped} مضافة مسبقًا` : ""} — تظهر الآن لجميع المستخدمين` });
-      load();
-      await openPreviewOrig(previewing);
     } catch {
       setResult({ error: "تعذر الوصول إلى الخادم أثناء الحفظ الجماعي" });
     } finally {
@@ -1024,6 +1233,26 @@ export default function ProvidersPage() {
               className="h-9 w-20 rounded-lg border border-[var(--color-gold)]/30 bg-[var(--color-surface-2)] px-2 text-center text-[12px] font-black text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold)]"
             />
             <span className="text-[11px] text-zinc-400">اقتراح فقط — لا يُطبَّق إلا بزر ونطاق تختارهما</span>
+          </div>
+        </div>
+
+        {/* ═══ بحث وتصفية المزودين محليًا دون طلبات إضافية ═══ */}
+        <div className="rounded-2xl border border-[var(--color-gold)]/20 bg-[var(--color-surface)] p-2.5">
+          <div className="relative">
+            <Search size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <input
+              value={providerSearch}
+              onChange={(e) => setProviderSearch(e.target.value)}
+              placeholder="ابحث باسم المزود أو الرابط أو الملاحظات..."
+              className="h-10 w-full rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-surface-2)] pr-9 pl-3 text-[11px] font-bold text-white outline-none placeholder:text-zinc-600 focus:border-[var(--color-gold)]/60"
+            />
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-1.5">
+            {([["all", "الكل"], ["active", "المفعّلة"], ["paused", "الموقوفة"]] as const).map(([mode, label]) => (
+              <button key={mode} type="button" onClick={() => setProviderMode(mode)} className={`h-8 rounded-xl border text-[10px] font-black transition active:scale-95 ${providerMode === mode ? "border-[var(--color-gold)] bg-[var(--color-gold)]/15 text-[var(--color-gold-bright)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-zinc-500"}`}>
+                {label} ({mode === "all" ? providers.length : providers.filter((provider) => Number(provider.is_active) === (mode === "active" ? 1 : 0)).length})
+              </button>
+            ))}
           </div>
         </div>
 
@@ -1091,11 +1320,20 @@ export default function ProvidersPage() {
           </div>
         )}
         <div className="space-y-6">
-          {providers.map((p, idx) => (
+          {visibleProviders.length === 0 && providers.length > 0 && (
+            <div className="rounded-3xl border border-dashed border-[var(--color-gold)]/25 bg-[var(--color-surface)] px-4 py-10 text-center text-[11px] text-zinc-500">
+              لا توجد مزودات مطابقة للبحث أو التصفية الحالية.
+            </div>
+          )}
+          {visibleProviders.map((p, idx) => (
             <section key={p.id} aria-label={`قسم ${p.name}`}>
               <ProviderCard
                 p={p}
-                services={services}
+                services={services.filter((s) => s.provider_id === p.id)}
+                serviceCount={serviceCounts[p.id] || 0}
+                servicesLoaded={loadedServiceProviders.has(p.id)}
+                servicesLoading={loadingServiceProviders.has(p.id)}
+                onLoadServices={loadProviderServices}
                 syncing={syncing}
                 globalMarkup={globalMarkup}
                 onSync={syncServices}
@@ -1174,7 +1412,7 @@ export default function ProvidersPage() {
                     <div className="flex items-center justify-between px-1 text-[9px] text-zinc-500 sm:text-[10px]"><span>عرض {((safePreviewPage - 1) * previewPageSize + 1).toLocaleString("en-US")}–{Math.min(safePreviewPage * previewPageSize, filteredPreviewServices.length).toLocaleString("en-US")} من {filteredPreviewServices.length.toLocaleString("en-US")}</span><span>60 خدمة في الصفحة</span></div>
                     <div className="max-h-[43vh] space-y-1 overflow-y-auto rounded-2xl border border-[var(--color-gold)]/10 bg-[#080808] p-1 sm:max-h-[47vh] sm:space-y-1.5 sm:p-1.5">
                       {visiblePreviewServices.map((s: PreviewCatalogService) => (
-                        <PreviewServiceRow key={s.service} s={s} previewing={previewing!} services={services} globalMarkup={globalMarkup} selected={selectedPreviewIds.has(String(s.service))} onSelect={togglePreviewSelection} onAdd={() => addServiceFromPreview(previewing!, String(s.service))} onSaved={(msg) => setResult({ message: msg })} onError={(msg) => setResult({ error: msg })} onRefresh={() => openPreviewOrig(previewing!)} />
+                        <PreviewServiceRow key={s.service} s={s} previewing={previewing!} services={services} globalMarkup={globalMarkup} selected={selectedPreviewIds.has(String(s.service))} onSelect={togglePreviewSelection} onAdd={() => addServiceFromPreview(previewing!, String(s.service))} onSaved={(msg) => setResult({ message: msg })} onError={(msg) => setResult({ error: msg })} onLocalChange={(id, patch) => setServices((prev) => prev.map((service) => service.id === id ? { ...service, ...patch } : service))} />
                       ))}
                     </div>
                     <div className="flex items-center justify-center gap-1.5 pt-0.5 sm:gap-2 sm:pt-1">

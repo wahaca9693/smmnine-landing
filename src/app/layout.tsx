@@ -12,25 +12,27 @@ const tajawal = Tajawal({
   display: "swap",
 });
 
+const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
 export const metadata: Metadata = {
-  metadataBase: new URL("https://follower-ty.duckdns.org"),
-  title: { default: "Follower", template: "%s | Follower" },
-  description: "Follower - خدمات السوشيال ميديا",
+  metadataBase: new URL(appUrl),
+  title: { default: "smmnine", template: "%s | smmnine" },
+  description: "smmnine - منصة خدمات السوشيال ميديا",
   icons: {
     icon: "/logo-icon.png",
     shortcut: "/logo-icon.png",
     apple: "/logo-icon.png",
   },
   openGraph: {
-    title: "Follower",
-    description: "Follower - خدمات السوشيال ميديا",
+    title: "smmnine",
+    description: "smmnine - منصة خدمات السوشيال ميديا",
     images: ["/og-image.png"],
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Follower",
-    description: "Follower - خدمات السوشيال ميديا",
+    title: "smmnine",
+    description: "smmnine - منصة خدمات السوشيال ميديا",
     images: ["/og-image.png"],
   },
 };
