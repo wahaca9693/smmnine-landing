@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useTheme } from "../components/ThemeProvider";
 import { Shield, AlertTriangle, CheckCircle, RefreshCw, XCircle } from "lucide-react";
 
 export default function TermsPage() {
+  const { settings } = useTheme();
+  const brandName = settings.siteName || "smmnine";
   return (
     <div className="min-h-screen bg-[var(--color-bg)] px-5 py-8 text-white">
       <div className="mx-auto max-w-2xl">
@@ -19,7 +22,7 @@ export default function TermsPage() {
               القبول العام
             </h2>
             <p className="leading-relaxed text-zinc-400">
-              باستخدامك لمنصة Follower، فإنك توافق على جميع الشروط والأحكام المذكورة هنا. يجب قراءة هذه الشروط بعناية قبل إنشاء أي طلب. المنصة مخصصة لتقديم خدمات تنمية الحضور الرقمي بشكل قانوني وآمن.
+              باستخدامك لمنصة {brandName}، فإنك توافق على جميع الشروط والأحكام المذكورة هنا. يجب قراءة هذه الشروط بعناية قبل إنشاء أي طلب. المنصة مخصصة لتقديم خدمات تنمية الحضور الرقمي بشكل قانوني وآمن.
             </p>
           </section>
 

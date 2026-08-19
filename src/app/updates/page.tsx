@@ -14,7 +14,7 @@ const updates = [
   {
     date: "5 أغسطس 2026",
     title: "تحسين API الطلبات",
-    body: "إصلاح مشكلة تسلسل BigInt وربط الطلبات مباشرة بـ Follower API مع خصم الرصيد تلقائياً.",
+    body: "إصلاح مشكلة تسلسل BigInt وربط الطلبات مباشرة بواجهة API مع خصم الرصيد تلقائياً.",
     icon: Zap,
     color: "text-yellow-400",
   },

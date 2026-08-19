@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTheme } from "./ThemeProvider";
 import {
   RefreshCw,
   Wallet,
@@ -36,7 +37,31 @@ interface Balance {
   currency: string;
 }
 
+type ServicesResponse = {
+  error?: string;
+  services?: Service[];
+  categories?: string[];
+};
+
+type StatusResult = {
+  status?: string;
+  status_ar?: string;
+  charge?: string | number;
+  start_count?: string | number;
+  remains?: string | number;
+  error?: string;
+};
+
+type OrderResult = {
+  order?: number | string;
+  error?: string;
+};
+
 const PAGE_SIZE = 15;
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "تعذر تنفيذ العملية";
+}
 
 const statusColors: Record<string, string> = {
   Pending: "text-amber-600 bg-amber-50 border-amber-100",
@@ -50,9 +75,10 @@ const statusColors: Record<string, string> = {
 };
 
 export default function ApiDemo() {
+  const { settings } = useTheme();
+  const brandName = settings.siteName || "smmnine";
   const [services, setServices] = useState<Service[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
-  const [filtered, setFiltered] = useState<Service[]>([]);
   const [balance, setBalance] = useState<Balance | null>(null);
   const [loadingServices, setLoadingServices] = useState(false);
   const [loadingBalance, setLoadingBalance] = useState(false);
@@ -65,11 +91,11 @@ export default function ApiDemo() {
   const [serviceId, setServiceId] = useState("");
   const [link, setLink] = useState("");
   const [quantity, setQuantity] = useState("");
-  const [orderResult, setOrderResult] = useState<{ order?: number; error?: string } | null>(null);
+  const [orderResult, setOrderResult] = useState<OrderResult | null>(null);
   const [creating, setCreating] = useState(false);
 
   const [orderId, setOrderId] = useState("");
-  const [statusResult, setStatusResult] = useState<any>(null);
+  const [statusResult, setStatusResult] = useState<StatusResult | null>(null);
   const [checking, setChecking] = useState(false);
   const [actionLoading, setActionLoading] = useState<"refill" | "cancel" | null>(null);
   const [actionResult, setActionResult] = useState<{ message?: string; error?: string } | null>(null);
@@ -79,12 +105,12 @@ export default function ApiDemo() {
     setError(null);
     try {
       const res = await fetch("/api/services");
-      const data = await res.json();
+      const data = (await res.json()) as ServicesResponse;
       if (data.error) throw new Error(data.error);
       setServices(data.services || []);
       setCategories(["الكل", ...(data.categories || [])]);
-    } catch (err: any) {
-      setError(err.message || "فشل تحميل الخدمات");
+    } catch (err: unknown) {
+      setError(errorMessage(err));
     } finally {
       setLoadingServices(false);
     }
@@ -95,22 +121,25 @@ export default function ApiDemo() {
     setError(null);
     try {
       const res = await fetch("/api/balance");
-      const data = await res.json();
+      const data = (await res.json()) as Balance & { error?: string };
       if (data.error) throw new Error(data.error);
       setBalance(data);
-    } catch (err: any) {
-      setError(err.message || "فشل تحميل الرصيد");
+    } catch (err: unknown) {
+      setError(errorMessage(err));
     } finally {
       setLoadingBalance(false);
     }
   };
 
   useEffect(() => {
-    fetchServices();
-    fetchBalance();
+    const timer = window.setTimeout(() => {
+      void fetchServices();
+      void fetchBalance();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
+  const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     let list = services;
 
@@ -127,16 +156,15 @@ export default function ApiDemo() {
       );
     }
 
-    setFiltered(list);
-    setPage(1);
+    return list;
   }, [search, selectedCategory, services]);
 
-  const paginated = useMemo(() => {
-    const start = (page - 1) * PAGE_SIZE;
-    return filtered.slice(start, start + PAGE_SIZE);
-  }, [filtered, page]);
-
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const visiblePage = Math.min(page, Math.max(totalPages, 1));
+  const paginated = useMemo(() => {
+    const start = (visiblePage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, visiblePage]);
 
   const handleServiceSelect = (svc: Service) => {
     setSelectedService(svc);
@@ -158,8 +186,8 @@ export default function ApiDemo() {
       if (data.order) {
         setOrderId(String(data.order));
       }
-    } catch (err: any) {
-      setOrderResult({ error: err.message });
+    } catch (err: unknown) {
+      setOrderResult({ error: errorMessage(err) });
     } finally {
       setCreating(false);
     }
@@ -177,10 +205,10 @@ export default function ApiDemo() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ order: orderId }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as StatusResult;
       setStatusResult(data);
-    } catch (err: any) {
-      setStatusResult({ error: err.message });
+    } catch (err: unknown) {
+      setStatusResult({ error: errorMessage(err) });
     } finally {
       setChecking(false);
     }
@@ -199,8 +227,8 @@ export default function ApiDemo() {
       const data = await res.json();
       setActionResult(data);
       if (!data.error) checkStatus();
-    } catch (err: any) {
-      setActionResult({ error: err.message });
+    } catch (err: unknown) {
+      setActionResult({ error: errorMessage(err) });
     } finally {
       setActionLoading(null);
     }
@@ -223,7 +251,7 @@ export default function ApiDemo() {
             واجهة برمجة التطبيقات
           </div>
           <h2 className="mb-3 text-[clamp(1.7rem,3vw,2.4rem)] font-black text-[#0a2463]">
-            متصل مباشرة بسيرفرات Follower
+            متصل مباشرة بسيرفرات {brandName}
           </h2>
           <p className="mx-auto max-w-[650px] text-base text-[#6b7280]">
             جلب كامل للخدمات والسيرفرات مع إمكانية إنشاء الطلبات، متابعتها، إعادة التعبئة، والإلغاء.
@@ -433,7 +461,7 @@ export default function ApiDemo() {
             <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-xl border border-[#e8edf5] bg-[#f8faff] p-4">
                 <div className="mb-1 text-xs font-bold text-[#6b7280]">الحالة</div>
-                <div className={`inline-block rounded-full border px-3 py-1 text-sm font-extrabold ${statusColors[statusResult.status] || "text-gray-600 bg-gray-50 border-gray-100"}`}>
+                <div className={`inline-block rounded-full border px-3 py-1 text-sm font-extrabold ${(statusResult.status ? statusColors[statusResult.status] : undefined) || "text-gray-600 bg-gray-50 border-gray-100"}`}>
                   {statusResult.status_ar || statusResult.status}
                 </div>
               </div>

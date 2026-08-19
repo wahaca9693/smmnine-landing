@@ -1,6 +1,7 @@
 "use client";
 
 import { Zap, ShieldCheck, BadgeDollarSign, HeadphonesIcon, RefreshCcw, LayoutDashboard } from "lucide-react";
+import { useTheme } from "./ThemeProvider";
 
 const features = [
   {
@@ -48,12 +49,14 @@ const features = [
 ];
 
 export default function Features() {
+  const { settings } = useTheme();
+  const brandName = settings.siteName || "smmnine";
   return (
     <section id="features" className="px-5 py-20 lg:py-[80px]">
       <div className="mx-auto max-w-[1100px]">
         <div className="mb-12 text-center">
           <h2 className="mb-3 text-[clamp(1.7rem,3vw,2.4rem)] font-black text-[#0a2463]">
-            لماذا تختار Follower؟
+            لماذا تختار {brandName}؟
           </h2>
           <p className="mx-auto max-w-[500px] text-base text-[#6b7280]">
             نوفر لك كل ما تحتاجه لتنمية حسابك بأمان وسرعة

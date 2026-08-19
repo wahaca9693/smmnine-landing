@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "../components/DashboardLayout";
+import { useTheme } from "../components/ThemeProvider";
 import { KeyRound, Copy, Check, RefreshCw, Ban, Plus, ArrowLeft, Terminal, Wallet, Activity, GraduationCap, Server, ShieldAlert, Rocket, Repeat, Zap, AlertTriangle, Eye, EyeOff } from "lucide-react";
 
 interface ApiKey {
@@ -73,6 +74,8 @@ function BackButton() {
 }
 
 export default function ApiAccessPage() {
+  const { settings } = useTheme();
+  const brandName = settings.siteName || "smmnine";
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [balance, setBalance] = useState(0);
   const [copiedId, setCopiedId] = useState<number | null>(null);
@@ -202,14 +205,14 @@ export default function ApiAccessPage() {
           </div>
           <p className="text-[11px] leading-[1.7] text-zinc-300">
             الـ <span className="font-black text-[var(--color-gold-bright)]">API</span> هو بوابة تربط موقعك أو بوتك الخاص بمنصة
-            <span className="font-black text-white"> Follower</span> مباشرة. وظيفته أن تمنحك التحكم الكامل من داخل منصتك أنت:
-            استدعاء جميع خدمات Follower بشكل كامل وفوري، وأي تحديث جديد على الخدمات أو الأسعار يصلك فورًا تلقائيًا عبر الـ API دون الحاجة لتحديث يدوي،
+            <span className="font-black text-white"> {brandName}</span> مباشرة. وظيفته أن تمنحك التحكم الكامل من داخل منصتك أنت:
+            استدعاء جميع خدمات {brandName} بشكل كامل وفوري، وأي تحديث جديد على الخدمات أو الأسعار يصلك فورًا تلقائيًا عبر الـ API دون الحاجة لتحديث يدوي،
             بالإضافة إلى إنشاء وتنفيذ الطلبات (متابعين، مشاهدات، إعجابات وغير ذلك) بطلب برمجي واحد فقط.
           </p>
           {/* خطوات من إنشاء الحساب حتى الاستخدام */}
           <div className="mt-3 space-y-2">
             {[
-              { icon: Rocket, title: "أنشئ حسابك", text: "أنشئ حسابًا داخل المنصة وسجل دخولك إلى لوحة خدمات Follower" },
+              { icon: Rocket, title: "أنشئ حسابك", text: `أنشئ حسابًا داخل المنصة وسجل دخولك إلى لوحة خدمات ${brandName}` },
               { icon: KeyRound, title: "ادخل إلى قسم الـ API", text: "افتح هذا القسم — ستجد عنوان ربط الخادم ومفتاحك العشوائي الطويل ظاهرين لك هنا" },
               { icon: Terminal, title: "انسخ المفتاح واربطه", text: "انسخ المفتاح واستخدمه في موقعك أو بوتك لاستدعاء الخدمات وتنفيذ الطلبات" },
             ].map((s, i) => (
@@ -313,7 +316,7 @@ export default function ApiAccessPage() {
               <Wallet size={12} /> كيف يعمل الخصم من محفظتك؟
             </div>
             <p>
-              كل عملية طلب تصل عبر مفتاحك — أو أي تحديث أو تغيير على خدمات Follower تستدعيه من هذا الـ API — يتم احتساب قيمتها وخصمها
+              كل عملية طلب تصل عبر مفتاحك — أو أي تحديث أو تغيير على خدمات {brandName} تستدعيه من هذا الـ API — يتم احتساب قيمتها وخصمها
               <span className="font-black text-white"> من رصيد محفظتك أنت داخل المنصة حصريًا</span>، تلقائيًا وفوريًا عند تنفيذ الطلب. لا علاقة لمحفظة الإدارة أو حسابات المستخدمين الآخرين بمفاتيحك.
               إن لم يكن في محفظتك رصيد كافٍ، سيظهر لك خطأ ويُرفض الطلب ولن يُخصم شيء.
             </p>
@@ -362,7 +365,7 @@ export default function ApiAccessPage() {
                 code={`{"service": "1", "link": "https://instagram.com/user", "quantity": 1000}`}
               />
               <p className="text-zinc-500">
-                الأسعار تخصم من رصيد محفظتك مباشرة حسب عرض المنصة، وأي تحديث جديد على خدمات Follower يظهر فورًا عند استدعاء جلب الخدمات، وكل طلب يصل عبر هذا المفتاح يسجل في قائمة طلباتك.
+                الأسعار تخصم من رصيد محفظتك مباشرة حسب عرض المنصة، وأي تحديث جديد على خدمات {brandName} يظهر فورًا عند استدعاء جلب الخدمات، وكل طلب يصل عبر هذا المفتاح يسجل في قائمة طلباتك.
                 عند الضغط على "تغيير المفتاح" يتم تعطيل المفتاح السابق فورًا وتفعيل المفتاح الجديد فقط — أي طلب يصل بالمفتاح القديم لن يُنفذ بعد ذلك.
               </p>
             </div>

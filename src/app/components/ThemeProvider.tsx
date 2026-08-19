@@ -5,6 +5,8 @@ import { useLiveRefresh } from "./useLiveRefresh";
 
 interface SiteSettings {
   siteName: string;
+  brandMediaUrl: string;
+  brandMediaType: "image" | "video";
   siteDescription: string;
   defaultCurrency: string;
   primaryColor: string;
@@ -23,7 +25,9 @@ interface ThemeContextType {
 }
 
 const defaultSettings: SiteSettings = {
-  siteName: "Follower",
+  siteName: "smmnine",
+  brandMediaUrl: "",
+  brandMediaType: "image",
   siteDescription: "منصة خدمات تسويق اجتماعي احترافية",
   defaultCurrency: "USD",
   primaryColor: "var(--color-primary)",
@@ -34,6 +38,8 @@ const defaultSettings: SiteSettings = {
   surfaceColor: "var(--color-surface)",
   borderColor: "var(--color-border)",
 };
+
+const BRANDING_REFRESH_KEY = "smmnine:branding-updated";
 
 const ThemeContext = createContext<ThemeContextType>({
   settings: defaultSettings,
@@ -50,7 +56,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       const res = await fetch("/api/settings", { cache: "no-store" });
       const data = await res.json();
       if (data.settings) {
-        setSettings({ ...defaultSettings, ...data.settings });
+        setSettings({
+          ...defaultSettings,
+          ...data.settings,
+          brandMediaType: data.settings.brandMediaType === "video" ? "video" : "image",
+        });
       }
     } catch (e) {
       console.error(e);
@@ -66,7 +76,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, []);
 
-  useLiveRefresh(fetchSettings, { intervalMs: 60000 });
+  useEffect(() => {
+    const onBrandingUpdate = () => { void fetchSettings(); };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === BRANDING_REFRESH_KEY) onBrandingUpdate();
+    };
+    window.addEventListener(BRANDING_REFRESH_KEY, onBrandingUpdate);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(BRANDING_REFRESH_KEY, onBrandingUpdate);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  useLiveRefresh(fetchSettings, { intervalMs: 30000 });
 
   useEffect(() => {
     const root = document.documentElement;
@@ -78,7 +101,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.style.setProperty("--color-card", settings.cardColor);
     root.style.setProperty("--color-surface", settings.surfaceColor);
     root.style.setProperty("--color-border", settings.borderColor);
-    if (settings.siteName) document.title = settings.siteName;
+    if (settings.siteName) {
+      document.title = settings.siteName;
+      document.documentElement.dataset.siteName = settings.siteName;
+    }
   }, [settings]);
 
   return (

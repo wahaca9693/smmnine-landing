@@ -4,9 +4,9 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Mail, User, Lock, Loader2, Rocket, Zap, ArrowLeft, Crown, Sparkles } from "lucide-react";
 import Link from "next/link";
-import Image from "next/image";
 import TurnstileWidget from "@/app/components/TurnstileWidget";
 import { useLanguage } from "@/app/components/LanguageProvider";
+import BrandMark from "@/app/components/BrandMark";
 
 export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -138,12 +138,13 @@ export default function LoginPage() {
         >
           {t("auth.createAccount")}
         </Link>
-        <div className="flex items-center gap-2.5">
-          <span className="text-2xl font-black tracking-wide text-white">smmnine</span>
-          <div className="relative">
-            <Image src="/logo.gif" alt="smmnine" width={44} height={44} unoptimized className="h-11 w-11 rounded-2xl object-cover ring-1 ring-[var(--color-gold)]/50" />
-            <Sparkles className="absolute -top-1 -left-1 text-[var(--color-gold)]" size={14} />
-          </div>
+        <div className="relative">
+          <BrandMark
+            size="md"
+            imageClassName="ring-1 ring-[var(--color-gold)]/50"
+            nameClassName="text-2xl font-black tracking-wide text-white"
+          />
+          <Sparkles className="absolute -top-1 -left-1 text-[var(--color-gold)]" size={14} />
         </div>
       </div>
 
@@ -158,13 +159,10 @@ export default function LoginPage() {
         {/* الترحيب */}
         <div className="mb-6 flex flex-col items-center gap-3">
           <div className="relative">
-            <Image
-              src="/logo.gif"
-              alt="smmnine"
-              width={80}
-              height={80}
-              unoptimized
-              className="h-20 w-20 rounded-3xl object-cover shadow-[0_0_60px_-8px_rgba(212,175,55,0.8)] ring-2 ring-[var(--color-gold)]/70"
+            <BrandMark
+              showName={false}
+              size="lg"
+              imageClassName="!h-20 !w-20 rounded-3xl shadow-[0_0_60px_-8px_rgba(212,175,55,0.8)] ring-2 ring-[var(--color-gold)]/70"
             />
             <Sparkles className="absolute -top-2 -left-2 text-[var(--color-gold)] animate-pulse" size={22} />
           </div>

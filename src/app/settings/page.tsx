@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import DashboardLayout from "../components/DashboardLayout";
 import { useLanguage, type Locale } from "../components/LanguageProvider";
+import { useTheme } from "../components/ThemeProvider";
 
 type Preferences = {
   email_notifications: boolean;
@@ -149,7 +150,9 @@ const preferenceLabels: Record<Locale, {
   },
 };
 
-export default function UserSettingsPage() {
+export default function SettingsPage() {
+  const { settings } = useTheme();
+  const brandName = settings.siteName || "smmnine";
   const { t, locale } = useLanguage();
   const labels = useMemo(() => preferenceLabels[locale], [locale]);
   const [preferences, setPreferences] = useState<Preferences>(defaults);
@@ -207,7 +210,7 @@ export default function UserSettingsPage() {
               <UserRound className="h-7 w-7" strokeWidth={2.2} />
             </div>
             <div className="min-w-0">
-              <p className="mb-1 text-xs font-bold uppercase tracking-[0.2em] text-amber-300/75">smmnine</p>
+              <p className="mb-1 text-xs font-bold uppercase tracking-[0.2em] text-amber-300/75">{brandName}</p>
               <h1 className="text-2xl font-black text-amber-50 sm:text-3xl">{t("settings.accountTitle")}</h1>
               <p className="mt-2 max-w-2xl text-sm leading-7 text-amber-100/65">{t("settings.accountSubtitle")}</p>
             </div>

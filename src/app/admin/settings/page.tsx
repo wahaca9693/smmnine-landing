@@ -41,7 +41,7 @@ export default function AdminSettingsPage() {
       if (!active) return;
       const settingsData = settings.status === "fulfilled" ? settings.value.data?.settings || {} : {};
       setForm({
-        siteName: String(settingsData.siteName || "Follower"),
+        siteName: String(settingsData.siteName || "smmnine"),
         siteDescription: String(settingsData.siteDescription || ""),
         defaultCurrency: String(settingsData.defaultCurrency || "USD"),
         cryptoMinAmount: String(settingsData.cryptoMinAmount ?? 1),

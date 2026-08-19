@@ -4,9 +4,12 @@ import { useState } from "react";
 import { Check, Languages, ShieldCheck, Sparkles } from "lucide-react";
 import DashboardLayout from "../../components/DashboardLayout";
 import { LOCALES, LOCALE_META, type Locale, useLanguage } from "../../components/LanguageProvider";
+import { useTheme } from "../../components/ThemeProvider";
 
 export default function LanguageSettingsPage() {
   const { locale, setLocale, t } = useLanguage();
+  const { settings } = useTheme();
+  const brandName = settings.siteName || "smmnine";
   const [saved, setSaved] = useState(false);
 
   const handleLocaleChange = (nextLocale: Locale) => {
@@ -27,7 +30,7 @@ export default function LanguageSettingsPage() {
               <Languages className="h-7 w-7" strokeWidth={2.2} />
             </div>
             <div className="min-w-0">
-              <p className="mb-1 text-xs font-bold uppercase tracking-[0.2em] text-amber-300/75">smmnine</p>
+              <p className="mb-1 text-xs font-bold uppercase tracking-[0.2em] text-amber-300/75">{brandName}</p>
               <h1 className="text-2xl font-black text-amber-50 sm:text-3xl">{t("language.title")}</h1>
               <p className="mt-2 max-w-2xl text-sm leading-7 text-amber-100/65">{t("language.subtitle")}</p>
             </div>

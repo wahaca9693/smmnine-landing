@@ -8,6 +8,15 @@ export const revalidate = 0;
 const COMPLETED_STATUSES = new Set(["finished", "confirmed"]);
 const FAILED_STATUSES = new Set(["failed", "expired", "refunded", "wrong_amount"]);
 
+type CryptoDepositRow = {
+  id: string | number;
+  user_id: string | number;
+  status: string;
+  amount: string | number;
+  payment_id?: string | null;
+  order_id?: string | null;
+};
+
 function json(data: unknown, status = 200) {
   return NextResponse.json(data, {
     status,
@@ -77,7 +86,7 @@ export async function POST(request: Request) {
   const lookup = paymentId
     ? await db.execute({ sql: "SELECT * FROM crypto_deposits WHERE payment_id = ? LIMIT 1", args: [paymentId] })
     : await db.execute({ sql: "SELECT * FROM crypto_deposits WHERE order_id = ? LIMIT 1", args: [orderId] });
-  const deposit = lookup.rows[0] as any;
+  const deposit = lookup.rows[0] as unknown as CryptoDepositRow | undefined;
 
   if (!deposit) return json({ received: true, ignored: true });
 

@@ -7,6 +7,8 @@ export const revalidate = 0;
 
 const keys = [
   "siteName",
+  "brandMediaUrl",
+  "brandMediaType",
   "siteDescription",
   "defaultCurrency",
   "primaryColor",
@@ -26,6 +28,8 @@ type SettingKey = (typeof keys)[number];
 
 const aliases: Record<string, SettingKey> = {
   site_name: "siteName",
+  brand_media_url: "brandMediaUrl",
+  brand_media_type: "brandMediaType",
   theme_primary: "primaryColor",
   theme_gold: "secondaryColor",
   site_description: "siteDescription",
@@ -37,7 +41,9 @@ const aliases: Record<string, SettingKey> = {
 };
 
 const defaults: Record<SettingKey, string | number> = {
-  siteName: "Follower",
+  siteName: "smmnine",
+  brandMediaUrl: "",
+  brandMediaType: "image",
   siteDescription: "منصة خدمات تسويق اجتماعي احترافية",
   defaultCurrency: "USD",
   primaryColor: "#f97316",
@@ -60,11 +66,14 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function readSettings(row: any) {
+type SettingsRow = Record<string, unknown>;
+
+function readSettings(row: SettingsRow) {
   const settings: Record<string, string | number | boolean> = {};
   for (const key of keys) {
     const fallback = defaults[key];
-    const value = row?.[key] ?? fallback;
+    const rawValue = row?.[key] ?? fallback;
+    const value = typeof rawValue === "string" || typeof rawValue === "number" ? rawValue : fallback;
     settings[key] = ["apiV2Enabled", "registrationEnabled"].includes(key) ? Boolean(Number(value)) : value;
   }
   settings.site_name = String(settings.siteName);
@@ -88,6 +97,15 @@ function validColor(value: unknown) {
 }
 
 function normalizeValue(key: SettingKey, value: unknown): string | number | null {
+  if (key === "brandMediaType") {
+    return value === "video" ? "video" : value === "image" ? "image" : null;
+  }
+  if (key === "brandMediaUrl") {
+    const text = String(value ?? "").trim();
+    if (!text) return "";
+    if (text.length > 2048 || !(text.startsWith("/") || /^https:\/\//i.test(text))) return null;
+    return text;
+  }
   if (["primaryColor", "secondaryColor", "primaryLight", "backgroundColor", "cardColor", "surfaceColor", "borderColor"].includes(key)) {
     return typeof value === "string" && validColor(value) ? value : null;
   }
@@ -101,7 +119,8 @@ function normalizeValue(key: SettingKey, value: unknown): string | number | null
     return /^[A-Z]{3}$/.test(currency) ? currency : null;
   }
   const text = String(value ?? "").trim();
-  return text.length > 0 && text.length <= 240 ? text : null;
+  const maxLength = key === "siteName" ? 80 : 240;
+  return text.length > 0 && text.length <= maxLength ? text : null;
 }
 
 export async function GET() {
@@ -110,8 +129,9 @@ export async function GET() {
       return json({ settings: settingsCache.value });
     }
     return json({ settings: await loadSettingsFromDatabase() });
-  } catch (err: any) {
-    return json({ error: err?.message || "تعذر تحميل الإعدادات" }, 500);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "تعذر تحميل الإعدادات";
+    return json({ error: message }, 500);
   }
 }
 
@@ -132,18 +152,23 @@ export async function POST(request: Request) {
     if (updates.size === 0) return json({ error: "لم يتم إرسال إعدادات قابلة للحفظ" }, 400);
 
     const existing = await db.execute("SELECT id FROM site_settings LIMIT 1");
-    const existingId = (existing.rows[0] as any)?.id || "default";
+    const existingId = String((existing.rows[0] as Record<string, unknown> | undefined)?.id || "default");
+    const valueFor = (key: SettingKey): string | number => {
+      const value = updates.get(key);
+      if (value === undefined) throw new Error(`Missing setting value: ${key}`);
+      return value;
+    };
     if (existing.rows.length === 0) {
       const insertKeys = Array.from(updates.keys());
       await db.execute({
         sql: `INSERT INTO site_settings (id, ${insertKeys.join(", ")}) VALUES (?, ${insertKeys.map(() => "?").join(", ")})`,
-        args: [existingId, ...insertKeys.map((key) => updates.get(key))],
+        args: [existingId, ...insertKeys.map(valueFor)],
       });
     } else {
       const updateKeys = Array.from(updates.keys());
       await db.execute({
         sql: `UPDATE site_settings SET ${updateKeys.map((key) => `${key} = ?`).join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        args: [...updateKeys.map((key) => updates.get(key)), existingId],
+        args: [...updateKeys.map(valueFor), existingId],
       });
     }
 
@@ -151,8 +176,8 @@ export async function POST(request: Request) {
     const settings = readSettings(result.rows[0] || {});
     settingsCache = { expiresAt: Date.now() + SETTINGS_CACHE_MS, value: settings };
     return json({ success: true, settings });
-  } catch (err: any) {
-    const message = String(err?.message || "");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "";
     const status = message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500;
     return json({ error: status === 401 ? "يرجى تسجيل الدخول" : status === 403 ? "غير مصرح" : "تعذر حفظ الإعدادات" }, status);
   }

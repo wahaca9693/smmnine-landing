@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Boxes, KeyRound, ListChecks, UserRound, WalletCards } from "lucide-react";
 import DashboardLayout from "../components/DashboardLayout";
 import { useLanguage } from "../components/LanguageProvider";
+import { useTheme } from "../components/ThemeProvider";
 
 type UserData = {
   username: string;
@@ -15,6 +16,8 @@ type UserData = {
 
 export default function ProfilePage() {
   const { t } = useLanguage();
+  const { settings } = useTheme();
+  const brandName = settings.siteName || "smmnine";
   const [user, setUser] = useState<UserData | null>(null);
 
   useEffect(() => {
@@ -42,7 +45,7 @@ export default function ProfilePage() {
               <UserRound className="h-8 w-8" strokeWidth={2.1} />
             </div>
             <div className="min-w-0">
-              <p className="mb-1 text-xs font-bold uppercase tracking-[0.2em] text-amber-300/75">smmnine</p>
+              <p className="mb-1 text-xs font-bold uppercase tracking-[0.2em] text-amber-300/75">{brandName}</p>
               <h1 className="truncate text-2xl font-black text-amber-50 sm:text-3xl">{t("profile.title")}</h1>
               <p className="mt-1 text-sm text-amber-100/65">{t("profile.subtitle")}</p>
             </div>

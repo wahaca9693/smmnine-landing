@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Menu, User, Bell, X } from "lucide-react";
-import Image from "next/image";
 import { useLanguage } from "./LanguageProvider";
-import { useTheme } from "./ThemeProvider";
+import BrandMark from "./BrandMark";
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -12,48 +11,54 @@ interface HeaderProps {
   unreadNotifications?: number;
 }
 
-export default function Header({ onMenuClick, user, unreadNotifications = 0 }: HeaderProps) {
+type NotificationItem = {
+  id: string | number;
+  is_read?: boolean | number;
+  title: string;
+  body: string;
+};
+
+function isNotificationItem(value: unknown): value is NotificationItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return (typeof item.id === "string" || typeof item.id === "number") && typeof item.title === "string" && typeof item.body === "string";
+}
+
+export default function Header({ onMenuClick, unreadNotifications = 0 }: HeaderProps) {
   const { t } = useLanguage();
-  const { settings } = useTheme();
   const [showNotifications, setShowNotifications] = useState(false);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
   const fetchNotifications = async () => {
     try {
-      const res = await fetch("/api/notifications");
-      const data = await res.json();
-      if (data.notifications) setNotifications(data.notifications);
-    } catch (e) {}
+      const res = await fetch("/api/notifications", { cache: "no-store" });
+      const data = (await res.json()) as { notifications?: unknown };
+      const items = Array.isArray(data.notifications) ? data.notifications.filter(isNotificationItem) : [];
+      setNotifications(items);
+    } catch {}
   };
 
   const markRead = async () => {
     try {
       await fetch("/api/notifications", { method: "POST" });
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: 1 })));
-    } catch (e) {}
+    } catch {}
   };
-
-  useEffect(() => {
-    if (showNotifications) fetchNotifications();
-  }, [showNotifications]);
 
   return (
     <header className="glass sticky top-0 z-50 flex h-[60px] items-center justify-between border-b border-[var(--gold)]/25 bg-[linear-gradient(135deg,rgba(120,90,30,0.92),rgba(60,42,15,0.95),rgba(30,22,8,0.95))] px-4">
       <div className="pointer-events-none absolute top-0 right-0 left-0 h-px bg-gradient-to-r from-transparent via-[var(--gold-light)]/50 to-transparent" />
       {/* Logo on the right (RTL visual left) */}
-      <div className="flex items-center gap-2">
-        <img
-          src="/logo.gif"
-          alt={settings.siteName || "Follower"}
-          className="h-10 w-10 rounded-xl object-cover"
-        />
-        <span className="max-w-[150px] truncate text-xl font-black text-gradient-luxe">{settings.siteName || "Follower"}</span>
-      </div>
+      <BrandMark
+        size="md"
+        imageClassName="ring-1 ring-[var(--gold)]/40"
+        nameClassName="max-w-[150px] text-xl font-black text-gradient-luxe"
+      />
 
       {/* Icons on the left (RTL visual right) */}
       <div className="flex items-center gap-2">
         <button
-          onClick={() => { setShowNotifications(!showNotifications); if (!showNotifications) markRead(); }}
+          onClick={() => { const opening = !showNotifications; setShowNotifications(opening); if (opening) { void fetchNotifications(); void markRead(); } }}
           className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--gold)]/40 bg-[rgba(212,175,55,0.14)] text-[var(--color-gold-bright)] backdrop-blur-sm transition hover:bg-[rgba(212,175,55,0.26)] hover:text-[var(--color-gold-bright)]"
           title={t("header.notifications")}
         >
