@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 
+type DbRow = Record<string, unknown>;
+type AdminTicketBody = { action?: unknown; ticketId?: unknown; reply?: unknown; status?: unknown };
+
 const TYPE_LABELS: Record<string, string> = {
   speed_up: "تسريع طلب",
   refill: "تعويض طلب",
@@ -20,7 +23,7 @@ export async function GET(request: Request) {
     let sql = `SELECT t.*, u.username, u.email 
                FROM tickets t 
                JOIN users u ON t.user_id = u.id`;
-    const args: any[] = [];
+    const args: Array<string | number> = [];
 
     if (status !== "all") {
       sql += " WHERE t.status = ?";
@@ -30,46 +33,54 @@ export async function GET(request: Request) {
 
     const result = await db.execute({ sql, args });
 
-    const tickets = result.rows.map((row: any) => ({
-      id: Number(row.id),
-      userId: Number(row.user_id),
-      username: row.username,
-      email: row.email,
-      type: row.type,
-      typeLabel: TYPE_LABELS[row.type] || row.type,
-      subject: row.subject,
-      description: row.description,
-      orderId: row.order_id,
-      status: row.status,
-      adminReply: row.admin_reply,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    const tickets = result.rows.map((row) => {
+      const item = row as DbRow;
+      const type = String(item.type || "other");
+      return {
+        id: Number(item.id),
+        userId: Number(item.user_id),
+        username: item.username,
+        email: item.email,
+        type,
+        typeLabel: TYPE_LABELS[type] || type,
+        subject: item.subject,
+        description: item.description,
+        orderId: item.order_id,
+        status: item.status,
+        adminReply: item.admin_reply,
+        createdAt: item.created_at,
+        updatedAt: item.updated_at,
+      };
+    });
 
     return NextResponse.json({ tickets });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 401 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "يرجى تسجيل الدخول";
+    return NextResponse.json({ error: message }, { status: 401 });
   }
 }
 
 export async function POST(request: Request) {
   try {
     await requireAdmin();
-    const body = await request.json();
-    const { action, ticketId, reply, status } = body;
+    const body = await request.json() as AdminTicketBody;
+    const action = typeof body.action === "string" ? body.action : "";
+    const ticketId = Number(body.ticketId || 0);
+    const reply = typeof body.reply === "string" ? body.reply : "";
+    const status = typeof body.status === "string" ? body.status : "";
 
-    if (!ticketId) {
+    if (ticketId <= 0) {
       return NextResponse.json({ error: "معرف التذكرة مطلوب" }, { status: 400 });
     }
 
     if (action === "reply") {
-      if (!reply || String(reply).trim().length < 1) {
+      if (reply.trim().length < 1) {
         return NextResponse.json({ error: "الرد مطلوب" }, { status: 400 });
       }
 
       await db.execute({
         sql: "UPDATE tickets SET admin_reply = ?, status = 'resolved', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        args: [String(reply).trim(), ticketId],
+        args: [reply.trim(), ticketId],
       });
 
       return NextResponse.json({ success: true, message: "تم الرد على التذكرة" });
@@ -87,7 +98,8 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ error: "إجراء غير معروف" }, { status: 400 });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "تعذر تحديث التذكرة";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

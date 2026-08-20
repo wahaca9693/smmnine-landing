@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "../../components/DashboardLayout";
 import { Smartphone, LogOut, Save, RefreshCw, AlertCircle, Loader2 } from "lucide-react";
 
+type AsiacellStatus = {
+  authenticated?: boolean;
+  phone?: string | null;
+  store_phone?: string | null;
+  exchange_rate?: number | string | null;
+};
+
 export default function AsiacellAdminPage() {
   const [authorized, setAuthorized] = useState<boolean | null>(null);
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<AsiacellStatus | null>(null);
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [storePhone, setStorePhone] = useState("");
@@ -15,23 +22,24 @@ export default function AsiacellAdminPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
-    fetch("/api/user")
-      .then((res) => res.json())
-      .then((data) => setAuthorized(data.user?.role === "admin"));
-    fetchStatus();
-  }, []);
-
-  const fetchStatus = async () => {
+  const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/payments/asiacell/admin");
       const data = await res.json();
       if (data.error) return;
-      setStatus(data);
+      setStatus(data as AsiacellStatus);
       setStorePhone(data.store_phone || "");
       setRate(String(data.exchange_rate || 1666));
-    } catch (e) {}
-  };
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/user")
+      .then((res) => res.json())
+      .then((data) => setAuthorized(data.user?.role === "admin"));
+    const timer = window.setTimeout(() => { void fetchStatus(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchStatus]);
 
   const login = async (e: React.FormEvent) => {
     e.preventDefault();

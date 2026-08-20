@@ -1,8 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "../../components/DashboardLayout";
-import { Shield, MessageSquare, CheckCircle, Clock, AlertCircle, Loader2, Send, Filter } from "lucide-react";
+import { Shield, MessageSquare, AlertCircle, Loader2, Send } from "lucide-react";
+
+type TicketRow = {
+  id: number;
+  subject: string;
+  username?: string | null;
+  type: string;
+  status: "open" | "resolved" | "closed" | string;
+  description: string;
+  orderId?: number | string | null;
+  adminReply?: string | null;
+};
 
 const TYPE_LABELS: Record<string, string> = {
   speed_up: "تسريع طلب",
@@ -15,7 +26,7 @@ const TYPE_LABELS: Record<string, string> = {
 
 export default function AdminTicketsPage() {
   const [authorized, setAuthorized] = useState<boolean | null>(null);
-  const [tickets, setTickets] = useState<any[]>([]);
+  const [tickets, setTickets] = useState<TicketRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [replying, setReplying] = useState<number | null>(null);
@@ -28,19 +39,21 @@ export default function AdminTicketsPage() {
       .then((data) => setAuthorized(data.user?.role === "admin"));
   }, []);
 
-  useEffect(() => {
-    if (authorized) fetchTickets();
-  }, [authorized, filter]);
-
-  const fetchTickets = async () => {
+  const fetchTickets = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`/api/admin/tickets?status=${filter}`);
       const data = await res.json();
-      setTickets(data.tickets || []);
-    } catch (e) {}
+      setTickets(Array.isArray(data.tickets) ? data.tickets : []);
+    } catch {}
     setLoading(false);
-  };
+  }, [filter]);
+
+  useEffect(() => {
+    if (!authorized) return;
+    const timer = window.setTimeout(() => { void fetchTickets(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [authorized, fetchTickets]);
 
   const sendReply = async (ticketId: number) => {
     if (!replyText.trim()) return;

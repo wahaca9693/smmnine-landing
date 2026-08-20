@@ -5,6 +5,9 @@ import { cancelOrder, getOrderStatus } from "@/lib/follower";
 import { cancelProviderOrder, getProviderOrderStatus } from "@/lib/providers";
 import { canRequestOrderCancellation, normalizeOrderStatus, orderStatusKey } from "@/lib/order-status";
 
+type DbRow = Record<string, unknown>;
+type CancelBody = { orderId?: unknown };
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -20,14 +23,15 @@ function isConfirmedCancellation(data: unknown): boolean {
 export async function POST(request: Request) {
   try {
     const session = await requireAuth();
-    const { orderId } = await request.json();
+    const body = await request.json() as CancelBody;
+    const orderId = typeof body.orderId === "number" || typeof body.orderId === "string" ? body.orderId : null;
     if (!orderId) return NextResponse.json({ error: "رقم الطلب مطلوب" }, { status: 400 });
 
     const result = await db.execute({
       sql: "SELECT * FROM orders WHERE id = ? AND user_id = ?",
       args: [orderId, session.userId!],
     });
-    const order = result.rows[0] as any;
+    const order = result.rows[0] as DbRow | undefined;
     if (!order) return NextResponse.json({ error: "الطلب غير موجود" }, { status: 404 });
     if (!order.smmnine_order_id) return NextResponse.json({ error: "لم يُسجّل الطلب لدى المزود بعد" }, { status: 409 });
     if (order.refunded_at) return NextResponse.json({ error: "تمت إعادة رصيد هذا الطلب مسبقًا" }, { status: 409 });
@@ -86,7 +90,7 @@ export async function POST(request: Request) {
       },
     ], "write");
 
-    const updated = Number((batchResult[0] as any)?.rowsAffected || 0);
+    const updated = Number(batchResult[0]?.rowsAffected || 0);
     if (updated !== 1) {
       return NextResponse.json({ error: "تمت معالجة إلغاء الطلب مسبقًا أو تعذر تحديثه" }, { status: 409 });
     }
@@ -98,10 +102,11 @@ export async function POST(request: Request) {
       refunded_amount: charge,
       message: "تم إلغاء الطلب وإعادة رصيده إلى محفظتك بعد تأكيد المزود",
     });
-  } catch (err: any) {
-    console.error("Order cancellation error:", err);
-    if (err?.message === "Unauthorized") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if (err?.message === "Account banned") return NextResponse.json({ error: "Account banned" }, { status: 403 });
-    return NextResponse.json({ error: err.message || "تعذر إلغاء الطلب" }, { status: 500 });
+  } catch (error) {
+    console.error("Order cancellation error:", error);
+    const message = error instanceof Error ? error.message : "";
+    if (message === "Unauthorized") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (message === "Account banned") return NextResponse.json({ error: "Account banned" }, { status: 403 });
+    return NextResponse.json({ error: message || "تعذر إلغاء الطلب" }, { status: 500 });
   }
 }

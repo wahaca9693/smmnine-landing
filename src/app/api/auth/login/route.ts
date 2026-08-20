@@ -83,11 +83,11 @@ export async function POST(request: Request) {
         balance: Number(user.balance),
       },
     });
-  } catch (err: any) {
-    console.error("Login error:", err);
-    if (err instanceof SecurityServiceUnavailable) {
+  } catch (error: unknown) {
+    console.error("Login error:", error);
+    if (error instanceof SecurityServiceUnavailable) {
       return NextResponse.json({ error: "حماية الدخول غير متاحة مؤقتًا. أعد المحاولة بعد قليل." }, { status: 503 });
     }
-    return NextResponse.json({ error: err.message || "حدث خطأ" }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "حدث خطأ" }, { status: 500 });
   }
 }

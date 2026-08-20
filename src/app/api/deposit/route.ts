@@ -22,6 +22,8 @@ type DepositMethodRow = Record<string, unknown> & {
   min_amount?: number;
   is_active?: number;
 };
+type DepositBody = { methodId?: unknown; amount?: unknown; notes?: unknown };
+type GatewayPaymentResponse = Record<string, unknown>;
 
 let methodsCache: { methods: DepositMethodRow[]; expiresAt: number } | null = null;
 let methodsCacheRequest: Promise<DepositMethodRow[]> | null = null;
@@ -33,12 +35,15 @@ async function loadActiveMethods(): Promise<DepositMethodRow[]> {
 
   methodsCacheRequest = (async () => {
     const result = await db.execute("SELECT * FROM payment_methods WHERE is_active = 1 ORDER BY id");
-    const methods = result.rows.map((row: any) => ({
-      ...row,
-      id: Number(row.id),
-      min_amount: ["usdt", "bnb", "btc"].includes(String(row.icon || "").toLowerCase()) ? 1 : Number(row.min_amount),
-      is_active: Number(row.is_active),
-    })) as DepositMethodRow[];
+    const methods = result.rows.map((row) => {
+      const item = row as Record<string, unknown>;
+      return {
+        ...item,
+        id: Number(item.id),
+        min_amount: ["usdt", "bnb", "btc"].includes(String(item.icon || "").toLowerCase()) ? 1 : Number(item.min_amount),
+        is_active: Number(item.is_active),
+      } as DepositMethodRow;
+    });
     methodsCache = { methods, expiresAt: Date.now() + METHODS_CACHE_TTL_MS };
     return methods;
   })();
@@ -70,15 +75,19 @@ export async function GET() {
     return json({ methods }, {
       headers: { "Cache-Control": "public, max-age=15, stale-while-revalidate=60" },
     });
-  } catch (err: any) {
-    return json({ error: err.message }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "تعذر تحميل طرق الدفع";
+    return json({ error: message }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await requireAuth();
-    const { methodId, amount, notes } = await request.json();
+    const body = await request.json() as DepositBody;
+    const methodId = typeof body.methodId === "number" || typeof body.methodId === "string" ? body.methodId : null;
+    const amount = body.amount;
+    const notes = body.notes;
     const numericAmount = Number(amount);
 
     if (!methodId || !Number.isFinite(numericAmount) || numericAmount <= 0) {
@@ -89,7 +98,7 @@ export async function POST(request: Request) {
       sql: "SELECT * FROM payment_methods WHERE id = ? AND is_active = 1",
       args: [methodId],
     });
-    const method = methodRes.rows[0] as any;
+    const method = methodRes.rows[0] as unknown as DepositMethodRow | undefined;
     if (!method) return json({ error: "طريقة الدفع غير صالحة" }, { status: 404 });
     const cryptoIcons = new Set(["usdt", "bnb", "btc"]);
     const isCryptoMethod = cryptoIcons.has(String(method.icon || "").toLowerCase());
@@ -154,7 +163,7 @@ export async function POST(request: Request) {
           }),
           cache: "no-store",
         });
-        const gatewayData = await gatewayResponse.json().catch(() => ({}));
+        const gatewayData = await gatewayResponse.json().catch(() => ({})) as GatewayPaymentResponse;
         if (!gatewayResponse.ok || !gatewayData.payment_id || !gatewayData.pay_address) {
           console.error("NOWPayments payment creation failed", gatewayResponse.status, gatewayData?.message || "unknown error");
           return json({ error: "تعذر إنشاء عنوان الدفع الآلي حاليًا" }, { status: 502 });
@@ -197,8 +206,8 @@ export async function POST(request: Request) {
         ? { payment_id: cryptoInfo.paymentId, order_id: cryptoInfo.orderId, pay_address: cryptoInfo.address, pay_amount: cryptoInfo.payAmount, pay_currency: cryptoInfo.payCurrency }
         : undefined,
     });
-  } catch (err: any) {
-    const message = String(err?.message || "");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
     if (message === "Unauthorized") return json({ error: "يرجى تسجيل الدخول" }, { status: 401 });
     if (message === "Account banned") return json({ error: "الحساب محظور" }, { status: 403 });
     return json({ error: "تعذر معالجة طلب الإيداع حاليًا" }, { status: 500 });

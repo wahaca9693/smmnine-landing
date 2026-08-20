@@ -6,6 +6,21 @@ import { ArrowLeft, MessageSquare, Clock3, CheckCircle2, CircleDot, X } from "lu
 import { useRouter } from "next/navigation";
 import { useLanguage } from "../../components/LanguageProvider";
 
+type TicketRow = {
+  id: number | string;
+  subject: string;
+  type: string;
+  status: string;
+  description: string;
+  orderId?: number | string | null;
+  adminReply?: string | null;
+  createdAt: string | number;
+};
+
+type TicketsResponse = {
+  tickets?: TicketRow[];
+};
+
 const STATUS_STYLES: Record<string, string> = {
   open: "text-amber-400 bg-amber-400/10 border-amber-400/30",
   resolved: "text-green-400 bg-green-400/10 border-green-400/30",
@@ -31,12 +46,12 @@ function StatusIcon({ status }: { status: string }) {
 export default function UserTicketsPage() {
   const { t } = useLanguage();
   const router = useRouter();
-  const [tickets, setTickets] = useState<any[]>([]);
+  const [tickets, setTickets] = useState<TicketRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetch("/api/tickets")
-      .then((res) => res.json())
+      .then(async (response) => (await response.json()) as TicketsResponse)
       .then((data) => {
         setTickets(data.tickets || []);
         setLoading(false);

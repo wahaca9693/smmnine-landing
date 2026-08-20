@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 
+type OrderRow = Record<string, unknown>;
+
 export async function GET(request: Request) {
   try {
     const session = await requireAuth();
@@ -9,7 +11,7 @@ export async function GET(request: Request) {
     const status = searchParams.get("status");
 
     let sql = "SELECT * FROM orders WHERE user_id = ?";
-    const args: any[] = [session.userId!];
+    const args: Array<string | number> = [session.userId!];
 
     if (status && status !== "all") {
       sql += " AND status = ?";
@@ -19,18 +21,22 @@ export async function GET(request: Request) {
     sql += " ORDER BY created_at DESC";
 
     const result = await db.execute({ sql, args });
-    const orders = result.rows.map((row: any) => ({
-      ...row,
-      id: Number(row.id),
-      user_id: Number(row.user_id),
-      smmnine_order_id: Number(row.smmnine_order_id),
-      service_id: Number(row.service_id),
-      charge: Number(row.charge),
-      quantity: Number(row.quantity),
-    }));
+    const orders = result.rows.map((row) => {
+      const item = row as OrderRow;
+      return {
+        ...item,
+        id: Number(item.id),
+        user_id: Number(item.user_id),
+        smmnine_order_id: Number(item.smmnine_order_id),
+        service_id: Number(item.service_id),
+        charge: Number(item.charge),
+        quantity: Number(item.quantity),
+      };
+    });
 
     return NextResponse.json({ orders });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 401 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "يرجى تسجيل الدخول";
+    return NextResponse.json({ error: message }, { status: 401 });
   }
 }

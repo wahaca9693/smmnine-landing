@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "../../components/DashboardLayout";
 import Link from "next/link";
 import { KeyRound, ArrowLeft, Power, Trash2, Users, Activity } from "lucide-react";
@@ -22,7 +22,7 @@ export default function AdminApiKeysPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/admin/api-keys");
@@ -32,11 +32,12 @@ export default function AdminApiKeysPage() {
       /* لا شيء */
     }
     setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
-    refresh();
-  }, []);
+    const timer = window.setTimeout(() => { void refresh(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refresh]);
 
   const act = async (id: number, action: "toggle" | "delete") => {
     const res = await fetch(`/api/admin/api-keys`, {

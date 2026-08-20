@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 
+type TransactionRow = Record<string, unknown>;
+
 export async function GET() {
   try {
     const session = await requireAuth();
@@ -10,15 +12,19 @@ export async function GET() {
       args: [session.userId!],
     });
 
-    const transactions = result.rows.map((row: any) => ({
-      ...row,
-      id: Number(row.id),
-      user_id: Number(row.user_id),
-      amount: Number(row.amount),
-    }));
+    const transactions = result.rows.map((row) => {
+      const item = row as TransactionRow;
+      return {
+        ...item,
+        id: Number(item.id),
+        user_id: Number(item.user_id),
+        amount: Number(item.amount),
+      };
+    });
 
     return NextResponse.json({ transactions });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 401 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "يرجى تسجيل الدخول";
+    return NextResponse.json({ error: message }, { status: 401 });
   }
 }

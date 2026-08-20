@@ -19,14 +19,31 @@ function validExpiry(value: unknown) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+type GiftCodeBody = {
+  action?: string;
+  id?: number | string;
+  code?: string;
+  length?: number | string;
+  amount?: number | string;
+  unlimited?: boolean;
+  max_uses?: number | string;
+  expires_at?: string | null;
+  kind?: string;
+};
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : "";
+}
+
 export async function GET() {
   try {
     await requireAdmin();
     await initDb();
     const result = await db.execute({ sql: "SELECT * FROM gift_codes ORDER BY created_at DESC, id DESC", args: [] });
     return NextResponse.json({ codes: result.rows });
-  } catch (error: any) {
-    const message = error?.message === "Unauthorized" || error?.message === "Forbidden" ? error.message : "تعذر تحميل الأكواد";
+  } catch (error: unknown) {
+    const rawMessage = errorText(error);
+    const message = rawMessage === "Unauthorized" || rawMessage === "Forbidden" ? rawMessage : "تعذر تحميل الأكواد";
     return NextResponse.json({ error: message }, { status: message === "Forbidden" ? 403 : 401 });
   }
 }
@@ -35,7 +52,7 @@ export async function POST(request: Request) {
   try {
     const admin = await requireAdmin();
     await initDb();
-    const body = await request.json();
+    const body = (await request.json()) as GiftCodeBody;
     const action = String(body.action || "create");
 
     if (action === "toggle" || action === "delete") {
@@ -64,13 +81,14 @@ export async function POST(request: Request) {
         sql: "INSERT INTO gift_codes (code, kind, amount, max_uses, expires_at, created_by) VALUES (?,?,?,?,?,?)",
         args: [code, String(body.kind || "gift"), amount, maxUses, expiresAt, Number(admin.userId || 0)],
       });
-    } catch (error: any) {
-      if (String(error?.message || "").toLowerCase().includes("unique")) return NextResponse.json({ error: "هذا الكود موجود مسبقًا" }, { status: 409 });
+    } catch (error: unknown) {
+      if (errorText(error).toLowerCase().includes("unique")) return NextResponse.json({ error: "هذا الكود موجود مسبقًا" }, { status: 409 });
       throw error;
     }
     return NextResponse.json({ ok: true, code, amount, max_uses: maxUses, expires_at: expiresAt });
-  } catch (error: any) {
-    const message = error?.message === "Unauthorized" || error?.message === "Forbidden" ? error.message : "تعذر تنفيذ العملية";
+  } catch (error: unknown) {
+    const rawMessage = errorText(error);
+    const message = rawMessage === "Unauthorized" || rawMessage === "Forbidden" ? rawMessage : "تعذر تنفيذ العملية";
     return NextResponse.json({ error: message }, { status: message === "Forbidden" ? 403 : 401 });
   }
 }

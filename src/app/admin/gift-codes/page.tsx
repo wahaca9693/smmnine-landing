@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Copy, Gift, KeyRound, Loader2, Plus, Power, RefreshCw, Trash2 } from "lucide-react";
 import DashboardLayout from "../../components/DashboardLayout";
 
@@ -14,13 +14,25 @@ export default function GiftCodesPage() {
   const [unlimited, setUnlimited] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  const [now, setNow] = useState<number | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const res = await fetch("/api/admin/gift-codes", { cache: "no-store" });
     const data = await res.json();
     if (res.ok) setCodes(data.codes || []); else setMessage({ text: data.error || "تعذر تحميل الأكواد", error: true });
-  };
-  useEffect(() => { void load(); }, []);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setNow(Date.now());
+      void load();
+    }, 0);
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
+  }, [load]);
 
   const create = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -64,7 +76,7 @@ export default function GiftCodesPage() {
         <button disabled={loading} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[var(--color-gold-bright)] via-[var(--color-gold)] to-[var(--color-gold-deep)] text-sm font-black text-black disabled:opacity-50">{loading ? <Loader2 size={17} className="animate-spin" /> : <KeyRound size={17} />} إنشاء الكود</button>
       </form>
 
-      <section className="glass-card overflow-hidden rounded-3xl border border-[var(--color-border)]"><div className="border-b border-[var(--color-border)] px-4 py-3 text-sm font-black text-white">الأكواد الحالية ({codes.length})</div><div className="divide-y divide-[var(--color-border)]">{codes.length === 0 ? <div className="p-8 text-center text-sm text-zinc-500">لا توجد أكواد حتى الآن.</div> : codes.map((item) => { const exhausted = item.max_uses > 0 && item.used_count >= item.max_uses; const expired = Boolean(item.expires_at && new Date(item.expires_at).getTime() <= Date.now()); return <div key={item.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="rounded-xl border border-[var(--color-gold)]/40 bg-[var(--color-gold)]/10 px-3 py-1 font-mono text-lg font-black tracking-[0.18em] text-[var(--color-gold-bright)]">{item.code}</span><span className={`rounded-full px-2 py-1 text-[9px] font-black ${item.is_active && !exhausted && !expired ? "bg-green-500/10 text-green-300" : "bg-red-500/10 text-red-300"}`}>{item.is_active && !exhausted && !expired ? "فعال" : expired ? "منتهي" : exhausted ? "مستنفد" : "متوقف"}</span></div><div className="mt-2 text-[11px] text-zinc-400">الرصيد <b className="text-white">${Number(item.amount).toFixed(6)}</b> · الاستخدام <b className="text-white">{item.used_count}/{item.max_uses === 0 ? "∞" : item.max_uses}</b> · {formatDate(item.expires_at)}</div></div><div className="flex gap-2"><button onClick={() => void copy(item.code)} className="flex h-9 items-center gap-1 rounded-xl border border-[var(--color-border)] px-3 text-[10px] font-black text-zinc-300"><Copy size={13} /> نسخ</button><button onClick={() => void action("toggle", item.id)} className="flex h-9 items-center gap-1 rounded-xl border border-[var(--color-gold)]/30 px-3 text-[10px] font-black text-[var(--color-gold-pale)]"><Power size={13} /> {item.is_active ? "إيقاف" : "تفعيل"}</button><button onClick={() => void action("delete", item.id)} className="flex h-9 items-center justify-center rounded-xl border border-red-500/30 px-3 text-red-300"><Trash2 size={13} /></button></div></div>; })}</div></section>
+      <section className="glass-card overflow-hidden rounded-3xl border border-[var(--color-border)]"><div className="border-b border-[var(--color-border)] px-4 py-3 text-sm font-black text-white">الأكواد الحالية ({codes.length})</div><div className="divide-y divide-[var(--color-border)]">{codes.length === 0 ? <div className="p-8 text-center text-sm text-zinc-500">لا توجد أكواد حتى الآن.</div> : codes.map((item) => { const exhausted = item.max_uses > 0 && item.used_count >= item.max_uses; const expired = Boolean(now !== null && item.expires_at && new Date(item.expires_at).getTime() <= now); return <div key={item.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="rounded-xl border border-[var(--color-gold)]/40 bg-[var(--color-gold)]/10 px-3 py-1 font-mono text-lg font-black tracking-[0.18em] text-[var(--color-gold-bright)]">{item.code}</span><span className={`rounded-full px-2 py-1 text-[9px] font-black ${item.is_active && !exhausted && !expired ? "bg-green-500/10 text-green-300" : "bg-red-500/10 text-red-300"}`}>{item.is_active && !exhausted && !expired ? "فعال" : expired ? "منتهي" : exhausted ? "مستنفد" : "متوقف"}</span></div><div className="mt-2 text-[11px] text-zinc-400">الرصيد <b className="text-white">${Number(item.amount).toFixed(6)}</b> · الاستخدام <b className="text-white">{item.used_count}/{item.max_uses === 0 ? "∞" : item.max_uses}</b> · {formatDate(item.expires_at)}</div></div><div className="flex gap-2"><button onClick={() => void copy(item.code)} className="flex h-9 items-center gap-1 rounded-xl border border-[var(--color-border)] px-3 text-[10px] font-black text-zinc-300"><Copy size={13} /> نسخ</button><button onClick={() => void action("toggle", item.id)} className="flex h-9 items-center gap-1 rounded-xl border border-[var(--color-gold)]/30 px-3 text-[10px] font-black text-[var(--color-gold-pale)]"><Power size={13} /> {item.is_active ? "إيقاف" : "تفعيل"}</button><button onClick={() => void action("delete", item.id)} className="flex h-9 items-center justify-center rounded-xl border border-red-500/30 px-3 text-red-300"><Trash2 size={13} /></button></div></div>; })}</div></section>
     </div>
   </DashboardLayout>;
 }

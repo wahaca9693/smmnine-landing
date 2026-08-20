@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 
+type DbRow = Record<string, unknown>;
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -45,7 +47,7 @@ export async function GET(request: Request) {
     const to = (searchParams.get("to") || "").trim();
     const page = Math.max(1, Number(searchParams.get("page") || 1));
     const limit = Math.min(100, Math.max(10, Number(searchParams.get("limit") || 50)));
-    const args: any[] = [];
+    const args: Array<string | number> = [];
     let where = " WHERE 1 = 1 ";
 
     if (action) {
@@ -69,7 +71,7 @@ export async function GET(request: Request) {
       sql: `SELECT COUNT(*) AS total FROM admin_audit_logs l LEFT JOIN users target ON target.id = l.target_user_id LEFT JOIN users admin ON admin.id = l.admin_user_id ${where}`,
       args,
     });
-    const total = Number((countResult.rows[0] as any)?.total || 0);
+    const total = Number((countResult.rows[0] as DbRow | undefined)?.total || 0);
     const offset = (page - 1) * limit;
     const result = await db.execute({
       sql: `
@@ -88,21 +90,27 @@ export async function GET(request: Request) {
 
     const actionResult = await db.execute("SELECT action, COUNT(*) AS total FROM admin_audit_logs GROUP BY action ORDER BY total DESC");
     return json({
-      logs: result.rows.map((row: any) => ({
-        ...row,
-        id: Number(row.id),
-        admin_user_id: row.admin_user_id == null ? null : Number(row.admin_user_id),
-        target_user_id: row.target_user_id == null ? null : Number(row.target_user_id),
-        details: safeDetails(row.details),
-      })),
+      logs: result.rows.map((row) => {
+        const item = row as DbRow;
+        return {
+          ...item,
+          id: Number(item.id),
+          admin_user_id: item.admin_user_id == null ? null : Number(item.admin_user_id),
+          target_user_id: item.target_user_id == null ? null : Number(item.target_user_id),
+          details: safeDetails(item.details),
+        };
+      }),
       total,
       page,
       limit,
       pages: Math.max(1, Math.ceil(total / limit)),
-      actions: actionResult.rows.map((row: any) => ({ action: String(row.action), total: Number(row.total || 0) })),
+      actions: actionResult.rows.map((row) => {
+        const item = row as DbRow;
+        return { action: String(item.action), total: Number(item.total || 0) };
+      }),
     });
-  } catch (err: any) {
-    const status = errorStatus(String(err?.message || ""));
+  } catch (error) {
+    const status = errorStatus(error instanceof Error ? error.message : "");
     return json({ error: status === 401 ? "يرجى تسجيل الدخول" : status === 403 ? "غير مصرح" : "تعذر تحميل سجل التدقيق" }, status);
   }
 }

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { X } from "lucide-react";
 
 interface ModalProps {
@@ -15,11 +15,8 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, subtitle, icon, children, zIndex = 60, size = "md", showClose = true }: ModalProps) {
-  const [visible, setVisible] = useState(false);
-
   useEffect(() => {
     if (open) {
-      setVisible(true);
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 
+type DbRow = Record<string, unknown>;
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -29,7 +31,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const search = (searchParams.get("search") || "").trim();
     const limit = Math.min(100, Math.max(10, Number(searchParams.get("limit") || 50)));
-    const args: any[] = [];
+    const args: Array<string | number> = [];
     let sql = `
       SELECT n.id, n.user_id, n.title, n.body, n.is_read, n.created_at, u.username
       FROM notifications n
@@ -45,16 +47,14 @@ export async function GET(request: Request) {
     const result = await db.execute({ sql, args });
     const count = await db.execute("SELECT COUNT(*) AS total FROM notifications");
     return json({
-      notifications: result.rows.map((row: any) => ({
-        ...row,
-        id: Number(row.id),
-        user_id: Number(row.user_id),
-        is_read: Number(row.is_read || 0),
-      })),
-      total: Number((count.rows[0] as any)?.total || 0),
+      notifications: result.rows.map((row) => {
+        const item = row as DbRow;
+        return { ...item, id: Number(item.id), user_id: Number(item.user_id), is_read: Number(item.is_read || 0) };
+      }),
+      total: Number((count.rows[0] as DbRow | undefined)?.total || 0),
     });
-  } catch (err: any) {
-    const status = errorStatus(String(err?.message || ""));
+  } catch (error) {
+    const status = errorStatus(error instanceof Error ? error.message : "");
     return json({ error: status === 401 ? "يرجى تسجيل الدخول" : status === 403 ? "غير مصرح" : "تعذر تحميل الإشعارات" }, status);
   }
 }
@@ -62,10 +62,10 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const admin = await requireAdmin();
-    const body = await request.json();
-    const title = cleanText(body?.title, 120);
-    const message = cleanText(body?.body, 1000);
-    const recipientType = body?.recipientType === "user" ? "user" : "broadcast";
+    const body = await request.json() as Record<string, unknown>;
+    const title = cleanText(body.title, 120);
+    const message = cleanText(body.body, 1000);
+    const recipientType = body.recipientType === "user" ? "user" : "broadcast";
     if (!title || !message) return json({ error: "العنوان ونص الإشعار مطلوبان" }, 400);
 
     if (recipientType === "broadcast") {
@@ -74,19 +74,20 @@ export async function POST(request: Request) {
         sql: "INSERT INTO notifications (user_id, title, body) SELECT id, ?, ? FROM users WHERE role != 'admin' AND COALESCE(is_banned, 0) = 0",
         args: [title, message],
       });
+      const recipientCount = Number((activeUsers.rows[0] as DbRow | undefined)?.total || 0);
       await db.execute({
         sql: "INSERT INTO admin_audit_logs (admin_user_id, target_user_id, action, details) VALUES (?, NULL, 'broadcastNotification', ?)",
-        args: [admin.userId ?? null, JSON.stringify({ title, recipients: Number((activeUsers.rows[0] as any)?.total || 0) })],
+        args: [admin.userId ?? null, JSON.stringify({ title, recipients: recipientCount })],
       });
-      return json({ success: true, message: `تم إرسال الإشعار إلى ${Number((activeUsers.rows[0] as any)?.total || 0)} مستخدم` });
+      return json({ success: true, message: `تم إرسال الإشعار إلى ${recipientCount} مستخدم` });
     }
 
-    const userId = Number(body?.userId || 0);
-    const username = cleanText(body?.username, 80);
+    const userId = Number(body.userId || 0);
+    const username = cleanText(body.username, 80);
     const lookup = userId > 0
       ? await db.execute({ sql: "SELECT id, username, role, is_banned FROM users WHERE id = ?", args: [userId] })
       : await db.execute({ sql: "SELECT id, username, role, is_banned FROM users WHERE username = ?", args: [username] });
-    const target = lookup.rows[0] as any;
+    const target = lookup.rows[0] as DbRow | undefined;
     if (!target || String(target.role) === "admin") return json({ error: "المستخدم غير موجود أو محمي" }, 404);
     if (Number(target.is_banned || 0) === 1) return json({ error: "لا يمكن إرسال إشعار إلى مستخدم محظور" }, 400);
 
@@ -99,8 +100,8 @@ export async function POST(request: Request) {
       args: [admin.userId ?? null, Number(target.id), JSON.stringify({ title })],
     });
     return json({ success: true, message: `تم إرسال الإشعار إلى ${String(target.username)}` });
-  } catch (err: any) {
-    const status = errorStatus(String(err?.message || ""));
+  } catch (error) {
+    const status = errorStatus(error instanceof Error ? error.message : "");
     return json({ error: status === 401 ? "يرجى تسجيل الدخول" : status === 403 ? "غير مصرح" : "تعذر إرسال الإشعار" }, status);
   }
 }

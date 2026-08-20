@@ -237,6 +237,16 @@ export default function AdminPage() {
   }
 
   const summary = analytics.summary;
+  const operationalAlerts: Array<{ href: string; label: string; value: string; tone: "amber" | "red" }> = [];
+  if ((summary.pending_orders || 0) > 0) {
+    operationalAlerts.push({ href: "/admin/orders", label: "طلبات تحتاج متابعة", value: integer(summary.pending_orders), tone: "amber" });
+  }
+  if ((summary.pending_deposits || 0) > 0) {
+    operationalAlerts.push({ href: "/admin/crypto", label: "إيداعات معلّقة", value: money(summary.pending_deposits), tone: "red" });
+  }
+  if ((summary.banned_users || 0) > 0) {
+    operationalAlerts.push({ href: "/admin/users", label: "حسابات محظورة", value: integer(summary.banned_users), tone: "amber" });
+  }
 
   return (
     <DashboardLayout>
@@ -261,6 +271,20 @@ export default function AdminPage() {
           <StatCard icon={Users} label="المستخدمون" value={integer(summary.total_users || 0)} hint={`${integer(summary.new_users || 0)} جديد`} tone="blue" />
           <StatCard icon={Wallet} label="أرصدة المستخدمين" value={money(summary.total_balance || 0)} hint={`${integer(summary.banned_users || 0)} محظور`} tone="green" />
         </section>
+
+        {operationalAlerts.length > 0 && (
+          <section className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-3 sm:p-4">
+            <div className="mb-2 flex items-center gap-2 text-xs font-black text-amber-200"><AlertCircle size={15} />مركز المتابعة التشغيلية</div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {operationalAlerts.map((alert) => (
+                <Link key={alert.href} href={alert.href} className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-black/15 px-3 py-2.5 transition hover:border-[var(--color-gold)]/40">
+                  <span className="text-[11px] font-bold text-zinc-300">{alert.label}</span>
+                  <span className={`text-sm font-black ${alert.tone === "red" ? "text-red-300" : "text-amber-200"}`}>{alert.value}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">

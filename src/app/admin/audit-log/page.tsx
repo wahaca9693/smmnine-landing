@@ -73,7 +73,10 @@ export default function AdminAuditLogPage() {
     }
   }, [action, from, page, search, to]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
   const apply = () => setPage(1);
 
   return (

@@ -3,6 +3,18 @@ import { NextResponse } from "next/server";
 import { getSession, requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 
+type UserRow = {
+  id: number | string;
+  username: string;
+  email: string | null;
+  balance: number | string;
+  role: string;
+};
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unexpected error";
+}
+
 export async function GET() {
   try {
     const session = await requireAuth();
@@ -19,7 +31,7 @@ export async function GET() {
       }),
     ]);
 
-    const user = result.rows[0];
+    const user = result.rows[0] as unknown as UserRow | undefined;
     if (!user) {
       const s = await getSession();
       s.destroy();
@@ -36,7 +48,7 @@ export async function GET() {
       },
       unreadNotifications: Number(notifCount.rows[0]?.count || 0),
     });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 401 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: errorMessage(error) }, { status: 401 });
   }
 }

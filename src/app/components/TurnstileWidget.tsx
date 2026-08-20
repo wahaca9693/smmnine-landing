@@ -82,7 +82,7 @@ export default function TurnstileWidget({ onToken, onError, className = "" }: Tu
         },
         "error-callback": handleError,
       });
-      setStatus("ready");
+      window.setTimeout(() => setStatus("ready"), 0);
       if (isTesting && window.turnstile?.execute && widgetIdRef.current !== undefined) {
         window.turnstile.execute(widgetIdRef.current);
       }
@@ -97,7 +97,7 @@ export default function TurnstileWidget({ onToken, onError, className = "" }: Tu
       }
       widgetIdRef.current = undefined;
     };
-  }, [siteKey, scriptReady]);
+  }, [siteKey, scriptReady, isTesting]);
 
   if (!siteKey) {
     return (

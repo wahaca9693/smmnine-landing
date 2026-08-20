@@ -8,11 +8,27 @@ import { useLiveRefresh } from "../../components/useLiveRefresh";
 import { ShoppingCart, Check, AlertCircle, ChevronDown, ChevronUp, Calculator, Wallet, AlertTriangle } from "lucide-react";
 import { Modal } from "../../components/Modal";
 
+type ServiceItem = {
+  service: number | string;
+  category: string;
+  name: string;
+  rate: number | string;
+  min: number | string;
+  max: number | string;
+};
+type RequirementItem = {
+  id: number | string;
+  title: string;
+  description?: string | null;
+  image_url?: string | null;
+  image_file?: string | null;
+};
+
 export default function NewOrderContent() {
   const searchParams = useSearchParams();
   const initialService = searchParams.get("service");
 
-  const [services, setServices] = useState<any[]>([]);
+  const [services, setServices] = useState<ServiceItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState("");
   const [search, setSearch] = useState("");
@@ -24,7 +40,7 @@ export default function NewOrderContent() {
   const [balance, setBalance] = useState(0);
   const [showServices, setShowServices] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(false);
-  const [requirements, setRequirements] = useState<any[]>([]);
+  const [requirements, setRequirements] = useState<RequirementItem[]>([]);
   const [requirementsChecked, setRequirementsChecked] = useState(false);
   const [requirementsLoading, setRequirementsLoading] = useState(false);
   const serviceIdRef = useRef("");
@@ -70,21 +86,33 @@ export default function NewOrderContent() {
   const serviceCategory = selectedService?.category || "";
   const isInstagram = serviceCategory.startsWith("Instagram");
   useEffect(() => {
-    setRequirements([]);
-    setRequirementsChecked(false);
-    if (!selectedService || !serviceCategory) return;
-    setRequirementsLoading(true);
-    fetch(`/api/service-requirements?category=${encodeURIComponent(serviceCategory)}`)
-      .then((res) => res.json())
-      .then((data) => {
-        setRequirements(Array.isArray(data.requirements) ? data.requirements : []);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setRequirements([]);
+      setRequirementsChecked(false);
+      if (!selectedService || !serviceCategory) {
         setRequirementsLoading(false);
-      })
-      .catch(() => setRequirementsLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedService?.service, serviceCategory]);
+        return;
+      }
+      setRequirementsLoading(true);
+      fetch(`/api/service-requirements?category=${encodeURIComponent(serviceCategory)}`, { signal: controller.signal })
+        .then((res) => res.json())
+        .then((data) => {
+          setRequirements(Array.isArray(data.requirements) ? data.requirements : []);
+          setRequirementsLoading(false);
+        })
+        .catch((error) => {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          setRequirementsLoading(false);
+        });
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [selectedService, serviceCategory]);
 
-    const showRequirementsModal = requirements.length > 0 && !requirementsChecked && selectedService;
+  const showRequirementsModal = Boolean(requirements.length > 0 && !requirementsChecked && selectedService);
 
 
   const estimatedCost = useMemo(() => {
@@ -348,7 +376,7 @@ export default function NewOrderContent() {
               </p>
             </div>
             <div className="max-h-[45vh] space-y-4 overflow-y-auto pl-1">
-              {requirements.map((req: any) => (
+              {requirements.map((req) => (
                 <div key={req.id} className="space-y-2">
                   <h3 className="flex items-center gap-2 font-black text-[var(--color-gold)]">
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--color-gold-bright)] to-[var(--color-gold)] text-xs font-black text-black">!</span>
@@ -358,6 +386,8 @@ export default function NewOrderContent() {
                   {(req.image_url || req.image_file) && (
                     <div className="space-y-1.5">
                       <div className="overflow-hidden rounded-2xl border-2 border-[var(--color-gold)]/45 shadow-[0_10px_40px_-12px_rgba(255,215,0,0.45)]">
+                        {/* الصور يحددها Admin وقد تكون من مصدر ديناميكي؛ نستخدم img لتجنب فرض نطاقات Next Image. */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={req.image_url || `/images/${req.image_file}`}
                           alt={req.title}

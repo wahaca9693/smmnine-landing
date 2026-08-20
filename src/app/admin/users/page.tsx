@@ -3,10 +3,22 @@
 import { useEffect, useState } from "react";
 import DashboardLayout from "../../components/DashboardLayout";
 import Link from "next/link";
-import { Users, Search, Ban, Unlock, Trash2, Plus, Minus, Eye, AlertCircle, ShieldCheck, History, KeyRound, X, RefreshCw, Wallet, ClipboardList, TicketCheck } from "lucide-react";
+import { Users, Search, Ban, Unlock, Trash2, Plus, Minus, Eye, AlertCircle, History, KeyRound, X, RefreshCw, Wallet, ClipboardList, TicketCheck } from "lucide-react";
 
 interface UserRow { id: number; username: string; email: string; balance: number; is_banned: number; status: string; created_at?: string; }
-interface UserDetails { user: UserRow & { terms_accepted: number }; orders: any[]; transactions: any[]; tickets: any[]; audit: any[]; }
+interface DetailOrder { id: number; service_name?: string | null; charge?: number | string | null; status?: string | null; }
+interface DetailTransaction { id: number; description?: string | null; type?: string | null; amount?: number | string | null; }
+interface DetailTicket { id: number; status?: string | null; }
+interface DetailAudit { id: number; action?: string | null; }
+interface UserDetails { user: UserRow & { terms_accepted: number }; orders: DetailOrder[]; transactions: DetailTransaction[]; tickets: DetailTicket[]; audit: DetailAudit[]; }
+type UsersResponse = { users?: UserRow[]; error?: string };
+type UsersRequestResult = UsersResponse & { ok: boolean };
+
+async function requestAdminUsers(search: string): Promise<UsersRequestResult> {
+  const res = await fetch(`/api/admin/users?search=${encodeURIComponent(search)}`, { credentials: "include", cache: "no-store" });
+  const data = await res.json() as UsersResponse;
+  return { ...data, ok: res.ok };
+}
 
 const money = (value: unknown) => `$${Number(value || 0).toFixed(6)}`;
 
@@ -25,18 +37,22 @@ export default function AdminUsersPage() {
 
   useEffect(() => {
     fetch("/api/user", { credentials: "include", cache: "no-store" }).then((res) => res.json()).then((data) => setAuthorized(data.user?.role === "admin")).catch(() => setAuthorized(false));
-    void fetchUsers();
+    void requestAdminUsers("").then((data) => {
+      setUsers(data.users || []);
+      if (!data.ok) setMessage(data.error || "تعذر تحميل المستخدمين");
+    }).catch(() => setMessage("تعذر تحميل المستخدمين"));
   }, []);
 
-  const fetchUsers = async () => {
+  async function fetchUsers() {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/users?search=${encodeURIComponent(search)}`, { credentials: "include", cache: "no-store" });
-      const data = await res.json();
+      const data = await requestAdminUsers(search);
       setUsers(data.users || []);
-      if (!res.ok) setMessage(data.error || "تعذر تحميل المستخدمين");
+      if (!data.ok) setMessage(data.error || "تعذر تحميل المستخدمين");
+    } catch {
+      setMessage("تعذر تحميل المستخدمين");
     } finally { setLoading(false); }
-  };
+  }
 
   const openDetails = async (user: UserRow) => {
     setSelectedUser(user); setDetails(null); setDetailsLoading(true); setMessage("");

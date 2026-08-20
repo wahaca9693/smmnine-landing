@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import DashboardLayout from "../../../../components/DashboardLayout";
 import Link from "next/link";
-import { ArrowRight, Package, RefreshCw, Eye, X } from "lucide-react";
+import { ArrowRight, Package, RefreshCw, X } from "lucide-react";
 
 const statusAr: Record<string, string> = {
   Pending: "معلق",
@@ -18,6 +18,28 @@ const statusAr: Record<string, string> = {
   Failed: "فاشل",
   Refunded: "مسترد",
 };
+
+interface AdminOrder {
+  id: number;
+  user_id: number;
+  username: string;
+  smmnine_order_id: number;
+  service_id: number;
+  service_name: string;
+  link: string;
+  quantity: number;
+  charge: number;
+  status: string;
+  created_at?: unknown;
+}
+
+interface OrderStatusPayload {
+  status?: string;
+  remains?: number | null;
+  start_count?: number | null;
+  error?: string;
+  [key: string]: unknown;
+}
 
 const statusColors: Record<string, string> = {
   Pending: "text-amber-400 bg-amber-400/10",
@@ -34,34 +56,49 @@ const statusColors: Record<string, string> = {
 
 export default function UserOrdersAdminPage() {
   const params = useParams();
-  const userId = params.id;
-  const [orders, setOrders] = useState<any[]>([]);
-  const [user, setUser] = useState<any>(null);
+  const userId = Array.isArray(params.id) ? params.id[0] : params.id;
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [user, setUser] = useState<{ username: string } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedOrder, setSelectedOrder] = useState<any>(null);
-  const [orderStatus, setOrderStatus] = useState<any>(null);
+  const [selectedOrder, setSelectedOrder] = useState<AdminOrder | null>(null);
+  const [orderStatus, setOrderStatus] = useState<OrderStatusPayload | null>(null);
 
   useEffect(() => {
-    fetch(`/api/admin/orders?userId=${userId}`)
-      .then((res) => res.json())
-      .then((data) => {
-        setOrders(data.orders || []);
-        setLoading(false);
-        if (data.orders?.length) {
-          setUser({ username: data.orders[0].username });
-        }
+    let active = true;
+    fetch(`/api/admin/orders?userId=${userId}`, { credentials: "include", cache: "no-store" })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (!active) return;
+        setOrders(ok ? data.orders || [] : []);
+        if (ok && data.orders?.length) setUser({ username: data.orders[0].username });
+      })
+      .catch(() => {
+        if (active) setOrders([]);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
+    return () => {
+      active = false;
+    };
   }, [userId]);
 
-  const checkStatus = async (order: any) => {
+  const checkStatus = async (order: AdminOrder) => {
     setSelectedOrder(order);
-    const res = await fetch("/api/orders/status", {
+    setOrderStatus(null);
+    const res = await fetch("/api/admin/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ orderId: order.id }),
     });
-    const data = await res.json();
-    setOrderStatus(data);
+    const data = await res.json() as OrderStatusPayload;
+    if (res.ok) {
+      setOrderStatus(data);
+      setSelectedOrder((current) => current ? { ...current, status: String(data.status || current.status) } : current);
+    } else {
+      setOrderStatus({ error: data.error || "تعذر تحديث حالة الطلب" });
+    }
   };
 
   return (
@@ -141,7 +178,9 @@ export default function UserOrdersAdminPage() {
               <div className="text-xs text-zinc-500">الرابط</div>
               <a href={selectedOrder.link} target="_blank" rel="noreferrer" className="break-all text-sm text-[var(--color-primary)]">{selectedOrder.link}</a>
             </div>
-            {orderStatus && (
+            {orderStatus?.error ? (
+              <div className="mt-3 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm font-bold text-red-200">{orderStatus.error}</div>
+            ) : orderStatus ? (
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <div className="rounded-xl bg-[var(--color-surface)] p-3">
                   <div className="text-xs text-zinc-500">المتبقي</div>
@@ -152,7 +191,7 @@ export default function UserOrdersAdminPage() {
                   <div className="font-bold text-white">{orderStatus.start_count ?? "—"}</div>
                 </div>
               </div>
-            )}
+            ) : null}
             <button
               onClick={() => checkStatus(selectedOrder)}
               className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] py-3 font-bold text-white"

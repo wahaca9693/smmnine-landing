@@ -42,8 +42,8 @@ export async function requireAuth() {
     throw new Error("Unauthorized");
   }
   // Check ban status from DB
-    const result = await db.execute({ sql: "SELECT is_banned FROM users WHERE id = ?", args: [session.userId!] });
-  const user = result.rows[0] as any;
+  const result = await db.execute({ sql: "SELECT is_banned FROM users WHERE id = ?", args: [session.userId!] });
+  const user = result.rows[0] as { is_banned?: unknown } | undefined;
   if (user && Number(user.is_banned)) {
     throw new Error("Account banned");
   }

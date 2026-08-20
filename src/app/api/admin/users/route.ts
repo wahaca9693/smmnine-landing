@@ -3,6 +3,8 @@ import bcrypt from "bcryptjs";
 import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 
+type DbRow = Record<string, unknown>;
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -13,7 +15,7 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function safeUser(row: any) {
+function safeUser(row: DbRow) {
   return {
     id: Number(row.id),
     username: String(row.username || ""),
@@ -36,7 +38,7 @@ async function audit(adminId: number | undefined, targetId: number, action: stri
 
 async function targetExists(userId: number) {
   const result = await db.execute({ sql: "SELECT id, role FROM users WHERE id = ?", args: [userId] });
-  const row = result.rows[0] as any;
+  const row = result.rows[0] as DbRow | undefined;
   if (!row || String(row.role) === "admin") return false;
   return true;
 }
@@ -53,7 +55,7 @@ export async function GET(request: Request) {
         sql: "SELECT id, username, email, balance, role, is_banned, status, terms_accepted, created_at FROM users WHERE id = ? AND role != 'admin'",
         args: [userId],
       });
-      const user = userRes.rows[0] as any;
+      const user = userRes.rows[0] as DbRow | undefined;
       if (!user) return json({ error: "المستخدم غير موجود" }, 404);
 
       const [ordersRes, transactionsRes, ticketsRes, auditRes] = await Promise.all([
@@ -68,13 +70,13 @@ export async function GET(request: Request) {
         orders: ordersRes.rows,
         transactions: transactionsRes.rows,
         tickets: ticketsRes.rows,
-        audit: auditRes.rows.map((row: any) => ({ ...row, details: row.details ? String(row.details) : "" })),
+        audit: auditRes.rows.map((row) => { const item = row as DbRow; return { ...item, details: item.details ? String(item.details) : "" }; }),
         viewer: { id: admin.userId },
       });
     }
 
     let sql = "SELECT id, username, email, balance, role, is_banned, status, created_at FROM users WHERE role != 'admin'";
-    const args: any[] = [];
+    const args: Array<string | number> = [];
     if (search) {
       sql += " AND (username LIKE ? OR email LIKE ? OR CAST(id AS TEXT) LIKE ?)";
       args.push(`%${search}%`, `%${search}%`, `%${search}%`);
@@ -82,8 +84,8 @@ export async function GET(request: Request) {
     sql += " ORDER BY created_at DESC LIMIT 200";
     const result = await db.execute({ sql, args });
     return json({ users: result.rows.map(safeUser) });
-  } catch (err: any) {
-    const message = String(err?.message || "");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
     const status = message === "Unauthorized" ? 401 : (message === "Forbidden" || message === "Account banned" ? 403 : 500);
     return json({ error: status === 401 ? "يرجى تسجيل الدخول" : status === 403 ? "غير مصرح" : "تعذر تحميل بيانات المستخدمين" }, status);
   }
@@ -92,7 +94,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const admin = await requireAdmin();
-    const body = await request.json();
+    const body = await request.json() as Record<string, unknown>;
     const action = String(body.action || "");
     const uid = Number(body.userId);
     if (!Number.isInteger(uid) || uid <= 0 || !(await targetExists(uid))) return json({ error: "المستخدم غير صالح أو محمي" }, 400);
@@ -106,6 +108,7 @@ export async function POST(request: Request) {
 
     if (action === "delete") {
       await db.execute({ sql: "DELETE FROM users WHERE id = ?", args: [uid] });
+      await audit(admin.userId, uid, action, { deleted: true });
       return json({ success: true, message: "تم حذف المستخدم" });
     }
 
@@ -114,7 +117,8 @@ export async function POST(request: Request) {
       if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000) return json({ error: "مبلغ غير صالح" }, 400);
       const delta = action === "addBalance" ? amount : -amount;
       const userRes = await db.execute({ sql: "SELECT balance FROM users WHERE id = ?", args: [uid] });
-      const current = Number((userRes.rows[0] as any)?.balance || 0);
+      const balanceRow = userRes.rows[0] as DbRow | undefined;
+      const current = Number(balanceRow?.balance || 0);
       if (delta < 0 && current + delta < 0) return json({ error: "لا يمكن أن يصبح الرصيد سالبًا" }, 400);
       await db.execute({ sql: "UPDATE users SET balance = balance + ? WHERE id = ?", args: [delta, uid] });
       await db.execute({
@@ -135,8 +139,8 @@ export async function POST(request: Request) {
     }
 
     return json({ error: "إجراء غير معروف" }, 400);
-  } catch (err: any) {
-    const message = String(err?.message || "");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
     const status = message === "Unauthorized" ? 401 : (message === "Forbidden" || message === "Account banned" ? 403 : 500);
     return json({ error: status === 401 ? "يرجى تسجيل الدخول" : status === 403 ? "غير مصرح" : "تعذر تنفيذ الإجراء" }, status);
   }

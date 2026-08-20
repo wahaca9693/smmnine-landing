@@ -391,7 +391,9 @@ export function LanguageProvider({ children, initialLocale }: { children: ReactN
 
   useEffect(() => {
     const saved = getCookie(COOKIE_NAME) as Locale | null;
-    if (saved && LOCALES.includes(saved) && saved !== locale) setLocaleState(saved);
+    if (saved && LOCALES.includes(saved) && saved !== locale) {
+      window.setTimeout(() => setLocaleState(saved), 0);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

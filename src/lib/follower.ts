@@ -2,9 +2,19 @@ const API_URL = process.env.SMMNINE_API_URL || "https://smmnine.com/api/v2";
 const API_KEY = process.env.SMMNINE_API_KEY;
 const REQUEST_TIMEOUT_MS = 8000;
 
-export async function smmnineRequest(params: Record<string, string>) {
-  if (!API_KEY) throw new Error("مزود الخدمات الخارجي غير مهيأ بعد");
+type JsonRecord = Record<string, unknown>;
+type JsonPayload = JsonRecord | JsonRecord[];
 
+function isJsonRecord(value: unknown): value is JsonRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isJsonPayload(value: unknown): value is JsonPayload {
+  return Array.isArray(value) ? value.every(isJsonRecord) : isJsonRecord(value);
+}
+
+async function requestPayload(params: Record<string, string>): Promise<JsonPayload> {
+  if (!API_KEY) throw new Error("مزود الخدمات الخارجي غير مهيأ بعد");
   const body = new URLSearchParams({ key: API_KEY, ...params });
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -19,17 +29,22 @@ export async function smmnineRequest(params: Record<string, string>) {
     });
 
     const text = await res.text();
-    let data: any;
+    let parsed: unknown;
     try {
-      data = JSON.parse(text);
+      parsed = JSON.parse(text);
     } catch {
       throw new Error("استجابة غير صالحة من مزود الخدمات");
     }
-
-    if (!res.ok || data.error) {
-      throw new Error(data.error || `مزود الخدمات أعاد HTTP ${res.status}`);
+    if (!isJsonPayload(parsed)) {
+      throw new Error("استجابة غير صالحة من مزود الخدمات");
     }
-    return data;
+
+    const record = isJsonRecord(parsed) ? parsed : null;
+    const providerError = record?.error;
+    if (!res.ok || providerError) {
+      throw new Error(String(providerError || `مزود الخدمات أعاد HTTP ${res.status}`));
+    }
+    return parsed;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error("استغرق مزود الخدمات وقتًا طويلًا للاستجابة");
@@ -40,27 +55,33 @@ export async function smmnineRequest(params: Record<string, string>) {
   }
 }
 
-export async function getServices() {
-  const data = await smmnineRequest({ action: "services" });
+export async function smmnineRequest(params: Record<string, string>): Promise<JsonRecord> {
+  const data = await requestPayload(params);
+  if (!isJsonRecord(data)) throw new Error("استجابة غير صالحة من مزود الخدمات");
+  return data;
+}
+
+export async function getServices(): Promise<JsonRecord[]> {
+  const data = await requestPayload({ action: "services" });
   return Array.isArray(data) ? data : [];
 }
 
-export async function getBalance() {
+export async function getBalance(): Promise<JsonRecord> {
   return smmnineRequest({ action: "balance" });
 }
 
-export async function createOrder(service: string, link: string, quantity: string) {
+export async function createOrder(service: string, link: string, quantity: string): Promise<JsonRecord> {
   return smmnineRequest({ action: "add", service, link, quantity });
 }
 
-export async function getOrderStatus(orderId: string) {
+export async function getOrderStatus(orderId: string): Promise<JsonRecord> {
   return smmnineRequest({ action: "status", order: orderId });
 }
 
-export async function refillOrder(orderId: string) {
+export async function refillOrder(orderId: string): Promise<JsonRecord> {
   return smmnineRequest({ action: "refill", order: orderId });
 }
 
-export async function cancelOrder(orderId: string) {
+export async function cancelOrder(orderId: string): Promise<JsonRecord> {
   return smmnineRequest({ action: "cancel", order: orderId });
 }

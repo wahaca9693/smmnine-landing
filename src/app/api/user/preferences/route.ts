@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 
+type PreferenceRow = Record<string, unknown>;
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -44,7 +46,7 @@ function normalize(body: Record<string, unknown>) {
   };
 }
 
-function serialize(row: any) {
+function serialize(row: PreferenceRow | undefined) {
   return {
     email_notifications: Boolean(Number(row?.email_notifications ?? (defaults.email_notifications ? 1 : 0))),
     order_status_notifications: Boolean(Number(row?.order_status_notifications ?? (defaults.order_status_notifications ? 1 : 0))),
@@ -62,8 +64,8 @@ export async function GET() {
       args: [session.userId!],
     });
     return json({ preferences: serialize(result.rows[0]) });
-  } catch (error: any) {
-    const message = String(error?.message || "");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
     return json({ error: message === "Forbidden" ? "الحساب محظور" : "يرجى تسجيل الدخول" }, message === "Forbidden" ? 403 : 401);
   }
 }
@@ -71,8 +73,9 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const session = await requireAuth();
-    const body = await request.json().catch(() => ({}));
-    const preferences = normalize(body && typeof body === "object" ? body : {});
+    const rawBody: unknown = await request.json().catch(() => ({}));
+    const body = rawBody && typeof rawBody === "object" && !Array.isArray(rawBody) ? rawBody as Record<string, unknown> : {};
+    const preferences = normalize(body);
 
     await db.execute({
       sql: `INSERT INTO user_preferences
@@ -96,8 +99,8 @@ export async function POST(request: Request) {
     });
 
     return json({ success: true, preferences });
-  } catch (error: any) {
-    const message = String(error?.message || "");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
     const status = message === "Forbidden" ? 403 : message === "Unauthorized" ? 401 : message.includes("غير صالحة") || message.includes("بين 10") ? 400 : 500;
     return json({ error: status === 403 ? "الحساب محظور" : status === 401 ? "يرجى تسجيل الدخول" : status === 400 ? message : "تعذر حفظ التفضيلات" }, status);
   }

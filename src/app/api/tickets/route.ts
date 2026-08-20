@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 
+type TicketRow = Record<string, unknown>;
+type TicketBody = { type?: unknown; subject?: unknown; description?: unknown; orderId?: unknown };
+
 const VALID_TYPES = [
   "speed_up",
   "refill",
@@ -29,45 +32,53 @@ export async function GET() {
       args: [session.userId!],
     });
 
-    const tickets = result.rows.map((row: any) => ({
-      id: Number(row.id),
-      type: row.type,
-      typeLabel: TYPE_LABELS[row.type] || row.type,
-      subject: row.subject,
-      description: row.description,
-      orderId: row.order_id,
-      status: row.status,
-      adminReply: row.admin_reply,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    const tickets = result.rows.map((row) => {
+      const item = row as TicketRow;
+      const type = String(item.type || "other");
+      return {
+        id: Number(item.id),
+        type,
+        typeLabel: TYPE_LABELS[type] || type,
+        subject: item.subject,
+        description: item.description,
+        orderId: item.order_id,
+        status: item.status,
+        adminReply: item.admin_reply,
+        createdAt: item.created_at,
+        updatedAt: item.updated_at,
+      };
+    });
 
     return NextResponse.json({ tickets });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 401 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "يرجى تسجيل الدخول";
+    return NextResponse.json({ error: message }, { status: 401 });
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await requireAuth();
-    const body = await request.json();
-    const { type, subject, description, orderId } = body;
+    const body = await request.json() as TicketBody;
+    const type = typeof body.type === "string" ? body.type : "";
+    const subject = typeof body.subject === "string" ? body.subject : "";
+    const description = typeof body.description === "string" ? body.description : "";
+    const orderId = typeof body.orderId === "number" || typeof body.orderId === "string" ? body.orderId : null;
 
     if (!type || !VALID_TYPES.includes(type)) {
       return NextResponse.json({ error: "نوع التذكرة غير صالح" }, { status: 400 });
     }
-    if (!subject || String(subject).trim().length < 3) {
+    if (subject.trim().length < 3) {
       return NextResponse.json({ error: "العنوان مطلوب (3 أحرف على الأقل)" }, { status: 400 });
     }
-    if (!description || String(description).trim().length < 10) {
+    if (description.trim().length < 10) {
       return NextResponse.json({ error: "الوصف مطلوب (10 أحرف على الأقل)" }, { status: 400 });
     }
 
     const result = await db.execute({
       sql: `INSERT INTO tickets (user_id, type, subject, description, order_id, status) 
             VALUES (?, ?, ?, ?, ?, 'open')`,
-      args: [session.userId!, type, String(subject).trim(), String(description).trim(), orderId || null],
+      args: [session.userId!, type, subject.trim(), description.trim(), orderId],
     });
 
     const ticketId = result.lastInsertRowid ? Number(result.lastInsertRowid) : 0;
@@ -77,7 +88,8 @@ export async function POST(request: Request) {
       ticketId,
       message: "تم إرسال التذكرة بنجاح، سنرد عليك في أقرب وقت",
     });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "تعذر إرسال التذكرة";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "../components/DashboardLayout";
 import { useTheme } from "../components/ThemeProvider";
-import { KeyRound, Copy, Check, RefreshCw, Ban, Plus, ArrowLeft, Terminal, Wallet, Activity, GraduationCap, Server, ShieldAlert, Rocket, Repeat, Zap, AlertTriangle, Eye, EyeOff } from "lucide-react";
+import { KeyRound, Copy, Check, RefreshCw, Ban, Plus, ArrowLeft, Terminal, Wallet, Activity, GraduationCap, Server, ShieldAlert, Rocket, Eye, EyeOff } from "lucide-react";
 
 interface ApiKey {
   id: number;
@@ -83,7 +83,7 @@ export default function ApiAccessPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [apiBaseUrl, setApiBaseUrl] = useState("/api/v2");
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setMessage(null);
     const [keyResult, userResult] = await Promise.allSettled([
       fetch("/api/api-access", { cache: "no-store" }),
@@ -111,11 +111,14 @@ export default function ApiAccessPage() {
         // الرصيد ثانوي ولا يمنع عرض عنوان API والمفتاح.
       }
     }
-  };
+  }, []);
 
   useEffect(() => {
-    refresh();
-  }, []);
+    const timer = window.setTimeout(() => {
+      void refresh();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refresh]);
 
   const copy = async (key: ApiKey) => {
     await navigator.clipboard.writeText(key.api_key);
@@ -366,7 +369,7 @@ export default function ApiAccessPage() {
               />
               <p className="text-zinc-500">
                 الأسعار تخصم من رصيد محفظتك مباشرة حسب عرض المنصة، وأي تحديث جديد على خدمات {brandName} يظهر فورًا عند استدعاء جلب الخدمات، وكل طلب يصل عبر هذا المفتاح يسجل في قائمة طلباتك.
-                عند الضغط على "تغيير المفتاح" يتم تعطيل المفتاح السابق فورًا وتفعيل المفتاح الجديد فقط — أي طلب يصل بالمفتاح القديم لن يُنفذ بعد ذلك.
+                عند الضغط على &quot;تغيير المفتاح&quot; يتم تعطيل المفتاح السابق فورًا وتفعيل المفتاح الجديد فقط — أي طلب يصل بالمفتاح القديم لن يُنفذ بعد ذلك.
               </p>
             </div>
           </div>

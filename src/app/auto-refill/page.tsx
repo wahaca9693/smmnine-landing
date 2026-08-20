@@ -1,12 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import { RefreshCw, Plus, Trash2, AlertCircle, Check } from "lucide-react";
 
+interface AutoRefillService {
+  service: number | string;
+  name: string;
+}
+
+interface AutoRefillRule {
+  id: number;
+  service_id: number;
+  service_name: string | null;
+  link: string;
+  target_quantity: number;
+  interval_hours: number;
+  is_active: number | boolean;
+}
+
 export default function AutoRefillPage() {
-  const [services, setServices] = useState<any[]>([]);
-  const [refills, setRefills] = useState<any[]>([]);
+  const [services, setServices] = useState<AutoRefillService[]>([]);
+  const [refills, setRefills] = useState<AutoRefillRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -16,23 +31,28 @@ export default function AutoRefillPage() {
   const [targetQuantity, setTargetQuantity] = useState("");
   const [intervalHours, setIntervalHours] = useState("24");
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const [sRes, rRes] = await Promise.all([fetch("/api/services"), fetch("/api/auto-refill")]);
-      const sData = await sRes.json();
-      const rData = await rRes.json();
-      setServices(sData.services || []);
-      setRefills(rData.refills || []);
-    } catch (e) {
-      console.error(e);
+      const sData: unknown = await sRes.json();
+      const rData: unknown = await rRes.json();
+      const servicesValue = sData && typeof sData === "object" && "services" in sData ? sData.services : [];
+      const refillsValue = rData && typeof rData === "object" && "refills" in rData ? rData.refills : [];
+      setServices(Array.isArray(servicesValue) ? servicesValue as AutoRefillService[] : []);
+      setRefills(Array.isArray(refillsValue) ? refillsValue as AutoRefillRule[] : []);
+    } catch (error) {
+      console.error(error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    const timer = window.setTimeout(() => {
+      void fetchData();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchData]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

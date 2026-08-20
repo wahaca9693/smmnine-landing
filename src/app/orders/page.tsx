@@ -1,9 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import { Search, RefreshCw, X, Link2, Package, Zap, Clock3, CheckCircle2, XCircle, AlertTriangle, Eye, Ban, CircleDollarSign } from "lucide-react";
 import { useLanguage } from "../components/LanguageProvider";
+
+type OrderItem = Record<string, unknown> & {
+  id: number;
+  status?: string | null;
+  status_key?: string | null;
+  service_name?: string | null;
+  smmnine_order_id?: number | string | null;
+  quantity?: number | string | null;
+  charge?: number | string | null;
+  remains?: number | string | null;
+  can_cancel?: boolean;
+  refunded_at?: string | null;
+  link?: string | null;
+  updated_at?: string | null;
+};
+type OrderPatch = Partial<OrderItem> & { id?: number };
 
 const statusColors: Record<string, string> = {
   pending: "text-amber-400 bg-amber-400/10 border-amber-400/30",
@@ -48,7 +64,7 @@ function statusKey(status: unknown): string {
   return raw.replace(/\s+/g, "_");
 }
 
-function statusLabel(t: (key: string) => string, order: any) {
+function statusLabel(t: (key: string) => string, order: OrderItem) {
   const key = order.status_key || statusKey(order.status);
   return t(statusTranslationKeys[key] || "order.reviewing");
 }
@@ -76,7 +92,7 @@ function StatusIcon({ status }: { status: string }) {
   }
 }
 
-function Progress({ order, t }: { order: any; t: (key: string) => string }) {
+function Progress({ order, t }: { order: OrderItem; t: (key: string) => string }) {
   const total = Number(order.quantity);
   const remaining = order.remains === null || order.remains === undefined ? null : Number(order.remains);
   if (!Number.isFinite(total) || total <= 0 || remaining === null || !Number.isFinite(remaining)) return null;
@@ -97,16 +113,16 @@ function Progress({ order, t }: { order: any; t: (key: string) => string }) {
 
 export default function OrdersPage() {
   const { t } = useLanguage();
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<OrderItem[]>([]);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
-  const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [selectedOrder, setSelectedOrder] = useState<OrderItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [canceling, setCanceling] = useState(false);
   const [modalMessage, setModalMessage] = useState("");
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`/api/orders?status=${filter}`, { cache: "no-store" });
@@ -114,12 +130,15 @@ export default function OrdersPage() {
       setOrders(data.orders || []);
     } catch {}
     setLoading(false);
-  };
+  }, [filter]);
 
-  useEffect(() => { fetchOrders(); }, [filter]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void fetchOrders(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchOrders]);
 
-  const mergeOrder = (patch: any) => {
-    setSelectedOrder((current: any) => current ? { ...current, ...patch } : current);
+  const mergeOrder = (patch: OrderPatch) => {
+    setSelectedOrder((current) => current ? { ...current, ...patch } : current);
     setOrders((current) => current.map((item) => item.id === patch.id || item.id === selectedOrder?.id ? { ...item, ...patch } : item));
   };
 
@@ -136,8 +155,8 @@ export default function OrdersPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "تعذر تحديث الطلب");
       mergeOrder({ ...data, id: selectedOrder.id, updated_at: new Date().toISOString() });
-    } catch (error: any) {
-      setModalMessage(error.message || "تعذر تحديث الطلب");
+    } catch (error) {
+      setModalMessage(error instanceof Error ? error.message : "تعذر تحديث الطلب");
     } finally {
       setRefreshing(false);
     }
@@ -159,8 +178,8 @@ export default function OrdersPage() {
       mergeOrder({ status: "Canceled", status_key: "canceled", refunded_at: new Date().toISOString() });
       setModalMessage(t("order.cancelSuccess"));
       await fetchOrders();
-    } catch (error: any) {
-      setModalMessage(error.message || t("order.cancelNoRefund"));
+    } catch (error) {
+      setModalMessage(error instanceof Error ? error.message : t("order.cancelNoRefund"));
     } finally {
       setCanceling(false);
     }
@@ -230,7 +249,7 @@ export default function OrdersPage() {
             <div className="rounded-2xl border border-[var(--color-gold)]/15 bg-[#1a1204]/60 p-3"><div className="text-xs text-zinc-500">{t("order.remaining")}</div><div className="font-black text-amber-300">{remaining === null || !Number.isFinite(remaining) ? t("order.noData") : remaining}</div></div>
           </div>
           <div className="mt-3 rounded-2xl border border-[var(--color-gold)]/15 bg-[#1a1204]/60 p-3"><div className="text-xs text-zinc-500">{t("order.service")}</div><div className="text-sm text-white">{selectedOrder.service_name}</div></div>
-          <div className="mt-3 flex items-center gap-2 rounded-2xl border border-[var(--color-gold)]/15 bg-[#1a1204]/60 p-3"><Link2 size={14} className="shrink-0 text-[var(--color-gold)]" /><a href={selectedOrder.link} target="_blank" rel="noreferrer" dir="ltr" className="truncate text-xs text-[var(--color-gold-pale)] hover:text-[var(--color-gold-bright)]">{selectedOrder.link}</a></div>
+          <div className="mt-3 flex items-center gap-2 rounded-2xl border border-[var(--color-gold)]/15 bg-[#1a1204]/60 p-3"><Link2 size={14} className="shrink-0 text-[var(--color-gold)]" /><a href={selectedOrder.link ?? undefined} target="_blank" rel="noreferrer" dir="ltr" className="truncate text-xs text-[var(--color-gold-pale)] hover:text-[var(--color-gold-bright)]">{selectedOrder.link}</a></div>
           <div className="mt-4 grid grid-cols-2 gap-2"><button onClick={refreshSelectedOrder} disabled={refreshing} className="flex items-center justify-center gap-2 rounded-xl border border-[var(--color-gold)]/40 bg-[var(--color-gold)]/10 px-3 py-2.5 text-sm font-black text-[var(--color-gold-pale)] disabled:opacity-50"><RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />{refreshing ? t("order.refreshing") : t("order.refresh")}</button>{canCancel ? <button onClick={cancelSelectedOrder} disabled={canceling} className="flex items-center justify-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2.5 text-sm font-black text-red-300 disabled:opacity-50"><Ban size={15} />{canceling ? t("order.refreshing") : t("order.cancelRequest")}</button> : <div className="flex items-center justify-center gap-2 rounded-xl border border-zinc-500/20 bg-zinc-500/10 px-2 py-2.5 text-center text-[11px] font-bold text-zinc-400"><CircleDollarSign size={14} />{t("order.cancelUnavailable")}</div>}</div>
           <p className="mt-3 text-center text-[10px] leading-5 text-zinc-500">{t("order.cancelRules")} {t("order.trackHint")}</p>
           {modalMessage && <div className="mt-3 rounded-xl border border-[var(--color-gold)]/30 bg-[var(--color-gold)]/10 p-3 text-center text-xs font-bold text-[var(--color-gold-pale)]">{modalMessage}</div>}

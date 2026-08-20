@@ -13,6 +13,7 @@ import {
   Wallet,
   History,
   Bell,
+  ClipboardList,
   Globe2,
   SlidersHorizontal,
   LogOut,
@@ -129,15 +130,37 @@ export default function Sidebar({ open, onClose, user }: SidebarProps) {
 
             {user?.role === "admin" && (
               <>
-                <div className="mb-2 mt-4 text-xs font-bold text-zinc-500">{t("sidebar.menu")}</div>
-                <Link
-                  href="/admin"
-                  onClick={onClose}
-                  className={`flex items-center justify-between rounded-xl px-3 py-3 transition hover:bg-[var(--color-surface)] ${pathname === "/admin" ? "bg-[var(--color-surface)]" : ""}`}
-                >
-                  <span className={`font-bold ${pathname === "/admin" ? "text-[var(--color-primary)]" : "text-white"}`}>{t("sidebar.adminPanel")}</span>
-                  <Shield size={18} className={pathname === "/admin" ? "text-[var(--color-primary)]" : "text-[var(--color-primary)]"} />
-                </Link>
+                <div className="mb-2 mt-4 text-xs font-bold text-zinc-500">إدارة المنصة</div>
+                {[
+                  { label: t("sidebar.adminPanel"), href: "/admin", icon: Shield },
+                  { label: "مركز الطلبات", href: "/admin/orders", icon: ClipboardList },
+                  { label: "المستخدمون", href: "/admin/users", icon: User },
+                  { label: "المزودون والخدمات", href: "/admin/providers", icon: Boxes },
+                  { label: "إدارة مفاتيح API", href: "/admin/api-keys", icon: KeyRound },
+                  { label: "إيداعات الكريبتو", href: "/admin/crypto", icon: Wallet },
+                  { label: "شحن Asiacell", href: "/admin/asiacell", icon: Wallet },
+                  { label: "المجاني والهدايا", href: "/admin/free-services", icon: Gift },
+                  { label: "أكواد الهدايا", href: "/admin/gift-codes", icon: Gift },
+                  { label: "إشعارات المستخدمين", href: "/admin/notifications", icon: Bell },
+                  { label: "تذاكر الدعم", href: "/admin/tickets", icon: FileText },
+                  { label: "سجل التدقيق", href: "/admin/audit-log", icon: History },
+                  { label: "هوية المنصة", href: "/admin/theme", icon: SlidersHorizontal },
+                  { label: "إعدادات الإدارة", href: "/admin/settings", icon: Settings },
+                ].map((item) => {
+                  const active = pathname === item.href || (item.href !== "/admin" && pathname.startsWith(`${item.href}/`));
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={onClose}
+                      className={`mb-1 flex items-center justify-between rounded-xl px-3 py-3 transition hover:bg-[var(--color-surface)] ${active ? "bg-[var(--color-surface)]" : ""}`}
+                    >
+                      <span className={`font-bold ${active ? "text-[var(--color-primary)]" : "text-white"}`}>{item.label}</span>
+                      <Icon size={18} className={active ? "text-[var(--color-primary)]" : "text-zinc-400"} />
+                    </Link>
+                  );
+                })}
               </>
             )}
           </div>

@@ -2,7 +2,17 @@
 
 import { useEffect, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
-import { History, ArrowDownLeft, ArrowUpRight, ShoppingCart, AlertCircle } from "lucide-react";
+import { History, ArrowDownLeft, ArrowUpRight, ShoppingCart, AlertCircle, type LucideIcon } from "lucide-react";
+
+type TransactionItem = {
+  id: number;
+  type: string;
+  status: string;
+  amount: number;
+  description?: string | null;
+  created_at: string;
+};
+type TransactionsResponse = { transactions?: TransactionItem[] };
 
 const typeLabels: Record<string, string> = {
   deposit: "إيداع",
@@ -12,7 +22,7 @@ const typeLabels: Record<string, string> = {
   admin_subtract: "خصم رصيد",
 };
 
-const typeIcons: Record<string, any> = {
+const typeIcons: Record<string, LucideIcon> = {
   deposit: ArrowDownLeft,
   order: ShoppingCart,
   refund: ArrowUpRight,
@@ -33,13 +43,13 @@ const statusAr: Record<string, string> = {
 };
 
 export default function TransactionsPage() {
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<TransactionItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetch("/api/transactions")
       .then((res) => res.json())
-      .then((data) => {
+      .then((data: TransactionsResponse) => {
         setTransactions(data.transactions || []);
         setLoading(false);
       });

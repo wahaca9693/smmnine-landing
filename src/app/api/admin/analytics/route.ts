@@ -7,6 +7,11 @@ export const revalidate = 0;
 
 type AnalyticsRange = "today" | "7d" | "30d" | "90d" | "all";
 type Row = Record<string, unknown>;
+type AsiacellStatusRow = {
+  authenticated?: unknown;
+  access_token?: unknown;
+  updated_at?: unknown;
+};
 
 function json(data: unknown, init?: ResponseInit) {
   return NextResponse.json(data, {
@@ -180,6 +185,8 @@ export async function GET(request: Request) {
       Object.entries(summaryRow).map(([key, value]) => [key, numberValue(value)]),
     );
 
+    const asiacellStatus = asiacellRes.rows[0] as unknown as AsiacellStatusRow | undefined;
+
     return json({
       range,
       generatedAt: new Date().toISOString(),
@@ -217,8 +224,8 @@ export async function GET(request: Request) {
       })),
       system: {
         nowpaymentsConfigured: Boolean(process.env.NOWPAYMENTS_API_KEY && process.env.NOWPAYMENTS_IPN_SECRET),
-        asiacellConnected: Number((asiacellRes.rows[0] as any)?.authenticated || 0) === 1 && Boolean((asiacellRes.rows[0] as any)?.access_token),
-        asiacellUpdatedAt: (asiacellRes.rows[0] as any)?.updated_at || null,
+        asiacellConnected: Number(asiacellStatus?.authenticated || 0) === 1 && Boolean(asiacellStatus?.access_token),
+        asiacellUpdatedAt: asiacellStatus?.updated_at || null,
         recentActivity: serializeRows(auditRes.rows as Row[]).map((row) => ({
           ...row,
           id: numberValue(row.id),

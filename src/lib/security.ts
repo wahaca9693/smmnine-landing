@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { db } from "./db";
+import { db } from "@/lib/db";
+import type { InStatement, ResultSet } from "@libsql/client";
 
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 let authTablePromise: Promise<void> | null = null;
@@ -11,10 +12,13 @@ export class SecurityServiceUnavailable extends Error {
   }
 }
 
-async function securityDbExecute(statement: { sql: string; args?: unknown[] }): Promise<any> {
+type SecurityStatement = InStatement;
+type SecurityResult = ResultSet;
+
+async function securityDbExecute(statement: SecurityStatement): Promise<SecurityResult> {
   try {
     return await Promise.race([
-      db.execute(statement as any),
+      db.execute(statement),
       new Promise<never>((_, reject) => setTimeout(() => reject(new SecurityServiceUnavailable()), 8000)),
     ]);
   } catch (error) {

@@ -2,7 +2,21 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 
-function serialize(row: any) {
+type AutoRefillRow = Record<string, unknown>;
+
+type AutoRefillBody = {
+  service_id?: unknown;
+  service_name?: unknown;
+  link?: unknown;
+  target_quantity?: unknown;
+  interval_hours?: unknown;
+};
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unexpected error";
+}
+
+function serialize(row: AutoRefillRow) {
   return {
     ...row,
     id: Number(row.id),
@@ -22,30 +36,30 @@ export async function GET() {
       args: [session.userId!],
     });
     return NextResponse.json({ refills: result.rows.map(serialize) });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 401 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: errorMessage(error) }, { status: 401 });
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await requireAuth();
-    const body = await request.json();
+    const body: AutoRefillBody = await request.json();
     const { service_id, service_name, link, target_quantity, interval_hours } = body;
 
-    if (!service_id || !link || !target_quantity) {
+    if (!service_id || typeof link !== "string" || !link || !target_quantity) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
     const result = await db.execute({
       sql: `INSERT INTO auto_refills (user_id, service_id, service_name, link, target_quantity, interval_hours)
             VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
-      args: [session.userId!, Number(service_id), service_name || "", link, Number(target_quantity), Number(interval_hours) || 24],
+      args: [session.userId!, Number(service_id), typeof service_name === "string" ? service_name : "", link, Number(target_quantity), Number(interval_hours) || 24],
     });
 
     return NextResponse.json({ refill: result.rows.map(serialize)[0] });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }
 
@@ -62,7 +76,7 @@ export async function DELETE(request: Request) {
     });
 
     return NextResponse.json({ success: true });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }

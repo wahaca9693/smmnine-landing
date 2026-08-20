@@ -22,7 +22,6 @@ import {
 } from "lucide-react";
 
 type Mode = "transfer" | "card";
-type Notice = { text: string; error?: boolean } | null;
 type GatewayStatus = { connected?: boolean; admin_connected?: boolean; exchange_rate?: number };
 
 type GatewayResponse = {
@@ -94,30 +93,31 @@ export default function AsiacellDepositPage() {
 
   useEffect(() => {
     const stored = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
-
-    // وضع البطاقة مستقل تمامًا عن جلسة الهاتف؛ لا نستعيد جلسة تحويل محفوظة هنا.
-    if (initialMode === "card") {
-      setMode("card");
-      setStep(1);
-      setSessionId("");
-      setPhone("");
-      setOtp("");
-      setTransferOtp("");
-      setTransferAmount("");
-    } else if (stored) {
-      try {
-        const saved = JSON.parse(stored) as { sessionId?: string; phone?: string; mode?: Mode; step?: number; transferAmount?: string };
-        if (saved.sessionId && saved.step && saved.step >= 2 && saved.step <= 4) {
-          setSessionId(saved.sessionId);
-          setPhone(saved.phone || "");
-          setMode("transfer");
-          setStep(saved.step);
-          setTransferAmount(saved.transferAmount || "");
+    const restoreTimer = window.setTimeout(() => {
+      // وضع البطاقة مستقل تمامًا عن جلسة الهاتف؛ لا نستعيد جلسة تحويل محفوظة هنا.
+      if (initialMode === "card") {
+        setMode("card");
+        setStep(1);
+        setSessionId("");
+        setPhone("");
+        setOtp("");
+        setTransferOtp("");
+        setTransferAmount("");
+      } else if (stored) {
+        try {
+          const saved = JSON.parse(stored) as { sessionId?: string; phone?: string; mode?: Mode; step?: number; transferAmount?: string };
+          if (saved.sessionId && saved.step && saved.step >= 2 && saved.step <= 4) {
+            setSessionId(saved.sessionId);
+            setPhone(saved.phone || "");
+            setMode("transfer");
+            setStep(saved.step);
+            setTransferAmount(saved.transferAmount || "");
+          }
+        } catch {
+          window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
         }
-      } catch {
-        window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
       }
-    }
+    }, 0);
 
     fetch("/api/payments/asiacell", { cache: "no-store", credentials: "include" })
       .then((response) => response.json())
@@ -126,6 +126,8 @@ export default function AsiacellDepositPage() {
         if (data.exchange_rate) setExchangeRate(Number(data.exchange_rate));
       })
       .catch(() => setGatewayStatus({}));
+
+    return () => window.clearTimeout(restoreTimer);
   }, [initialMode]);
 
   const callGateway = async (action: string, payload: Record<string, string | number>) => {

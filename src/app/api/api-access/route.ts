@@ -3,6 +3,9 @@ import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { randomBytes } from "crypto";
 
+type DbRow = Record<string, unknown>;
+type ApiKeyBody = { name?: unknown; id?: unknown; action?: unknown };
+
 function genKey() {
   return "smm-" + randomBytes(24).toString("hex");
 }
@@ -30,17 +33,19 @@ export async function GET(request: Request) {
       args: [session.userId!],
     });
     return NextResponse.json(withApiUrl(request, { keys: res.rows }));
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "تعذر تحميل مفاتيح API";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await requireAuth();
-    const { name } = await request.json().catch(() => ({}));
+    const body = await request.json().catch(() => ({})) as ApiKeyBody;
+    const name = typeof body.name === "string" ? body.name.trim().slice(0, 80) : "";
     const count = await db.execute({ sql: "SELECT COUNT(*) AS c FROM api_keys WHERE user_id = ?", args: [session.userId!] });
-    if (Number((count.rows[0] as any).c) >= 3) {
+    if (Number((count.rows[0] as DbRow | undefined)?.c || 0) >= 3) {
       return NextResponse.json({ error: "الحد الأقصى 3 مفاتيح لكل مستخدم" }, { status: 400 });
     }
     const apiKey = genKey();
@@ -49,15 +54,18 @@ export async function POST(request: Request) {
       args: [session.userId!, apiKey, name || "مفتاحي الرئيسي"],
     });
     return NextResponse.json(withApiUrl(request, { message: "تم إنشاء المفتاح", apiKey }));
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "تعذر إنشاء مفتاح API";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 export async function PATCH(request: Request) {
   try {
     const session = await requireAuth();
-    const { id, action } = await request.json();
+    const body = await request.json() as ApiKeyBody;
+    const id = Number(body.id || 0);
+    const action = typeof body.action === "string" ? body.action : "";
     if (action === "revoke") {
       await db.execute({ sql: "UPDATE api_keys SET is_active = 0 WHERE id = ? AND user_id = ?", args: [id, session.userId!] });
       return NextResponse.json(withApiUrl(request, { message: "تم إلغاء المفتاح" }));
@@ -65,10 +73,12 @@ export async function PATCH(request: Request) {
     if (action === "regenerate") {
       await db.execute({ sql: "UPDATE api_keys SET api_key = ?, requests_count = 0, is_active = 1 WHERE id = ? AND user_id = ?", args: [genKey(), id, session.userId!] });
       const fresh = await db.execute({ sql: "SELECT api_key FROM api_keys WHERE id = ? AND user_id = ?", args: [id, session.userId!] });
-      return NextResponse.json(withApiUrl(request, { message: "تم تجديد المفتاح", apiKey: (fresh.rows[0] as any)?.api_key }));
+      const freshRow = fresh.rows[0] as DbRow | undefined;
+      return NextResponse.json(withApiUrl(request, { message: "تم تجديد المفتاح", apiKey: freshRow?.api_key }));
     }
     return NextResponse.json({ error: "إجراء غير صالح" }, { status: 400 });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "تعذر تحديث مفتاح API";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

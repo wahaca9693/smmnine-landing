@@ -4,7 +4,9 @@ import { detectPlatform, detectServiceType } from "@/lib/platform-mapping";
 import { db } from "@/lib/db";
 import { readServicesCache, writeServicesCache } from "@/lib/services-cache";
 
-async function getProviderServices(): Promise<any[]> {
+type ServiceRecord = Record<string, unknown>;
+
+async function getProviderServices(): Promise<ServiceRecord[]> {
   try {
     const rows = await db.execute({
       sql: `SELECT ps.remote_service_id AS service, ps.name, ps.type, ps.sell_rate AS rate, ps.min, ps.max,
@@ -16,7 +18,7 @@ async function getProviderServices(): Promise<any[]> {
             ORDER BY p.id, ps.remote_service_id`,
       args: [],
     });
-    return rows.rows as any[];
+    return rows.rows as ServiceRecord[];
   } catch {
     return [];
   }
@@ -62,16 +64,16 @@ export async function GET() {
     const [servicesResult, providerServices] = await Promise.all([
       getServices().catch(() => {
         // مزود Follower غير مربوط بمفتاح — نعمل بالخدمات المحلية ومزودين فقط
-        return [] as any[];
+        return [] as ServiceRecord[];
       }),
       getProviderServices(),
     ]);
     const services = Array.isArray(servicesResult) ? servicesResult : [];
 
     // دمج خدمات المزودين الخارجيين مع الخدمات المحلية
-    const providerMapped = providerServices.map((s: any) => ({
+    const providerMapped = providerServices.map((s: ServiceRecord) => ({
       ...s,
-      service: s.local_id != null ? `provider:${s.local_id}` : String(s.service),
+      service: s.local_id != null ? `provider:${String(s.local_id)}` : String(s.service),
       remote_service_id: String(s.service),
       rate: String(s.rate),
       min: String(s.min),
@@ -84,15 +86,15 @@ export async function GET() {
     }));
     const merged = [...services, ...providerMapped];
 
-    const enrichedServices = merged.map((s: any) => ({
+    const enrichedServices = merged.map((s: ServiceRecord) => ({
       ...s,
-      platform: s.platform || detectPlatform(s.category || "", s.name || ""),
-      serviceType: s.serviceType || detectServiceType(s.name || ""),
-      name: s.provider_name ? `${s.name} [مزود: ${s.provider_name}]` : s.name,
-      is_new: !!s.is_new,
+      platform: s.platform || detectPlatform(String(s.category || ""), String(s.name || "")),
+      serviceType: s.serviceType || detectServiceType(String(s.name || "")),
+      name: s.provider_name ? `${String(s.name || "")} [مزود: ${String(s.provider_name)}]` : s.name,
+      is_new: Boolean(s.is_new),
     }));
 
-    const categories = [...new Set(merged.map((s: any) => s.category || "عام"))].sort();
+    const categories = [...new Set(merged.map((s: ServiceRecord) => String(s.category || "عام")))].sort();
 
     const payload = {
       services: enrichedServices,
@@ -102,7 +104,8 @@ export async function GET() {
     };
     writeServicesCache(payload);
     return json(payload);
-  } catch (err: any) {
-    return json({ error: err.message }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "تعذر تحميل الخدمات";
+    return json({ error: message }, { status: 500 });
   }
 }

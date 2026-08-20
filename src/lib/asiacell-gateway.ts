@@ -3,6 +3,18 @@ import { randomUUID } from "crypto";
 import fetch, { Response as FetchResponse } from "node-fetch";
 import { HttpsProxyAgent } from "https-proxy-agent";
 
+type JsonRecord = Record<string, unknown>;
+type AsiacellResponse = { response: FetchResponse; text: string; json: JsonRecord | null };
+
+function isJsonRecord(value: unknown): value is JsonRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function stringField(data: JsonRecord, key: string): string {
+  const value = data[key];
+  return value === null || value === undefined ? "" : String(value);
+}
+
 export const AC_API = "https://app.asiacell.com";
 export const ASIACELL_TRANSFER_FEE_IQD = 500;
 export const AC_API_KEY = "1ccbc4c913bc4ce785a0a2de444aa0d6";
@@ -89,6 +101,17 @@ function normalizeProxyUrl(proxy: string): string {
   return `http://${trimmed}`;
 }
 
+const ASIACELL_DEBUG = process.env.ASIACELL_DEBUG === "1";
+
+function debugAsiacell(message: string, details?: unknown): void {
+  if (!ASIACELL_DEBUG) return;
+  if (details === undefined) {
+    console.debug(`[Asiacell] ${message}`);
+    return;
+  }
+  console.debug(`[Asiacell] ${message}`, details);
+}
+
 function getProxyUrl(): string | undefined {
   // Single proxy URL
   if (process.env.ASIACELL_PROXY_URL) return normalizeProxyUrl(process.env.ASIACELL_PROXY_URL);
@@ -108,25 +131,24 @@ export async function asiacellFetch(
   url: string,
   options: RequestInit,
   headers: Record<string, string>
-): Promise<{ response: FetchResponse; text: string; json: any | null }> {
+): Promise<AsiacellResponse> {
   const proxyUrl = getProxyUrl();
-
-  console.log(`[Asiacell Request] ${options.method || "GET"} ${url}`);
-  console.log(`[Asiacell Headers]`, JSON.stringify(headers, null, 2));
-  if (options.body) console.log(`[Asiacell Body]`, options.body);
-  if (proxyUrl) console.log(`[Asiacell Proxy] Using proxy: ${proxyUrl.replace(/:\/\/[^@]+@/, "://***@")}`);
+  const safeHeaders = Object.fromEntries(Object.entries(headers).map(([key, value]) => [key, /authorization|api-key/i.test(key) ? "***" : value]));
+  debugAsiacell(`Request ${options.method || "GET"} ${url}`);
+  debugAsiacell("Headers", JSON.stringify(safeHeaders));
+  if (proxyUrl) debugAsiacell(`Proxy configured: ${proxyUrl.replace(/:\/\/[^@]+@/, "://***@")}`);
 
   const agent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
-  const response = await fetch(url, { ...options, headers, agent } as any);
-
+  const fetchOptions = { ...options, headers, agent } as Parameters<typeof fetch>[1];
+  const response = await fetch(url, fetchOptions);
   const text = await response.text();
 
-  console.log(`[Asiacell Response] ${response.status} ${url}`);
-  console.log(`[Asiacell Response Text]`, text.slice(0, 1000));
+  debugAsiacell(`Response ${response.status} ${url}`);
 
-  let json: any = null;
+  let json: JsonRecord | null = null;
   try {
-    json = JSON.parse(text);
+    const parsed: unknown = JSON.parse(text);
+    json = isJsonRecord(parsed) ? parsed : null;
   } catch {
     json = null;
   }
@@ -138,11 +160,11 @@ export async function retryAsiacellFetch(
   url: string,
   options: RequestInit,
   headers: Record<string, string>
-): Promise<{ response: FetchResponse; text: string; json: any | null }> {
+): Promise<AsiacellResponse> {
   let result = await asiacellFetch(url, options, headers);
 
   if (!result.json) {
-    console.log(`[Asiacell Retry] Non-JSON response, retrying without Host header...`);
+    debugAsiacell("Non-JSON response; retrying without Host header");
     const retryHeaders = { ...headers };
     delete retryHeaders.Host;
     retryHeaders.Accept = "application/json";
@@ -152,12 +174,13 @@ export async function retryAsiacellFetch(
   return result;
 }
 
-export function extractAsiacellError(data: any): string {
+export function extractAsiacellError(data: JsonRecord | null): string {
   if (!data) return "فشل الاتصال بآسيا سيل";
-  if (data.message) return data.message;
-  if (data.nextAction) {
+  if (stringField(data, "message")) return stringField(data, "message");
+  const nextAction = stringField(data, "nextAction");
+  if (nextAction) {
     try {
-      const url = new URL(data.nextAction, "https://example.com");
+      const url = new URL(nextAction, "https://example.com");
       const msg = url.searchParams.get("msg");
       if (msg) return decodeURIComponent(msg).replace(/\+/g, " ");
     } catch {}
@@ -165,10 +188,10 @@ export function extractAsiacellError(data: any): string {
   return "فشلت العملية";
 }
 
-export function isSuccessResponse(data: any): boolean {
+export function isSuccessResponse(data: JsonRecord | null): boolean {
   if (!data) return false;
   if (data.success === true) return true;
-  const msg = String(data.message || "").toLowerCase();
+  const msg = stringField(data, "message").toLowerCase();
   if (msg.includes("نجاح") || msg.includes("تمت") || msg.includes("success")) return true;
   return false;
 }
@@ -177,14 +200,14 @@ export function isSuccessResponse(data: any): boolean {
 
 export async function getAdminRow(): Promise<AdminSession | null> {
   const result = await db.execute("SELECT * FROM asiacell_admin WHERE id = 1");
-  const row = result.rows[0] as any;
+  const row = result.rows[0] as JsonRecord | undefined;
   if (!row) return null;
   return {
     ...row,
     id: Number(row.id),
     authenticated: Number(row.authenticated),
     exchange_rate: Number(row.exchange_rate),
-  } as AdminSession;
+  } as unknown as AdminSession;
 }
 
 export async function setAdminRow(data: Partial<AdminSession>): Promise<void> {
@@ -205,7 +228,7 @@ export async function setAdminRow(data: Partial<AdminSession>): Promise<void> {
     });
   } else {
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: Array<string | number | null> = [];
     for (const [key, value] of Object.entries(data)) {
       if (value === undefined) continue;
       fields.push(`${key} = ?`);
@@ -227,44 +250,45 @@ export async function adminLogin(phone: string): Promise<{ success: boolean; mes
   }
 
   const deviceId = randomUUID();
-  const { json: data, text } = await retryAsiacellFetch(
+  const { json: data } = await retryAsiacellFetch(
     `${AC_API}/api/v1/login?lang=ar`,
     { method: "POST", body: JSON.stringify({ captchaCode: "", username: clean }) },
     loginHeaders(deviceId)
   );
 
   if (!data) {
-    console.error("[Asiacell Admin Login] Non-JSON:", text.slice(0, 200));
+    debugAsiacell("Admin login returned non-JSON response");
     return { success: false, error: "رد غير متوقع من Asiacell - حاول مرة أخرى" };
   }
 
-  const pidMatch = (data.nextUrl || "").match(/PID=([^&]+)/);
+  const pidMatch = stringField(data, "nextUrl").match(/PID=([^&]+)/);
   const pid = pidMatch ? pidMatch[1] : "";
   await setAdminRow({ phone: clean, device_id: deviceId, access_token: "", pid, authenticated: 0, store_phone: clean });
 
-  return { success: true, message: data.message || "تم إرسال رمز التحقق" };
+  return { success: true, message: stringField(data, "message") || "تم إرسال رمز التحقق" };
 }
 
 export async function adminVerify(otp: string): Promise<{ success: boolean; message?: string; error?: string }> {
   const admin = await getAdminRow();
   if (!admin) return { success: false, error: "قم بتسجيل الدخول أولاً" };
 
-  const { json: data, text } = await retryAsiacellFetch(
+  const { json: data } = await retryAsiacellFetch(
     `${AC_API}/api/v1/smsvalidation?lang=ar`,
     { method: "POST", body: JSON.stringify({ PID: admin.pid, passcode: otp }) },
     loginHeaders(admin.device_id)
   );
 
   if (!data) {
-    console.error("[Asiacell Admin Verify] Non-JSON:", text.slice(0, 200));
+    debugAsiacell("Admin verification returned non-JSON response");
     return { success: false, error: "رد غير متوقع من Asiacell" };
   }
 
-  if (data.access_token) {
-    await setAdminRow({ access_token: data.access_token, authenticated: 1 });
+  const accessToken = stringField(data, "access_token");
+  if (accessToken) {
+    await setAdminRow({ access_token: accessToken, authenticated: 1 });
     return { success: true, message: "تم ربط البوابة بنجاح" };
   }
-  return { success: false, message: data.message || "رمز التحقق غير صحيح" };
+  return { success: false, message: stringField(data, "message") || "رمز التحقق غير صحيح" };
 }
 
 export async function adminLogout(): Promise<void> {
@@ -285,14 +309,14 @@ export async function createCustomerSession(userId: number, phone: string, devic
 
 export async function getCustomerSession(id: string): Promise<CustomerSession | null> {
   const result = await db.execute({ sql: "SELECT * FROM asiacell_sessions WHERE id = ?", args: [id] });
-  const row = result.rows[0] as any;
+  const row = result.rows[0] as JsonRecord | undefined;
   if (!row) return null;
-  return { ...row, user_id: Number(row.user_id), amount: Number(row.amount) } as CustomerSession;
+  return { ...row, user_id: Number(row.user_id), amount: Number(row.amount) } as unknown as CustomerSession;
 }
 
 export async function updateCustomerSession(id: string, data: Partial<CustomerSession>): Promise<void> {
   const fields: string[] = [];
-  const values: any[] = [];
+  const values: Array<string | number | null> = [];
   for (const [key, value] of Object.entries(data)) {
     if (value === undefined) continue;
     fields.push(`${key} = ?`);
@@ -322,6 +346,7 @@ export function convertIqdToUsd(amountIQD: number, exchangeRate: number): number
 }
 
 export async function creditUser(userId: number, amount: number, method: string, description: string, paymentId: string): Promise<void> {
+  void paymentId;
   await db.execute({ sql: "UPDATE users SET balance = balance + ? WHERE id = ?", args: [amount, userId] });
   await db.execute({
     sql: `INSERT INTO transactions (user_id, type, amount, status, description, method)
@@ -339,52 +364,56 @@ export async function customerLogin(userId: number, phone: string): Promise<{ su
   }
 
   const deviceId = randomUUID();
-  const { json: data, text } = await retryAsiacellFetch(
+  const { json: data } = await retryAsiacellFetch(
     `${AC_API}/api/v1/login?lang=ar`,
     { method: "POST", body: JSON.stringify({ captchaCode: "", username: clean }) },
     loginHeaders(deviceId)
   );
 
   if (!data) {
-    console.error("[Asiacell Customer Login] Non-JSON:", text.slice(0, 200));
+    debugAsiacell("Customer login returned non-JSON response");
     return { success: false, error: "رد غير متوقع من Asiacell - حاول مرة أخرى" };
   }
 
-  const pidMatch = (data.nextUrl || "").match(/PID=([^&]+)/);
+  const pidMatch = stringField(data, "nextUrl").match(/PID=([^&]+)/);
   const pid = pidMatch ? pidMatch[1] : "";
   const sessionId = await createCustomerSession(userId, clean, deviceId, pid);
-  return { success: true, sessionId, message: data.message || "تم إرسال رمز التحقق" };
+  return { success: true, sessionId, message: stringField(data, "message") || "تم إرسال رمز التحقق" };
 }
 
 export async function customerVerify(sessionId: string, otp: string): Promise<{ success: boolean; message?: string; error?: string }> {
   const session = await getCustomerSession(sessionId);
   if (!session) return { success: false, error: "الجلسة منتهية" };
 
-  const { json: data, text } = await retryAsiacellFetch(
+  const { json: data } = await retryAsiacellFetch(
     `${AC_API}/api/v1/smsvalidation?lang=ar`,
     { method: "POST", body: JSON.stringify({ PID: session.pid, passcode: otp }) },
     loginHeaders(session.device_id)
   );
 
   if (!data) {
-    console.error("[Asiacell Customer Verify] Non-JSON:", text.slice(0, 200));
+    debugAsiacell("Customer verification returned non-JSON response");
     return { success: false, error: "رد غير متوقع من Asiacell - حاول مرة أخرى" };
   }
 
-  if (data.access_token) {
-    await updateCustomerSession(session.id, { access_token: data.access_token, step: "authenticated" });
+  const accessToken = stringField(data, "access_token");
+  if (accessToken) {
+    await updateCustomerSession(session.id, { access_token: accessToken, step: "authenticated" });
     await setUserVerifiedPhone(session.user_id, session.phone);
     return { success: true, message: "تم التحقق بنجاح" };
   }
-  return { success: false, message: data.message || "رمز التحقق غير صحيح" };
+  return { success: false, message: stringField(data, "message") || "رمز التحقق غير صحيح" };
 }
 
-export function extractTopupAmount(data: any): number {
-  if (data?.analyticData?.params?.["Recharge Amount"]) {
-    return Math.floor(parseFloat(String(data.analyticData.params["Recharge Amount"])));
-  }
-  if (data?.data?.amount) return Math.floor(parseFloat(String(data.data.amount)));
-  if (data?.amount) return Math.floor(parseFloat(String(data.amount)));
+export function extractTopupAmount(data: JsonRecord | null): number {
+  if (!data) return 0;
+  const analyticData = isJsonRecord(data.analyticData) ? data.analyticData : null;
+  const params = analyticData && isJsonRecord(analyticData.params) ? analyticData.params : null;
+  const rechargeAmount = params ? params["Recharge Amount"] : undefined;
+  if (rechargeAmount) return Math.floor(parseFloat(String(rechargeAmount)));
+  const nestedData = isJsonRecord(data.data) ? data.data : null;
+  if (nestedData?.amount) return Math.floor(parseFloat(String(nestedData.amount)));
+  if (data.amount) return Math.floor(parseFloat(String(data.amount)));
   return 0;
 }
 
@@ -403,14 +432,14 @@ export async function topupCard(userId: number, sessionId: string | undefined, v
   const v = String(voucher || "").trim();
   if (!v || v.length < 4) return { success: false, error: "رقم الكارت مطلوب" };
 
-  const { json: topupData, text: topupText } = await retryAsiacellFetch(
+  const { json: topupData } = await retryAsiacellFetch(
     `${AC_API}/api/v1/top-up?lang=ar&theme=avocado`,
     { method: "POST", body: JSON.stringify({ msisdn: "", rechargeType: 1, voucher: v }) },
     topupHeaders(effectiveDeviceId, effectiveToken)
   );
 
   if (!topupData) {
-    console.error("[Asiacell TopUp] Non-JSON:", topupText.slice(0, 200));
+    debugAsiacell("Top-up returned non-JSON response");
     return { success: false, error: "رد غير متوقع من Asiacell - حاول مرة أخرى" };
   }
 
@@ -449,14 +478,14 @@ export async function startTransfer(
 
   const transferFeeIQD = ASIACELL_TRANSFER_FEE_IQD;
   const totalTransferIQD = amountIQD + transferFeeIQD;
-  const { json: data, text } = await retryAsiacellFetch(
+  const { json: data } = await retryAsiacellFetch(
     `${AC_API}/api/v1/credit-transfer/start?lang=ar`,
     { method: "POST", body: JSON.stringify({ amount: totalTransferIQD, receiverMsisdn: storePhone }) },
     authHeaders(session.device_id, session.access_token)
   );
 
   if (!data) {
-    console.error("[Asiacell Transfer Start] Non-JSON:", text.slice(0, 200));
+    debugAsiacell("Transfer start returned non-JSON response");
     return { success: false, error: "رد غير متوقع من Asiacell - ربما الموقع يواجه ضغطاً. حاول مرة أخرى." };
   }
 
@@ -464,9 +493,9 @@ export async function startTransfer(
     return { success: false, message: extractAsiacellError(data) || "فشل بدء التحويل" };
   }
 
-  const transferPid = data.PID || data.pid || "";
+  const transferPid = stringField(data, "PID") || stringField(data, "pid");
   if (!transferPid) {
-    return { success: false, message: data.message || data.error || "فشل بدء التحويل - لم يتم الحصول على PID" };
+    return { success: false, message: stringField(data, "message") || stringField(data, "error") || "فشل بدء التحويل - لم يتم الحصول على PID" };
   }
 
   await updateCustomerSession(session.id, { transfer_pid: transferPid, amount: amountIQD, step: "awaiting_transfer_otp" });
@@ -475,7 +504,7 @@ export async function startTransfer(
     amountIQD,
     feeIQD: transferFeeIQD,
     totalIQD: totalTransferIQD,
-    message: data.message || `تم بدء تحويل ${totalTransferIQD.toLocaleString("ar-IQ")} د.ع شامل رسم التحويل. أدخل رمز التأكيد الذي وصلك من آسيا سيل.`,
+    message: stringField(data, "message") || `تم بدء تحويل ${totalTransferIQD.toLocaleString("ar-IQ")} د.ع شامل رسم التحويل. أدخل رمز التأكيد الذي وصلك من آسيا سيل.`,
   };
 }
 
@@ -488,14 +517,14 @@ export async function confirmTransfer(userId: number, sessionId: string, otp: st
   const o = String(otp || "").trim();
   if (!o) return { success: false, error: "رمز التأكيد مطلوب" };
 
-  const { json: data, text } = await retryAsiacellFetch(
+  const { json: data } = await retryAsiacellFetch(
     `${AC_API}/api/v1/credit-transfer/do-transfer?lang=ar`,
     { method: "POST", body: JSON.stringify({ PID: session.transfer_pid, passcode: o }) },
     authHeaders(session.device_id, session.access_token)
   );
 
   if (!data) {
-    console.error("[Asiacell Transfer Confirm] Non-JSON:", text.slice(0, 200));
+    debugAsiacell("Transfer confirmation returned non-JSON response");
     return { success: false, error: "رد غير متوقع من Asiacell - حاول مرة أخرى" };
   }
 
@@ -529,17 +558,17 @@ export async function resendTransferOtp(sessionId: string): Promise<{ success: b
     return { success: false, error: "الجلسة منتهية أو لم يتم بدء التحويل" };
   }
 
-  const { json: data, text } = await retryAsiacellFetch(
+  const { json: data } = await retryAsiacellFetch(
     `${AC_API}/api/v1/credit-transfer/do-transfer?lang=ar`,
     { method: "POST", body: JSON.stringify({ PID: session.transfer_pid, passcode: "" }) },
     authHeaders(session.device_id, session.access_token)
   );
 
   if (!data) {
-    console.error("[Asiacell Resend] Non-JSON:", text.slice(0, 200));
+    debugAsiacell("Resend returned non-JSON response");
     return { success: false, error: "رد غير متوقع من Asiacell" };
   }
-  return { success: true, message: data.message || "تم إعادة إرسال الرمز" };
+  return { success: true, message: stringField(data, "message") || "تم إعادة إرسال الرمز" };
 }
 
 // ========== RECORDS POLLING ==========
@@ -553,31 +582,30 @@ export async function checkRecordsAndCredit(): Promise<{ checked: boolean; proce
   }
 
   try {
-    const { json: data, text } = await retryAsiacellFetch(
+    const { json: data } = await retryAsiacellFetch(
       `${AC_API}/api/v1/cdr/detail?type=sms&page=1&limit=50&lang=ar&theme=avocado`,
       { method: "GET" },
       authHeaders(admin.device_id, admin.access_token)
     );
 
     if (!data) {
-      console.error("[Asiacell Records] Non-JSON:", text.slice(0, 200));
+      debugAsiacell("Records returned non-JSON response");
       return { checked: false, error: "Non-JSON response" };
     }
 
-    if (!data?.data || !Array.isArray(data.data)) {
-      if (data?.status === 401 || String(data?.message || "").toLowerCase().includes("unauthorized")) {
+        const records = Array.isArray(data.data) ? data.data.filter(isJsonRecord) : [];
+    if (records.length === 0) {
+      if (Number(data.status) === 401 || stringField(data, "message").toLowerCase().includes("unauthorized")) {
         await setAdminRow({ authenticated: 0 });
       }
       return { checked: true, processed: 0, error: "No records data" };
     }
-
     let processed = 0;
-    for (const record of data.data) {
-      const recordId = record.id || record.transactionId || `${record.date}_${record.otherParty}`;
+    for (const record of records) {
+      const recordId = String(record.id || record.transactionId || `${record.date}_${record.otherParty}`);
       if (processedTransfers.has(recordId)) continue;
-
-      const msg = record.message || record.description || record.text || "";
-      const sender = record.otherParty || record.from || record.number || "";
+      const msg = String(record.message || record.description || record.text || "");
+      const sender = String(record.otherParty || record.from || record.number || "");
       const amountMatch = String(msg).match(/(\d+)/);
       const isTransfer =
         String(msg).includes("تحويل") ||
@@ -595,7 +623,7 @@ export async function checkRecordsAndCredit(): Promise<{ checked: boolean; proce
           });
 
           if (result.rows.length > 0) {
-            const user = result.rows[0] as any;
+            const user = result.rows[0] as JsonRecord;
             const exchangeRate = getAsiacellExchangeRate(admin);
             const creditedUsd = convertIqdToUsd(amount, exchangeRate);
             if (creditedUsd > 0) {
@@ -608,9 +636,10 @@ export async function checkRecordsAndCredit(): Promise<{ checked: boolean; proce
       processedTransfers.add(recordId);
     }
 
-    return { checked: true, processed, total: data.data.length };
-  } catch (err: any) {
-    console.error("[Asiacell Records] Error:", err.message);
-    return { checked: false, error: err.message };
+    return { checked: true, processed, total: records.length };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "حدث خطأ غير متوقع";
+    console.error("[Asiacell Records] Error:", message);
+    return { checked: false, error: message };
   }
 }

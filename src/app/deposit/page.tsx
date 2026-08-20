@@ -107,23 +107,28 @@ export default function DepositPage() {
   }, []);
 
   useEffect(() => {
-    try {
-      const cached = window.localStorage.getItem(DEPOSIT_METHODS_CACHE_KEY);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) {
-          setMethods(parsed);
-          setMethodsLoading(false);
+    const cacheTimer = window.setTimeout(() => {
+      try {
+        const cached = window.localStorage.getItem(DEPOSIT_METHODS_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) {
+            setMethods(parsed);
+            setMethodsLoading(false);
+          }
         }
+      } catch {
+        // Ignore malformed or unavailable local cache.
       }
-    } catch {
-      // Ignore malformed or unavailable local cache.
-    }
+    }, 0);
 
-    const timer = window.setTimeout(() => {
+    const refreshTimer = window.setTimeout(() => {
       void refreshData();
     }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(cacheTimer);
+      window.clearTimeout(refreshTimer);
+    };
   }, [refreshData]);
 
   useLiveRefresh(refreshData, { intervalMs: 30000 });
