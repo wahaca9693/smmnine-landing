@@ -1,4 +1,4 @@
-import { db, initDb } from "../src/lib/db";
+import { initDb } from "../src/lib/db";
 
 async function migrate() {
   await initDb();

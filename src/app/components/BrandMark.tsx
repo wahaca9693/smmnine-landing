@@ -2,6 +2,9 @@
 
 import { useTheme } from "./ThemeProvider";
 
+/* Dynamic admin-managed image URLs intentionally use a plain img element. */
+/* eslint-disable @next/next/no-img-element */
+
 type BrandMarkProps = {
   className?: string;
   imageClassName?: string;

@@ -67,8 +67,12 @@ function json(data: unknown, status = 200) {
 }
 
 type SettingsRow = Record<string, unknown>;
+type SettingsData = Record<string, string | number | boolean>;
 
-function readSettings(row: SettingsRow) {
+const SETTINGS_CACHE_TTL_MS = 30_000;
+let settingsCache: { value: SettingsData; expiresAt: number } | null = null;
+
+function readSettings(row: SettingsRow): SettingsData {
   const settings: Record<string, string | number | boolean> = {};
   for (const key of keys) {
     const fallback = defaults[key];
@@ -83,8 +87,13 @@ function readSettings(row: SettingsRow) {
 }
 
 async function loadSettingsFromDatabase() {
+  const now = Date.now();
+  if (settingsCache && settingsCache.expiresAt > now) return settingsCache.value;
+
   const result = await db.execute("SELECT * FROM site_settings LIMIT 1");
-  return readSettings(result.rows[0] || {});
+  const settings = readSettings(result.rows[0] || {});
+  settingsCache = { value: settings, expiresAt: now + SETTINGS_CACHE_TTL_MS };
+  return settings;
 }
 
 function validColor(value: unknown) {
@@ -166,6 +175,7 @@ export async function POST(request: Request) {
 
     const result = await db.execute("SELECT * FROM site_settings LIMIT 1");
     const settings = readSettings(result.rows[0] || {});
+    settingsCache = { value: settings, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS };
     return json({ success: true, settings });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "";

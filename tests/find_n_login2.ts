@@ -1,11 +1,13 @@
 import { chromium } from "playwright";
+
+type ElementFinding = { tag: string; cls: string; txt: string; bg: string; color: string; pos: string; r: { x: number; y: number; w: number; h: number } };
 async function main() {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, isMobile: true });
   await page.goto("http://localhost:3000/login", { waitUntil: "networkidle" });
   await page.waitForTimeout(2500);
   const els = await page.evaluate(() => {
-    const out: any[] = [];
+    const out: ElementFinding[] = [];
     document.querySelectorAll("*").forEach((el) => {
       const r = el.getBoundingClientRect();
       if (r.bottom > 650 && r.right < 160 && r.width >= 20 && r.width <= 80 && r.height >= 20 && r.height <= 80) {

@@ -4,6 +4,9 @@ import { chromium } from "playwright";
 
 const BASE = "http://localhost:3000";
 
+type ApiKeyRecord = { id?: number | string; is_active?: boolean; api_key?: string };
+type ApiService = { id: number | string; name: string; rate?: number | string; sell_rate?: number | string; min?: number | string; max?: number | string };
+
 async function main() {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -32,19 +35,17 @@ async function main() {
   const bal0 = await getBalance();
   console.log("2) رصيد المستخدم قبل الشحن:", bal0);
 
-  let bal1 = bal0;
   if (bal0 < 5) {
     // شحن عبر /api/admin/balance (يحتاج admin cookie — غير متاح، لذا نستخدم DB مباشرة عبر سكربت؟ لا يمكن من هنا)
     // الحل: استخدام /api/deposit لإنشاء طلب شحن pending ثم تأكيده؟ لا — سنستخدم route شحن للمستخدم؟ لا يوجد.
     // الحل الآمن: لا شحن عبر DB — سنقوم به خارج Playwright قبل هذا السكربت.
     console.log("2b) يجب شحن الرصيد يدويًا أولًا — تخطي");
   }
-  bal1 = await getBalance();
 
   // 3) إنشاء مفتاح API
-  let apiKey = await page.evaluate(async () => {
+  const apiKey = await page.evaluate(async () => {
     const keys = await fetch("http://localhost:3000/api/api-access").then((r) => r.json());
-    const active = keys.keys?.find((k: any) => k.is_active);
+    const active = keys.keys?.find((k: ApiKeyRecord) => k.is_active);
     if (active) return active.api_key;
     const res = await fetch("http://localhost:3000/api/api-access", {
       method: "POST",
@@ -62,7 +63,7 @@ async function main() {
   const getData = await getRes.json();
   console.log("4) GET /api/v2?key= — HTTP:", getRes.status, "| count:", getData.count ?? getData.services?.length);
   if (getData.error) console.log("   خطأ:", getData.error);
-  (getData.services || []).slice(0, 3).forEach((s: any) => console.log("   خدمة:", s.id, s.name, "| rate:", s.rate, "| sell:", s.sell_rate, "| min/max:", s.min, s.max));
+  (getData.services || []).slice(0, 3).forEach((s: ApiService) => console.log("   خدمة:", s.id, s.name, "| rate:", s.rate, "| sell:", s.sell_rate, "| min/max:", s.min, s.max));
 
   // 5) طلب ناقص البيانات — رفض
   const bad1 = await fetch(`${BASE}/api/v2?key=${apiKey}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ service: 1 }) });
@@ -74,13 +75,12 @@ async function main() {
   console.log("6b) رصيد بعد طلبات مرفوضة:", await getBalance());
 
   // 7) طلب ناجح على خدمة نشطة
-  const svc = (getData.services || []).find((s: any) => Number(s.min || 0) <= 100);
+  const svc = (getData.services || []).find((s: ApiService) => Number(s.min || 0) <= 100);
   if (!svc) {
     console.log("7) لا خدمات نشطة — تخطي الطلب الناجح (يجب شحن الرصيد وربط مزود أولًا)");
   } else {
     const cost = (100 / 1000) * Number(svc.sell_rate ?? svc.rate);
     console.log(`7) طلب 100 وحدة من "${svc.name}" — التكلفة ${cost}$`);
-    const balBefore = await getBalance();
     const orderRes = await fetch(`${BASE}/api/v2?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -105,7 +105,7 @@ async function main() {
   // 9) مفتاح ملغى — رفض
   await page.evaluate(async () => {
     const keys = await fetch("http://localhost:3000/api/api-access").then((r) => r.json());
-    const active = keys.keys?.find((k: any) => k.is_active);
+    const active = keys.keys?.find((k: ApiKeyRecord) => k.is_active);
     if (active) await fetch("http://localhost:3000/api/api-access", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: active.id, action: "revoke" }) });
   });
   const rev = await fetch(`${BASE}/api/v2?key=${apiKey}`);

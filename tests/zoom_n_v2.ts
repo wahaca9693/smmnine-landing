@@ -1,4 +1,6 @@
 import { chromium } from "playwright";
+
+type SvgFinding = { parent: string; r: { x: number; y: number; w: number; h: number }; size: string; stroke: string; fill: string };
 async function main() {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true });
@@ -10,8 +12,8 @@ async function main() {
   await page.screenshot({ path: "/home/ubuntu/smmnine/shots/n_zoom3.png", clip: { x: 15, y: 765, width: 60, height: 60 } });
   // فحص كل SVG paths والـ elements عند تلك المنطقة بدقة
   const out = await page.evaluate(() => {
-    const results: any[] = [];
-    document.querySelectorAll("svg").forEach((svg: any) => {
+    const results: SvgFinding[] = [];
+    document.querySelectorAll("svg").forEach((svg) => {
       const r = svg.getBoundingClientRect();
       if (r.bottom > 700 && r.right < 200) {
         results.push({

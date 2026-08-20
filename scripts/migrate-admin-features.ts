@@ -6,8 +6,9 @@ async function migrate() {
   try {
     await db.execute("ALTER TABLE users ADD COLUMN is_banned INTEGER DEFAULT 0");
     console.log("Added users.is_banned");
-  } catch (e: any) {
-    if (!e.message?.includes("duplicate column")) console.error(e.message);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (!message.includes("duplicate column")) console.error(message);
   }
 
   // Create site_settings table
@@ -35,9 +36,10 @@ async function migrate() {
     });
   }
 
-  // Create super admin account
-  const username = "FollowerSuperAdmin2026!";
-  const password = "Adm#9xZ$qL@7vW2nKp*4mB!rT";
+  // Create super admin account from deployment-provided secrets only.
+  const username = process.env.ADMIN_USERNAME?.trim();
+  const password = process.env.ADMIN_INITIAL_PASSWORD;
+  if (!username || !password) throw new Error("Set ADMIN_USERNAME and ADMIN_INITIAL_PASSWORD before running this migration");
   const hash = await bcrypt.hash(password, 10);
 
   // Delete if exists then insert to update password
@@ -48,9 +50,7 @@ async function migrate() {
   });
 
   console.log("Admin features migration complete");
-  console.log("Super admin created:");
-  console.log("  Username:", username);
-  console.log("  Password:", password);
+  console.log("Super admin created:", username);
 }
 
 migrate().catch(console.error);

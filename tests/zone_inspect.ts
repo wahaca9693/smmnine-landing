@@ -1,4 +1,7 @@
 import { chromium } from "playwright";
+
+type LayerFinding = { tag: string; cls: string; txt: string; pos: string; bg: string; r: { x: number; y: number; w: number; h: number } };
+type PseudoFinding = { node: string; p: string; content: string; bg: string; color: string };
 async function main() {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true });
@@ -7,8 +10,8 @@ async function main() {
   await page.mouse.move(2000, 2000);
   const info = await page.evaluate(() => {
     // كل العناصر التي تغطي نقطة (38,795)
-    const els: any[] = [];
-    let el: any = document.elementFromPoint(38, 795);
+    const els: LayerFinding[] = [];
+    let el: Element | null = document.elementFromPoint(38, 795);
     while (el && els.length < 10) {
       const cs = getComputedStyle(el);
       const r = el.getBoundingClientRect();
@@ -23,7 +26,7 @@ async function main() {
       el = el.parentElement;
     }
     // فحص pseudo للعناصر الدائرية القريبة
-    const pseudo: any[] = [];
+    const pseudo: PseudoFinding[] = [];
     document.querySelectorAll("*").forEach((node) => {
       const r = node.getBoundingClientRect();
       if (r.bottom > 700 && r.right < 150 && Math.abs(r.width - r.height) < 20 && r.width > 20 && r.width < 100) {

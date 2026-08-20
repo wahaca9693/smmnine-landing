@@ -3,8 +3,12 @@
 // Usage: node proxy-server.js
 // Then set ASIACELL_PROXY_URL in Vercel env to: http://YOUR_SERVER_IP:3000
 
+// This standalone Node proxy intentionally uses CommonJS so it runs with `node proxy-server.js`.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const http = require("http");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const https = require("https");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const url = require("url");
 
 const PORT = process.env.PORT || 3000;

@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import DashboardLayout from "../components/DashboardLayout";
 import { SlidersHorizontal, User, Wallet, FileText, Globe2, LogOut, AlertCircle } from "lucide-react";
 import Link from "next/link";
 
 export default function SiteManagementPage() {
+  const router = useRouter();
   const [user, setUser] = useState<{ username: string; balance: number; role: string } | null>(null);
 
   useEffect(() => {
@@ -16,7 +18,7 @@ export default function SiteManagementPage() {
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
-    window.location.href = "/login";
+    router.push("/login");
   };
 
   const cards = [

@@ -1,4 +1,6 @@
 import { chromium } from "playwright";
+
+type NextWindow = Window & { next?: { router?: { push?: (path: string) => unknown } } };
 async function main() {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true });
@@ -6,7 +8,7 @@ async function main() {
   await page.goto("http://localhost:3000/api-access", { waitUntil: "networkidle" });
   await page.waitForTimeout(2000);
   // ثم SPA navigation إلى login
-  await page.evaluate(() => (window as any).next?.router?.push("/login"));
+  await page.evaluate(() => (window as NextWindow).next?.router?.push?.("/login"));
   await page.waitForTimeout(2500);
   await page.mouse.move(2000, 2000);
   await page.waitForTimeout(300);

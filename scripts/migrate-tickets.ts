@@ -1,13 +1,15 @@
 import { db } from "../src/lib/db";
 
+type SqlRow = Record<string, unknown>;
+
 async function columnExists(table: string, column: string): Promise<boolean> {
   try {
     const result = await db.execute({
       sql: `PRAGMA table_info(${table})`,
       args: [],
     });
-    return result.rows.some((row: any) => row.name === column);
-  } catch (e) {
+    return (result.rows as unknown as SqlRow[]).some((row) => String(row.name ?? "") === column);
+  } catch {
     return false;
   }
 }

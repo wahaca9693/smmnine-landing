@@ -4,7 +4,7 @@ async function main() {
   const db = createClient({ url: "file:/home/ubuntu/smmnine-data/local.db" });
   // التحقق: هل يوجد مفتاح أصلاً لـ demo_user؟
   const existing = await db.execute("SELECT id FROM api_keys WHERE user_id = 4");
-  if ((existing.rows as any[]).length > 0) {
+  if (existing.rows.length > 0) {
     console.log("Key already exists");
     await db.close();
     return;

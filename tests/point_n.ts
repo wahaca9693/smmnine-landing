@@ -1,4 +1,6 @@
 import { chromium } from "playwright";
+
+type PointFinding = { x: number; y: number; el: null } | { x: number; y: number; tag: string; txt: string; path: string[] };
 async function main() {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, isMobile: true });
@@ -15,7 +17,7 @@ async function main() {
   await page.goto("http://localhost:3000/api-access", { waitUntil: "networkidle" });
   await page.waitForTimeout(2000);
   const info = await page.evaluate(() => {
-    const results: any[] = [];
+    const results: PointFinding[] = [];
     for (const [x, y] of [[27, 777], [27, 782], [36, 782], [47, 782], [30, 780], [40, 790]]) {
       const el = document.elementFromPoint(x, y);
       if (!el) { results.push({ x, y, el: null }); continue; }

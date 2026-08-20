@@ -4,8 +4,9 @@ async function migrate() {
   try {
     await db.execute("ALTER TABLE users ADD COLUMN verified_phone TEXT");
     console.log("Added users.verified_phone");
-  } catch (e: any) {
-    if (!e.message?.includes("duplicate column")) console.error(e.message);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (!message.includes("duplicate column")) console.error(message);
   }
 
   await db.execute(`

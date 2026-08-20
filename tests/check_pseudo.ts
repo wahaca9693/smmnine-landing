@@ -1,11 +1,14 @@
 import { chromium } from "playwright";
+
+type PseudoFinding = { el: string; p: "::before" | "::after"; content: string; bg: string; disp: string; pos: string; l: string; t: string; w: string; h: string; bgImg: string; color: string };
+type FixedFinding = { tag: string; cls: string; pos: string; r: { x: number; y: number; w: number; h: number } };
 async function main() {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true });
   await page.goto("http://localhost:3000/login", { waitUntil: "networkidle" });
   await page.waitForTimeout(2500);
   const out = await page.evaluate(() => {
-    const res: any[] = [];
+    const res: PseudoFinding[] = [];
     for (const el of [document.body, document.documentElement]) {
       for (const p of ["::before", "::after"] as const) {
         const cs = getComputedStyle(el, p);
@@ -14,8 +17,8 @@ async function main() {
       }
     }
     // كل العناصر fixed/absolute في أسفل الصفحة
-    const fixed: any[] = [];
-    document.querySelectorAll("*").forEach((n: any) => {
+    const fixed: FixedFinding[] = [];
+    document.querySelectorAll("*").forEach((n) => {
       const cs = getComputedStyle(n);
       if (cs.position === "fixed" || cs.position === "absolute") {
         const r = n.getBoundingClientRect();
