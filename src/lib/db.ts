@@ -294,6 +294,37 @@ const schemaStatements = [
     FOREIGN KEY (code_id) REFERENCES gift_codes(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS free_service_offers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    service_id TEXT NOT NULL UNIQUE,
+    service_name TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'follower',
+    provider_id INTEGER,
+    provider_service_id INTEGER,
+    min_quantity INTEGER NOT NULL,
+    max_quantity INTEGER NOT NULL,
+    cooldown_hours REAL NOT NULL DEFAULT 24,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE SET NULL,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS free_service_usages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    offer_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    order_id INTEGER,
+    quantity INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'reserved',
+    cooldown_until DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (offer_id) REFERENCES free_service_offers(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS admin_audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     admin_user_id INTEGER,
@@ -337,6 +368,9 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS idx_api_keys_user_active ON api_keys(user_id, is_active)`,
   `CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_auth_attempts_updated_at ON auth_attempts(updated_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_free_offers_active ON free_service_offers(is_active, updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_free_usages_user_offer ON free_service_usages(user_id, offer_id, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_free_usages_order ON free_service_usages(order_id)`,
 ] as const;
 
 const schemaMigrations: SchemaMigration[] = [

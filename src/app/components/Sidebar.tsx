@@ -20,6 +20,7 @@ import {
   FileText,
   KeyRound,
   Settings,
+  Gift,
 } from "lucide-react";
 import { useLanguage } from "./LanguageProvider";
 
@@ -49,6 +50,7 @@ export default function Sidebar({ open, onClose, user }: SidebarProps) {
     { type: "link", label: t("sidebar.language"), href: "/settings/language", icon: Globe2 },
     { type: "link", label: t("sidebar.settings"), href: "/settings", icon: Settings },
     { type: "link", label: t("sidebar.services"), href: "/services", icon: Boxes },
+    { type: "link", label: "المجاني والهدايا", href: "/free-services", icon: Gift, badge: "مجاني", badgeColor: "green" },
     { type: "link", label: t("sidebar.orders"), href: "/orders", icon: ShoppingCart },
     { type: "link", label: t("sidebar.actions"), href: "/orders?tab=actions", icon: Zap },
     { type: "link", label: t("sidebar.autoRefill"), href: "/auto-refill", icon: RefreshCw },
