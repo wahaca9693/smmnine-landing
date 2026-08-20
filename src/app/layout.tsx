@@ -14,11 +14,12 @@ const tajawal = Tajawal({
 });
 
 const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-const fallbackBranding = { siteName: "smmnine", siteDescription: "منصة خدمات السوشيال ميديا", brandMediaUrl: "", brandMediaType: "image" } as const;
+const fallbackBranding = { siteName: "smmnine", siteDescription: "منصة خدمات تسويق اجتماعي احترافية", brandMediaUrl: "", brandMediaType: "image" } as const;
 
+type Branding = { siteName: string; siteDescription: string; brandMediaUrl: string; brandMediaType: "image" | "video" };
 type BrandingRow = { siteName?: unknown; siteDescription?: unknown; brandMediaUrl?: unknown; brandMediaType?: unknown };
 
-async function getBranding() {
+async function getBranding(): Promise<Branding> {
   try {
     const result = await db.execute("SELECT siteName, siteDescription, brandMediaUrl, brandMediaType FROM site_settings LIMIT 1");
     const row = result.rows[0] as BrandingRow | undefined;
@@ -53,12 +54,13 @@ export default async function RootLayout({
 }>) {
   const cookieStore = await cookies();
   const savedLocale = cookieStore.get("follower-locale")?.value;
+  const branding = await getBranding();
   const initialLocale: Locale = ["ar", "en", "ru", "zh", "hi"].includes(savedLocale as Locale) ? (savedLocale as Locale) : "ar";
 
   return (
     <html lang={initialLocale} dir={initialLocale === "ar" ? "rtl" : "ltr"} className={`${tajawal.variable} h-full antialiased`} data-locale={initialLocale}>
       <body className="min-h-full bg-[var(--color-bg)] text-white">
-        <Providers initialLocale={initialLocale}>{children}</Providers>
+        <Providers initialLocale={initialLocale} initialBranding={branding}>{children}</Providers>
       </body>
     </html>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import Link from "next/link";
 import {
@@ -24,6 +24,7 @@ import {
   Palette,
   Plus,
   RefreshCw,
+  Search,
   Shield,
   Smartphone,
   Gift,
@@ -85,6 +86,21 @@ const paymentLabels: Record<string, string> = {
   admin: "إدارة",
 };
 
+type QuickAction = { href: string; label: string; keywords: string; icon: typeof Users };
+
+const quickActions: QuickAction[] = [
+  { href: "/admin/orders", label: "مراجعة الطلبات", keywords: "طلبات order", icon: ClipboardList },
+  { href: "/admin/users", label: "إدارة المستخدمين", keywords: "مستخدمين users حساب رصيد", icon: Users },
+  { href: "/admin/providers", label: "المزودون والخدمات", keywords: "مزود خدمات providers", icon: Activity },
+  { href: "/admin/crypto", label: "إيداعات الكريبتو", keywords: "دفع شحن crypto nowpayments", icon: Coins },
+  { href: "/admin/asiacell", label: "إعدادات آسياسيل", keywords: "asiacell تحويل شحن", icon: Smartphone },
+  { href: "/admin/free-services", label: "المجاني والهدايا", keywords: "مجاني هدايا free gifts", icon: Gift },
+  { href: "/admin/gift-codes", label: "أكواد الهدايا", keywords: "كود هدية gift code", icon: Gift },
+  { href: "/admin/theme", label: "هوية المنصة", keywords: "اسم شعار مظهر branding theme", icon: Palette },
+  { href: "/admin/notifications", label: "إرسال إشعار", keywords: "إشعار notifications", icon: Bell },
+  { href: "/admin/api-keys", label: "مفاتيح API", keywords: "api مفاتيح", icon: KeyRound },
+];
+
 function money(value: number) {
   return `$${value.toFixed(2)}`;
 }
@@ -137,6 +153,9 @@ export default function AdminPage() {
   const [type, setType] = useState<"add" | "subtract">("add");
   const [result, setResult] = useState<Result>(null);
   const [loading, setLoading] = useState(false);
+  const [quickSearch, setQuickSearch] = useState("");
+  const analyticsAbortRef = useRef<AbortController | null>(null);
+  const analyticsRequestRef = useRef(0);
 
   useEffect(() => {
     fetch("/api/user", { cache: "no-store", credentials: "include" })
@@ -146,17 +165,22 @@ export default function AdminPage() {
   }, []);
 
   const loadAnalytics = useCallback(async () => {
+    analyticsAbortRef.current?.abort();
+    const controller = new AbortController();
+    analyticsAbortRef.current = controller;
+    const requestId = ++analyticsRequestRef.current;
     setLoadingAnalytics(true);
     setAnalyticsError("");
     try {
-      const res = await fetch(`/api/admin/analytics?range=${range}`, { cache: "no-store", credentials: "include" });
+      const res = await fetch(`/api/admin/analytics?range=${range}`, { cache: "no-store", credentials: "include", signal: controller.signal });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "تعذر تحميل التحليلات");
-      setAnalytics(data as AnalyticsData);
+      if (requestId === analyticsRequestRef.current) setAnalytics(data as AnalyticsData);
     } catch (error) {
-      setAnalyticsError(error instanceof Error ? error.message : "تعذر تحميل التحليلات");
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (requestId === analyticsRequestRef.current) setAnalyticsError(error instanceof Error ? error.message : "تعذر تحميل التحليلات");
     } finally {
-      setLoadingAnalytics(false);
+      if (requestId === analyticsRequestRef.current) setLoadingAnalytics(false);
     }
   }, [range]);
 
@@ -165,7 +189,10 @@ export default function AdminPage() {
     const timer = window.setTimeout(() => {
       void loadAnalytics();
     }, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      analyticsAbortRef.current?.abort();
+    };
   }, [authorized, loadAnalytics]);
 
   const submit = async (event: React.FormEvent) => {
@@ -195,6 +222,11 @@ export default function AdminPage() {
 
   const maxServiceOrders = useMemo(() => Math.max(1, ...analytics.topServices.map((service) => service.orders_count)), [analytics.topServices]);
   const maxDailySales = useMemo(() => Math.max(1, ...analytics.daily.map((day) => day.sales)), [analytics.daily]);
+  const visibleQuickActions = useMemo(() => {
+    const query = quickSearch.trim().toLocaleLowerCase("ar");
+    if (!query) return quickActions;
+    return quickActions.filter((action) => `${action.label} ${action.keywords}`.toLocaleLowerCase("ar").includes(query));
+  }, [quickSearch]);
 
   if (authorized === null) {
     return <DashboardLayout><div className="flex h-40 items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--color-border)] border-t-[var(--color-primary)]" /></div></DashboardLayout>;
@@ -244,7 +276,7 @@ export default function AdminPage() {
         </section>
 
         <section className="grid gap-3 lg:grid-cols-[1fr_1.2fr]">
-          <div className="glass-card rounded-2xl p-4"><h2 className="mb-3 flex items-center gap-2 text-base font-black text-white"><Zap size={18} className="text-[var(--color-gold)]" />إجراءات سريعة</h2><div className="grid grid-cols-2 gap-2"><Link href="/admin/users" className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-black/10 p-3 text-xs font-bold text-zinc-200 hover:border-[var(--color-gold)]/50"><Users size={15} className="text-[var(--color-gold)]" />إدارة مستخدم</Link><Link href="/admin/users" className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-black/10 p-3 text-xs font-bold text-zinc-200 hover:border-[var(--color-gold)]/50"><Wallet size={15} className="text-[var(--color-gold)]" />تعديل رصيد</Link><Link href="/admin/gift-codes" className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-black/10 p-3 text-xs font-bold text-zinc-200 hover:border-[var(--color-gold)]/50"><Gift size={15} className="text-[var(--color-gold)]" />إنشاء كود هدية</Link><Link href="/admin/free-services" className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-black/10 p-3 text-xs font-bold text-zinc-200 hover:border-[var(--color-gold)]/50"><Gift size={15} className="text-[var(--color-gold)]" />إدارة المجاني</Link><Link href="/admin/notifications" className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-black/10 p-3 text-xs font-bold text-zinc-200 hover:border-[var(--color-gold)]/50"><Bell size={15} className="text-[var(--color-gold)]" />إرسال إشعار</Link></div></div>
+          <div className="glass-card rounded-2xl p-4"><div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><h2 className="flex items-center gap-2 text-base font-black text-white"><Zap size={18} className="text-[var(--color-gold)]" />مركز الوصول السريع</h2><label className="flex min-w-0 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-black/10 px-3 py-2 sm:w-52"><Search size={14} className="shrink-0 text-zinc-500" /><input value={quickSearch} onChange={(event) => setQuickSearch(event.target.value)} placeholder="ابحث في الإدارة" aria-label="البحث في إجراءات الإدارة" className="min-w-0 flex-1 bg-transparent text-[11px] font-bold text-white outline-none placeholder:text-zinc-600" /></label></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{visibleQuickActions.map(({ href, label, icon: Icon }) => <Link href={href} key={href} className="flex min-w-0 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-black/10 p-3 text-xs font-bold text-zinc-200 transition hover:-translate-y-0.5 hover:border-[var(--color-gold)]/50"><Icon size={15} className="shrink-0 text-[var(--color-gold)]" /><span className="truncate">{label}</span></Link>)}{visibleQuickActions.length === 0 && <div className="col-span-full rounded-xl border border-dashed border-[var(--color-border)] p-4 text-center text-xs text-zinc-500">لا توجد نتيجة مطابقة</div>}</div></div>
           <div className="glass-card rounded-2xl p-4"><div className="mb-3 flex items-center justify-between"><h2 className="flex items-center gap-2 text-base font-black text-white"><FileSearch size={18} className="text-[var(--color-gold)]" />آخر النشاطات</h2><Link href="/admin/audit-log" className="text-[10px] font-bold text-[var(--color-gold)]">السجل الكامل <ArrowUpRight size={12} className="inline" /></Link></div><div className="space-y-2">{analytics.system.recentActivity.length === 0 && <div className="rounded-xl border border-dashed border-[var(--color-border)] p-5 text-center text-xs text-zinc-500">لا توجد نشاطات مسجلة</div>}{analytics.system.recentActivity.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-black/10 p-2.5"><div className="min-w-0"><div className="truncate text-xs font-black text-zinc-200">{item.target_username || "إجراء عام"}</div><div className="mt-1 text-[9px] text-zinc-500">{item.action} · بواسطة {item.admin_username || "الإدارة"}</div></div><span className="shrink-0 text-[9px] text-zinc-600">{dateTime(item.created_at)}</span></div>)}</div></div>
         </section>
 

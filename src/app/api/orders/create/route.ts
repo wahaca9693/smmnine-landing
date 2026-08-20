@@ -204,7 +204,7 @@ export async function POST(request: Request) {
       smmnineOrderId = smmnineResult.order ? String(smmnineResult.order) : null;
       if (!smmnineOrderId) {
         await db.execute({ sql: "UPDATE users SET balance = balance + ? WHERE id = ?", args: [cost, session.userId!] });
-        return json({ error: "فشل إنشاء الطلب في Follower" }, { status: 502 });
+        return json({ error: "فشل إنشاء الطلب لدى مزود الخدمة" }, { status: 502 });
       }
     } catch (error) {
       await db.execute({ sql: "UPDATE users SET balance = balance + ? WHERE id = ?", args: [cost, session.userId!] });

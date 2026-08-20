@@ -1,12 +1,12 @@
 "use client";
 
 import { LanguageProvider, type Locale } from "./LanguageProvider";
-import { ThemeProvider } from "./ThemeProvider";
+import { ThemeProvider, type SiteSettings } from "./ThemeProvider";
 
-export default function Providers({ children, initialLocale }: { children: React.ReactNode; initialLocale: Locale }) {
+export default function Providers({ children, initialLocale, initialBranding }: { children: React.ReactNode; initialLocale: Locale; initialBranding?: Partial<SiteSettings> }) {
   return (
     <LanguageProvider initialLocale={initialLocale}>
-      <ThemeProvider>{children}</ThemeProvider>
+      <ThemeProvider initialSettings={initialBranding}>{children}</ThemeProvider>
     </LanguageProvider>
   );
 }

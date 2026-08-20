@@ -82,14 +82,9 @@ function readSettings(row: SettingsRow) {
   return settings;
 }
 
-let settingsCache: { expiresAt: number; value: Record<string, string | number | boolean> } | null = null;
-const SETTINGS_CACHE_MS = 30_000;
-
 async function loadSettingsFromDatabase() {
   const result = await db.execute("SELECT * FROM site_settings LIMIT 1");
-  const value = readSettings(result.rows[0] || {});
-  settingsCache = { expiresAt: Date.now() + SETTINGS_CACHE_MS, value };
-  return value;
+  return readSettings(result.rows[0] || {});
 }
 
 function validColor(value: unknown) {
@@ -125,9 +120,6 @@ function normalizeValue(key: SettingKey, value: unknown): string | number | null
 
 export async function GET() {
   try {
-    if (settingsCache && settingsCache.expiresAt > Date.now()) {
-      return json({ settings: settingsCache.value });
-    }
     return json({ settings: await loadSettingsFromDatabase() });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "تعذر تحميل الإعدادات";
@@ -174,7 +166,6 @@ export async function POST(request: Request) {
 
     const result = await db.execute("SELECT * FROM site_settings LIMIT 1");
     const settings = readSettings(result.rows[0] || {});
-    settingsCache = { expiresAt: Date.now() + SETTINGS_CACHE_MS, value: settings };
     return json({ success: true, settings });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "";

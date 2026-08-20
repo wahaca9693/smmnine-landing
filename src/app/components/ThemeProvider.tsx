@@ -1,9 +1,9 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useLiveRefresh } from "./useLiveRefresh";
 
-interface SiteSettings {
+export interface SiteSettings {
   siteName: string;
   brandMediaUrl: string;
   brandMediaType: "image" | "video";
@@ -21,10 +21,13 @@ interface SiteSettings {
 interface ThemeContextType {
   settings: SiteSettings;
   loading: boolean;
-  refresh: () => void;
+  refresh: () => void | Promise<void>;
+  update: (next: Partial<SiteSettings>) => void;
 }
 
-const defaultSettings: SiteSettings = {
+export const BRANDING_REFRESH_KEY = "smmnine:branding-updated";
+
+export const defaultSettings: SiteSettings = {
   siteName: "smmnine",
   brandMediaUrl: "",
   brandMediaType: "image",
@@ -39,41 +42,66 @@ const defaultSettings: SiteSettings = {
   borderColor: "var(--color-border)",
 };
 
-const BRANDING_REFRESH_KEY = "smmnine:branding-updated";
-
 const ThemeContext = createContext<ThemeContextType>({
   settings: defaultSettings,
   loading: true,
   refresh: () => {},
+  update: () => {},
 });
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<SiteSettings>(defaultSettings);
-  const [loading, setLoading] = useState(true);
-
-  const fetchSettings = async () => {
-    try {
-      const res = await fetch("/api/settings", { cache: "no-store" });
-      const data = await res.json();
-      if (data.settings) {
-        setSettings({
-          ...defaultSettings,
-          ...data.settings,
-          brandMediaType: data.settings.brandMediaType === "video" ? "video" : "image",
-        });
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+function normalizeSettings(value: unknown): SiteSettings {
+  const source = value && typeof value === "object" ? value as Partial<Record<keyof SiteSettings, unknown>> : {};
+  const stringValue = (key: keyof SiteSettings, fallback: string) => {
+    const candidate = source[key];
+    return typeof candidate === "string" && candidate.trim() ? candidate.trim() : fallback;
   };
+  return {
+    siteName: stringValue("siteName", defaultSettings.siteName),
+    brandMediaUrl: typeof source.brandMediaUrl === "string" ? source.brandMediaUrl : defaultSettings.brandMediaUrl,
+    brandMediaType: source.brandMediaType === "video" ? "video" : "image",
+    siteDescription: stringValue("siteDescription", defaultSettings.siteDescription),
+    defaultCurrency: stringValue("defaultCurrency", defaultSettings.defaultCurrency),
+    primaryColor: stringValue("primaryColor", defaultSettings.primaryColor),
+    secondaryColor: stringValue("secondaryColor", defaultSettings.secondaryColor),
+    primaryLight: stringValue("primaryLight", defaultSettings.primaryLight),
+    backgroundColor: stringValue("backgroundColor", defaultSettings.backgroundColor),
+    cardColor: stringValue("cardColor", defaultSettings.cardColor),
+    surfaceColor: stringValue("surfaceColor", defaultSettings.surfaceColor),
+    borderColor: stringValue("borderColor", defaultSettings.borderColor),
+  };
+}
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void fetchSettings();
-    }, 0);
-    return () => window.clearTimeout(timer);
+export function broadcastBrandingUpdate() {
+  if (typeof window === "undefined") return;
+  const stamp = String(Date.now());
+  window.localStorage.setItem(BRANDING_REFRESH_KEY, stamp);
+  window.dispatchEvent(new Event(BRANDING_REFRESH_KEY));
+}
+
+export function ThemeProvider({ children, initialSettings }: { children: ReactNode; initialSettings?: Partial<SiteSettings> }) {
+  const normalizedInitialSettings = normalizeSettings(initialSettings);
+  const [settings, setSettings] = useState<SiteSettings>(() => normalizedInitialSettings);
+  const [loading, setLoading] = useState(false);
+  const requestIdRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
+
+  const fetchSettings = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+
+    try {
+      const res = await fetch("/api/settings", { cache: "no-store", signal: controller.signal });
+      const data = await res.json() as { settings?: unknown };
+      if (!res.ok || requestId !== requestIdRef.current) return;
+      if (data.settings) setSettings(normalizeSettings(data.settings));
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (requestId === requestIdRef.current) console.error(error);
+    } finally {
+      if (requestId === requestIdRef.current) setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -87,7 +115,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       window.removeEventListener(BRANDING_REFRESH_KEY, onBrandingUpdate);
       window.removeEventListener("storage", onStorage);
     };
-  }, []);
+  }, [fetchSettings]);
 
   useLiveRefresh(fetchSettings, { intervalMs: 30000 });
 
@@ -107,8 +135,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, [settings]);
 
+  const update = useCallback((next: Partial<SiteSettings>) => {
+    setSettings((current) => normalizeSettings({ ...current, ...next }));
+  }, []);
+
   return (
-    <ThemeContext.Provider value={{ settings, loading, refresh: fetchSettings }}>
+    <ThemeContext.Provider value={{ settings, loading, refresh: fetchSettings, update }}>
       {children}
     </ThemeContext.Provider>
   );
@@ -120,6 +152,7 @@ export function useTheme() {
 
 function darken(hex: string, percent: number) {
   const num = parseInt(hex.replace("#", ""), 16);
+  if (!Number.isFinite(num)) return hex;
   const amt = Math.round(2.55 * percent);
   const R = Math.max((num >> 16) - amt, 0);
   const G = Math.max((num >> 8 & 0x00ff) - amt, 0);

@@ -10,6 +10,8 @@ import {
   SecurityServiceUnavailable,
 } from "@/lib/security";
 
+type RegistrationSettingsRow = { registrationEnabled?: unknown };
+
 export async function POST(request: Request) {
   try {
     const body = await request.json() as {
@@ -32,7 +34,8 @@ export async function POST(request: Request) {
     }
 
     const registrationSetting = await db.execute("SELECT registrationEnabled FROM site_settings LIMIT 1");
-    const registrationEnabled = registrationSetting.rows.length === 0 || Boolean(Number((registrationSetting.rows[0] as any)?.registrationEnabled ?? 1));
+    const registrationRow = registrationSetting.rows[0] as unknown as RegistrationSettingsRow | undefined;
+    const registrationEnabled = registrationSetting.rows.length === 0 || Boolean(Number(registrationRow?.registrationEnabled ?? 1));
     if (!registrationEnabled) {
       return NextResponse.json({ error: "التسجيل الجديد متوقف مؤقتًا من الإدارة. يرجى المحاولة لاحقًا." }, { status: 403 });
     }
@@ -114,7 +117,7 @@ export async function POST(request: Request) {
 
     await db.execute({
       sql: "INSERT INTO notifications (user_id, title, body) VALUES (?, ?, ?)",
-      args: [userId, "مرحباً بك!", "تم إنشاء حسابك بنجاح في Follower. اقرأ شروط الاستخدام قبل الطلب."],
+      args: [userId, "مرحباً بك!", "تم إنشاء حسابك بنجاح. اقرأ شروط الاستخدام قبل الطلب."],
     });
 
     const session = await getSession();
@@ -132,11 +135,12 @@ export async function POST(request: Request) {
         balance: 0,
       },
     });
-  } catch (err: any) {
-    console.error("Register error:", err);
-    if (err instanceof SecurityServiceUnavailable) {
+  } catch (error: unknown) {
+    console.error("Register error:", error);
+    if (error instanceof SecurityServiceUnavailable) {
       return NextResponse.json({ error: "حماية التسجيل غير متاحة مؤقتًا. أعد المحاولة بعد قليل." }, { status: 503 });
     }
-    return NextResponse.json({ error: err.message || "حدث خطأ" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "حدث خطأ";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -6,8 +6,9 @@ async function migrate() {
   try {
     await db.execute("ALTER TABLE users ADD COLUMN is_banned INTEGER DEFAULT 0");
     console.log("Added users.is_banned");
-  } catch (e: any) {
-    if (!e.message?.includes("duplicate column")) console.error(e.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("duplicate column")) console.error(message);
   }
 
   // Add theme columns to existing site_settings if missing
@@ -16,8 +17,9 @@ async function migrate() {
     try {
       await db.execute(`ALTER TABLE site_settings ADD COLUMN ${col} TEXT`);
       console.log(`Added site_settings.${col}`);
-    } catch (e: any) {
-      if (!e.message?.includes("duplicate column")) console.error(e.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("duplicate column")) console.error(message);
     }
   }
 
@@ -27,7 +29,7 @@ async function migrate() {
     await db.execute({
       sql: `INSERT INTO site_settings (id, siteName, primaryColor, backgroundColor, cardColor, surfaceColor, borderColor)
             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      args: ["default", "Follower", "#f97316", "#050505", "#111111", "#1a1a1a", "#27272a"],
+      args: ["default", "smmnine", "#f97316", "#050505", "#111111", "#1a1a1a", "#27272a"],
     });
     console.log("Seeded default site settings");
   } else {
