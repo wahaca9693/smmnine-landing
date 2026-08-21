@@ -5,6 +5,7 @@ import DashboardLayout from "../components/DashboardLayout";
 import Link from "next/link";
 import {
   Activity,
+  ServerCog,
   AlertCircle,
   Bell,
   ArrowUpRight,
@@ -99,6 +100,7 @@ const quickActions: QuickAction[] = [
   { href: "/admin/theme", label: "هوية المنصة", keywords: "اسم شعار مظهر branding theme", icon: Palette },
   { href: "/admin/notifications", label: "إرسال إشعار", keywords: "إشعار notifications", icon: Bell },
   { href: "/admin/api-keys", label: "مفاتيح API", keywords: "api مفاتيح", icon: KeyRound },
+  { href: "/admin/system-health", label: "صحة النظام", keywords: "صحة مراقبة health system database مخطط", icon: ServerCog },
 ];
 
 function money(value: number) {

@@ -4,6 +4,13 @@ import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 type DbRow = Record<string, unknown>;
+type QueryValue = string | number;
+
+type ListFilters = {
+  search: string;
+  status: "all" | "active" | "banned";
+  sort: "created_desc" | "created_asc" | "balance_desc" | "balance_asc" | "username_asc";
+};
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -25,8 +32,79 @@ function safeUser(row: DbRow) {
     is_banned: Number(row.is_banned || 0),
     status: String(row.status || "active"),
     terms_accepted: Number(row.terms_accepted || 0),
+    orders_count: Number(row.orders_count || 0),
     created_at: row.created_at,
   };
+}
+
+function parsePage(value: string | null, fallback: number) {
+  const parsed = Number(value || fallback);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseLimit(value: string | null) {
+  const parsed = Number(value || 25);
+  return Number.isInteger(parsed) ? Math.min(100, Math.max(10, parsed)) : 25;
+}
+
+function parseFilters(searchParams: URLSearchParams): ListFilters {
+  const requestedStatus = searchParams.get("status");
+  const requestedSort = searchParams.get("sort");
+  return {
+    search: (searchParams.get("search") || "").trim().slice(0, 100),
+    status: requestedStatus === "active" || requestedStatus === "banned" ? requestedStatus : "all",
+    sort: ["created_desc", "created_asc", "balance_desc", "balance_asc", "username_asc"].includes(String(requestedSort))
+      ? (requestedSort as ListFilters["sort"])
+      : "created_desc",
+  };
+}
+
+function buildUserWhere(filters: ListFilters) {
+  const args: QueryValue[] = [];
+  let where = " WHERE u.role != 'admin' ";
+  if (filters.search) {
+    where += " AND (u.username LIKE ? OR u.email LIKE ? OR CAST(u.id AS TEXT) LIKE ?) ";
+    args.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`);
+  }
+  if (filters.status === "banned") where += " AND (u.is_banned = 1 OR u.status = 'banned') ";
+  if (filters.status === "active") where += " AND u.is_banned = 0 AND COALESCE(u.status, 'active') != 'banned' ";
+  return { where, args };
+}
+
+function orderBy(sort: ListFilters["sort"]) {
+  switch (sort) {
+    case "created_asc": return "u.created_at ASC, u.id ASC";
+    case "balance_desc": return "u.balance DESC, u.id DESC";
+    case "balance_asc": return "u.balance ASC, u.id ASC";
+    case "username_asc": return "LOWER(u.username) ASC, u.id ASC";
+    case "created_desc":
+    default: return "u.created_at DESC, u.id DESC";
+  }
+}
+
+function csvCell(value: unknown) {
+  const text = String(value ?? "").replace(/\r?\n/g, " ");
+  return /[",]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function csvResponse(rows: DbRow[]) {
+  const header = ["id", "username", "email", "balance", "status", "orders_count", "created_at"];
+  const body = rows.map((row) => [
+    row.id,
+    row.username,
+    row.email,
+    Number(row.balance || 0).toFixed(6),
+    Number(row.is_banned || 0) ? "banned" : String(row.status || "active"),
+    Number(row.orders_count || 0),
+    row.created_at,
+  ].map(csvCell).join(","));
+  return new Response(`\uFEFF${[header.join(","), ...body].join("\n")}\n`, {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="follower-users.csv"`,
+      "Cache-Control": "no-store, max-age=0",
+    },
+  });
 }
 
 async function audit(adminId: number | undefined, targetId: number, action: string, details: Record<string, unknown> = {}) {
@@ -47,7 +125,7 @@ export async function GET(request: Request) {
   try {
     const admin = await requireAdmin();
     const { searchParams } = new URL(request.url);
-    const search = (searchParams.get("search") || "").trim();
+    const filters = parseFilters(searchParams);
     const userId = Number(searchParams.get("userId") || 0);
 
     if (userId > 0) {
@@ -75,15 +153,53 @@ export async function GET(request: Request) {
       });
     }
 
-    let sql = "SELECT id, username, email, balance, role, is_banned, status, created_at FROM users WHERE role != 'admin'";
-    const args: Array<string | number> = [];
-    if (search) {
-      sql += " AND (username LIKE ? OR email LIKE ? OR CAST(id AS TEXT) LIKE ?)";
-      args.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    const { where, args } = buildUserWhere(filters);
+    const requestedPage = parsePage(searchParams.get("page"), 1);
+    const limit = parseLimit(searchParams.get("limit"));
+    const statsRes = await db.execute({
+      sql: "SELECT COUNT(*) AS total_users, SUM(CASE WHEN is_banned = 1 OR status = 'banned' THEN 1 ELSE 0 END) AS banned_users, SUM(CASE WHEN is_banned = 0 AND COALESCE(status, 'active') != 'banned' THEN 1 ELSE 0 END) AS active_users, COALESCE(SUM(balance), 0) AS total_balance FROM users WHERE role != 'admin'",
+      args: [],
+    });
+    const countRes = await db.execute({
+      sql: `SELECT COUNT(*) AS total FROM users u ${where}`,
+      args,
+    });
+    const total = Number((countRes.rows[0] as DbRow | undefined)?.total || 0);
+    const pages = Math.max(1, Math.ceil(total / limit));
+    const page = Math.min(requestedPage, pages);
+    const offset = (page - 1) * limit;
+    const listSql = `
+      SELECT u.id, u.username, u.email, u.balance, u.role, u.is_banned, u.status, u.terms_accepted, u.created_at,
+             COUNT(o.id) AS orders_count
+      FROM users u
+      LEFT JOIN orders o ON o.user_id = u.id
+      ${where}
+      GROUP BY u.id, u.username, u.email, u.balance, u.role, u.is_banned, u.status, u.terms_accepted, u.created_at
+      ORDER BY ${orderBy(filters.sort)}
+      LIMIT ? OFFSET ?
+    `;
+    const result = await db.execute({ sql: listSql, args: [...args, limit, offset] });
+    const stats = statsRes.rows[0] as DbRow | undefined;
+
+    if (searchParams.get("format") === "csv") {
+      const exportResult = await db.execute({ sql: listSql.replace("LIMIT ? OFFSET ?", "LIMIT 5000 OFFSET 0"), args });
+      return csvResponse(exportResult.rows as DbRow[]);
     }
-    sql += " ORDER BY created_at DESC LIMIT 200";
-    const result = await db.execute({ sql, args });
-    return json({ users: result.rows.map(safeUser) });
+
+    return json({
+      users: result.rows.map((row) => safeUser(row as DbRow)),
+      page,
+      limit,
+      total,
+      pages,
+      filters,
+      stats: {
+        total_users: Number(stats?.total_users || 0),
+        active_users: Number(stats?.active_users || 0),
+        banned_users: Number(stats?.banned_users || 0),
+        total_balance: Number(stats?.total_balance || 0),
+      },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     const status = message === "Unauthorized" ? 401 : (message === "Forbidden" || message === "Account banned" ? 403 : 500);
@@ -96,6 +212,34 @@ export async function POST(request: Request) {
     const admin = await requireAdmin();
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action || "");
+
+    if (action === "bulkBan" || action === "bulkUnban") {
+      const rawIds = Array.isArray(body.userIds) ? body.userIds : [];
+      const ids = [...new Set(rawIds.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))].slice(0, 100);
+      if (ids.length === 0) return json({ error: "اختر مستخدمًا واحدًا على الأقل" }, 400);
+      const placeholders = ids.map(() => "?").join(",");
+      const targets = await db.execute({ sql: `SELECT id FROM users WHERE id IN (${placeholders}) AND role != 'admin'`, args: ids });
+      const validIds = targets.rows.map((row) => Number((row as DbRow).id)).filter((id) => Number.isInteger(id));
+      if (validIds.length === 0) return json({ error: "لا توجد حسابات صالحة ضمن الاختيار" }, 400);
+      const banned = action === "bulkBan" ? 1 : 0;
+      const transaction = await db.transaction("write");
+      try {
+        const validPlaceholders = validIds.map(() => "?").join(",");
+        await transaction.execute({ sql: `UPDATE users SET is_banned = ?, status = ? WHERE id IN (${validPlaceholders}) AND role != 'admin'`, args: [banned, banned ? "banned" : "active", ...validIds] });
+        for (const targetId of validIds) {
+          await transaction.execute({
+            sql: "INSERT INTO admin_audit_logs (admin_user_id, target_user_id, action, details) VALUES (?, ?, ?, ?)",
+            args: [admin.userId ?? null, targetId, action, JSON.stringify({ bulk: true, selected_count: validIds.length })],
+          });
+        }
+        await transaction.commit();
+      } catch (error) {
+        await transaction.rollback().catch(() => undefined);
+        throw error;
+      }
+      return json({ success: true, affected: validIds.length, message: `تم تحديث ${validIds.length} حساب` });
+    }
+
     const uid = Number(body.userId);
     if (!Number.isInteger(uid) || uid <= 0 || !(await targetExists(uid))) return json({ error: "المستخدم غير صالح أو محمي" }, 400);
 
