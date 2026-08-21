@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   X,
   User,
@@ -22,6 +23,8 @@ import {
   KeyRound,
   Settings,
   Gift,
+  Star,
+  Sparkles,
 } from "lucide-react";
 import { useLanguage } from "./LanguageProvider";
 
@@ -35,10 +38,94 @@ type MenuItem =
   | { type: "link"; label: string; href: string; icon?: React.ElementType; badge?: string; badgeColor?: string }
   | { type: "action"; label: string; action: () => void; icon?: React.ElementType; badge?: string; badgeColor?: string };
 
+type CustomNavItem = {
+  id: number;
+  label_ar: string;
+  label_en: string | null;
+  href: string;
+  icon: string;
+  badge: string | null;
+  badge_color: string;
+  audience: "user" | "admin" | "both";
+  is_active: number;
+  sort_order: number;
+};
+
+const customIconMap: Record<string, React.ElementType> = {
+  Zap,
+  Globe2,
+  Gift,
+  Wallet,
+  ShoppingCart,
+  Boxes,
+  Bell,
+  FileText,
+  KeyRound,
+  RefreshCw,
+  Star,
+  Sparkles,
+};
+
+function parseCustomItems(value: unknown): CustomNavItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): CustomNavItem[] => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    const id = Number(row.id);
+    const href = String(row.href || "");
+    const audience = String(row.audience || "user");
+    if (!Number.isInteger(id) || id <= 0 || !href.startsWith("/") || !["user", "admin", "both"].includes(audience)) return [];
+    return [{
+      id,
+      label_ar: String(row.label_ar || ""),
+      label_en: row.label_en == null ? null : String(row.label_en),
+      href,
+      icon: String(row.icon || "Zap"),
+      badge: row.badge == null ? null : String(row.badge),
+      badge_color: String(row.badge_color || "gold"),
+      audience: audience as CustomNavItem["audience"],
+      is_active: Number(row.is_active ?? 1),
+      sort_order: Number(row.sort_order ?? 0),
+    }];
+  });
+}
+
 export default function Sidebar({ open, onClose, user }: SidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { t } = useLanguage();
+  const { t, locale } = useLanguage();
+  const [customItems, setCustomItems] = useState<CustomNavItem[]>([]);
+  const [adminCustomItems, setAdminCustomItems] = useState<CustomNavItem[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadCustomNavigation = async () => {
+      try {
+        const publicResponse = await fetch("/api/navigation", { cache: "no-store" });
+        const publicData = await publicResponse.json() as { items?: unknown };
+        if (!cancelled) setCustomItems(parseCustomItems(publicData.items).filter((item) => item.is_active === 1 && (item.audience === "user" || item.audience === "both")));
+        if (user?.role === "admin") {
+          const adminResponse = await fetch("/api/admin/navigation", { cache: "no-store" });
+          if (adminResponse.ok) {
+            const adminData = await adminResponse.json() as { items?: unknown };
+            if (!cancelled) setAdminCustomItems(parseCustomItems(adminData.items).filter((item) => item.is_active === 1 && (item.audience === "admin" || item.audience === "both")));
+          }
+        } else if (!cancelled) {
+          setAdminCustomItems([]);
+        }
+      } catch {
+        if (!cancelled) {
+          setCustomItems([]);
+          setAdminCustomItems([]);
+        }
+      }
+    };
+    void loadCustomNavigation();
+    return () => { cancelled = true; };
+  }, [user?.role]);
+
+  const customLabel = (item: CustomNavItem) => locale === "ar" ? item.label_ar : (item.label_en || item.label_ar);
+  const customBadgeClass = (color: string) => color === "green" ? "bg-green-500/20 text-green-400" : color === "blue" ? "bg-blue-500/20 text-blue-300" : color === "red" ? "bg-red-500/20 text-red-300" : "badge-new";
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -62,6 +149,14 @@ export default function Sidebar({ open, onClose, user }: SidebarProps) {
     { type: "link", label: t("sidebar.terms"), href: "/terms", icon: FileText },
     { type: "link", label: t("sidebar.createSite"), href: "/reseller", icon: Globe2, badge: "مجاني", badgeColor: "green" },
     { type: "link", label: t("sidebar.siteManagement"), href: user?.role === "admin" ? "/admin" : "/site-management", icon: SlidersHorizontal },
+    ...customItems.sort((a, b) => a.sort_order - b.sort_order || a.id - b.id).map((item): MenuItem => ({
+      type: "link",
+      label: customLabel(item),
+      href: item.href,
+      icon: customIconMap[item.icon] || Zap,
+      badge: item.badge || undefined,
+      badgeColor: item.badge_color,
+    })),
   ];
 
   const isActive = (href: string) => {
@@ -145,6 +240,7 @@ export default function Sidebar({ open, onClose, user }: SidebarProps) {
                   { label: "تذاكر الدعم", href: "/admin/tickets", icon: FileText },
                   { label: "سجل التدقيق", href: "/admin/audit-log", icon: History },
                   { label: "هوية المنصة", href: "/admin/theme", icon: SlidersHorizontal },
+                  { label: "الأزرار المخصصة", href: "/admin/navigation", icon: Sparkles },
                   { label: "إعدادات الإدارة", href: "/admin/settings", icon: Settings },
                 ].map((item) => {
                   const active = pathname === item.href || (item.href !== "/admin" && pathname.startsWith(`${item.href}/`));
@@ -158,6 +254,19 @@ export default function Sidebar({ open, onClose, user }: SidebarProps) {
                     >
                       <span className={`font-bold ${active ? "text-[var(--color-primary)]" : "text-white"}`}>{item.label}</span>
                       <Icon size={18} className={active ? "text-[var(--color-primary)]" : "text-zinc-400"} />
+                    </Link>
+                  );
+                })}
+                {adminCustomItems.sort((a, b) => a.sort_order - b.sort_order || a.id - b.id).map((item) => {
+                  const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                  const Icon = customIconMap[item.icon] || Zap;
+                  return (
+                    <Link key={`custom-admin-${item.id}`} href={item.href} onClick={onClose} className={`mb-1 flex items-center justify-between rounded-xl px-3 py-3 transition hover:bg-[var(--color-surface)] ${active ? "bg-[var(--color-surface)]" : ""}`}>
+                      <span className={`font-bold ${active ? "text-[var(--color-primary)]" : "text-white"}`}>{customLabel(item)}</span>
+                      <div className="flex items-center gap-2">
+                        {item.badge && <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${customBadgeClass(item.badge_color)}`}>{item.badge}</span>}
+                        <Icon size={18} className={active ? "text-[var(--color-primary)]" : "text-zinc-400"} />
+                      </div>
                     </Link>
                   );
                 })}

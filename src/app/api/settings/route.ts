@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
+import { invalidateApiV2EnabledCache } from "@/lib/api-v2-guard";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -176,6 +177,7 @@ export async function POST(request: Request) {
     const result = await db.execute("SELECT * FROM site_settings LIMIT 1");
     const settings = readSettings(result.rows[0] || {});
     settingsCache = { value: settings, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS };
+    if (updates.has("apiV2Enabled")) invalidateApiV2EnabledCache();
     return json({ success: true, settings });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "";

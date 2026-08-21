@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db, initDb } from "@/lib/db";
-import { cancelOrder, createOrder, getServices } from "@/lib/follower";
+import { cancelOrder, createOrder } from "@/lib/follower";
 import { executeProviderOrder } from "@/lib/providers";
+import { findCatalogService } from "@/lib/service-catalog";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -43,22 +44,48 @@ export async function POST(request: Request) {
       return json({ error: "الكمية يجب أن تكون رقمًا صحيحًا موجبًا" }, { status: 400 });
     }
 
-    // The public catalog contains both Follower services and provider_services.
-    // Resolve provider services from the database first so admin changes are authoritative.
+    const rawIdempotencyKey = request.headers.get("Idempotency-Key") || (typeof body?.idempotencyKey === "string" ? body.idempotencyKey : "");
+    const idempotencyKey = rawIdempotencyKey.trim();
+    if (idempotencyKey && (idempotencyKey.length < 16 || idempotencyKey.length > 128)) {
+      return json({ error: "مفتاح Idempotency-Key يجب أن يكون بين 16 و128 حرفًا" }, { status: 400 });
+    }
+    if (idempotencyKey) {
+      const existingResult = await db.execute({
+        sql: `SELECT id, smmnine_order_id, service_name, charge, status, link, quantity
+              FROM orders WHERE user_id = ? AND idempotency_key = ? LIMIT 1`,
+        args: [session.userId!, idempotencyKey],
+      });
+      const existing = existingResult.rows[0] as unknown as JsonRecord | undefined;
+      if (existing) {
+        return json({
+          replayed: true,
+          order: {
+            id: Number(existing.id),
+            smmnine_order_id: existing.smmnine_order_id ?? null,
+            service_name: existing.service_name,
+            charge: Number(existing.charge),
+            status: existing.status,
+            link: existing.link,
+            quantity: Number(existing.quantity),
+          },
+        });
+      }
+    }
+
     const requestedServiceId = String(serviceId);
-    const providerLookupId = requestedServiceId.startsWith("provider:")
-      ? requestedServiceId.slice("provider:".length)
-      : requestedServiceId;
-    const providerResult = await db.execute({
-      sql: `SELECT ps.*, p.name AS provider_name
-            FROM provider_services ps
-            JOIN providers p ON p.id = ps.provider_id
-            WHERE p.is_active = 1 AND ps.is_active = 1
-              AND (CAST(ps.id AS TEXT) = ? OR ps.remote_service_id = ?)
-            LIMIT 1`,
-      args: [providerLookupId, requestedServiceId],
-    });
-    const providerService = providerResult.rows[0] as unknown as JsonRecord | undefined;
+    const catalogService = await findCatalogService(requestedServiceId);
+    const providerService: JsonRecord | undefined = catalogService?.source === "provider"
+      ? {
+        id: catalogService.providerServiceId,
+        remote_service_id: catalogService.remoteServiceId,
+        name: catalogService.name,
+        min: catalogService.min,
+        max: catalogService.max,
+        sell_rate: catalogService.rate,
+        rate: catalogService.rate,
+        provider_id: catalogService.providerId,
+      }
+      : undefined;
 
     if (providerService) {
       const min = Number(providerService.min) || 0;
@@ -99,9 +126,9 @@ export async function POST(request: Request) {
       let localOrderId: number | null = null;
       try {
         const orderResult = await db.execute({
-          sql: `INSERT INTO orders (user_id, service_id, service_name, link, quantity, charge, status, provider_id)
-                VALUES (?, ?, ?, ?, ?, ?, 'processing', ?)`,
-          args: [session.userId!, Number(providerService.id), String(providerService.name), String(link), qty, cost, Number(providerService.provider_id)],
+          sql: `INSERT INTO orders (user_id, service_id, service_name, link, quantity, charge, status, provider_id, idempotency_key)
+                VALUES (?, ?, ?, ?, ?, ?, 'processing', ?, ?)`,
+          args: [session.userId!, Number(providerService.id), String(providerService.name), String(link), qty, cost, Number(providerService.provider_id), idempotencyKey || null],
         });
         localOrderId = Number(orderResult.lastInsertRowid);
 
@@ -162,16 +189,18 @@ export async function POST(request: Request) {
       });
     }
 
-    // Follower-backed services retain the existing remote order flow.
-    let services: JsonRecord[] = [];
-    try {
-      services = await getServices();
-    } catch {
-      services = [];
-    }
-    const service = services.find((s) => String(s.service) === String(serviceId));
+    // Follower-backed services use the same resolved catalog and never fall back to a stale list.
+    const service: JsonRecord | null = catalogService?.source === "follower"
+      ? {
+        service: catalogService.serviceId,
+        name: catalogService.name,
+        rate: catalogService.rate,
+        min: catalogService.min,
+        max: catalogService.max,
+      }
+      : null;
     if (!service) {
-      return json({ error: "الخدمة غير موجودة أو غير نشطة" }, { status: 404 });
+      return json({ error: "الخدمة غير موجودة أو غير نشطة أو معرّفها غير فريد" }, { status: 404 });
     }
 
     if (qty < Number(service.min) || qty > Number(service.max)) {
@@ -214,8 +243,8 @@ export async function POST(request: Request) {
     let localOrderId: number | null = null;
     try {
       const orderResult = await db.execute({
-        sql: "INSERT INTO orders (user_id, smmnine_order_id, service_id, service_name, link, quantity, charge, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        args: [session.userId!, smmnineOrderId, Number(serviceId), String(service.name), link, qty, cost, "Pending"],
+        sql: "INSERT INTO orders (user_id, smmnine_order_id, service_id, service_name, link, quantity, charge, status, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        args: [session.userId!, smmnineOrderId, String(service.service), String(service.name), link, qty, cost, "Pending", idempotencyKey || null],
       });
       localOrderId = Number(orderResult.lastInsertRowid);
 

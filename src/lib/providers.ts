@@ -40,6 +40,17 @@ function providerError(data: unknown, status: number): string {
   return message || `HTTP ${status}`;
 }
 
+async function recordProviderHealth(providerId: number, status: "online" | "offline" | "degraded", error: string | null): Promise<void> {
+  await db.execute({
+    sql: "UPDATE providers SET connection_status = ?, last_error = ?, last_probe_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    args: [status, error ? error.slice(0, 500) : null, providerId],
+  }).catch(() => undefined);
+}
+
+function isTransportFailure(status: number, message: string): boolean {
+  return status >= 500 || status === 0 || /timeout|timed out|fetch failed|network|connect|aborted/i.test(message);
+}
+
 /**
  * Sends an order to an active provider that implements the standard SMM
  * Panel API v2 contract. Secrets are kept server-side and never returned.
@@ -57,14 +68,21 @@ async function providerAction(providerId: number, params: Record<string, string>
   const endpoints = providerEndpointCandidates(provider.api_url);
   for (const endpoint of endpoints) {
     const body = new URLSearchParams({ key: String(provider.api_key), ...params });
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-      body,
-      cache: "no-store",
-      redirect: "follow",
-      signal: AbortSignal.timeout(20000),
-    });
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+        body,
+        cache: "no-store",
+        redirect: "follow",
+        signal: AbortSignal.timeout(20000),
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error && /timeout|aborted/i.test(error.message) ? "انتهت مهلة الاتصال بالمزود" : "تعذر الاتصال بالمزود";
+      await recordProviderHealth(providerId, "offline", message);
+      throw new Error(message);
+    }
     const text = await response.text();
     let data: unknown = null;
     try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text.slice(0, 240) }; }
@@ -72,10 +90,17 @@ async function providerAction(providerId: number, params: Record<string, string>
     lastStatus = response.status;
     const record = data && typeof data === "object" ? data as Record<string, unknown> : {};
     if (response.status === 404 && endpoint !== endpoints.at(-1)) continue;
-    if (!response.ok || record.error) throw new Error(providerError(data, response.status));
+    if (!response.ok || record.error) {
+      const message = providerError(data, response.status);
+      await recordProviderHealth(providerId, isTransportFailure(response.status, message) ? "offline" : "degraded", message);
+      throw new Error(message);
+    }
+    await recordProviderHealth(providerId, "online", null);
     return record;
   }
-  throw new Error(providerError(lastData, lastStatus));
+  const message = providerError(lastData, lastStatus);
+  await recordProviderHealth(providerId, isTransportFailure(lastStatus, message) ? "offline" : "degraded", message);
+  throw new Error(message);
 }
 
 export async function getProviderOrderStatus(providerId: number, remoteOrderId: string) {
@@ -122,14 +147,25 @@ export async function executeProviderOrder(params: ProviderOrderParams): Promise
       lastStatus = response.status;
       const record = data && typeof data === "object" ? data as Record<string, unknown> : {};
       if (response.status === 404 && endpoint !== endpoints.at(-1)) continue;
-      if (!response.ok || record.error) return { ok: false, error: providerError(data, response.status) };
-      if (record.order === undefined || record.order === null || String(record.order) === "") {
-        return { ok: false, error: "استجابة غير صالحة من المزود: لم يُرجع رقم الطلب" };
+      if (!response.ok || record.error) {
+        const message = providerError(data, response.status);
+        await recordProviderHealth(params.providerId, isTransportFailure(response.status, message) ? "offline" : "degraded", message);
+        return { ok: false, error: message };
       }
+      if (record.order === undefined || record.order === null || String(record.order) === "") {
+        const message = "استجابة غير صالحة من المزود: لم يُرجع رقم الطلب";
+        await recordProviderHealth(params.providerId, "degraded", message);
+        return { ok: false, error: message };
+      }
+      await recordProviderHealth(params.providerId, "online", null);
       return { ok: true, remoteOrderId: String(record.order) };
     }
-    return { ok: false, error: providerError(lastData, lastStatus) };
+    const message = providerError(lastData, lastStatus);
+    await recordProviderHealth(params.providerId, isTransportFailure(lastStatus, message) ? "offline" : "degraded", message);
+    return { ok: false, error: message };
   } catch (error: unknown) {
-    return { ok: false, error: error instanceof Error ? error.message : "تعذر إرسال الطلب للمزود" };
+    const message = error instanceof Error ? error.message : "تعذر إرسال الطلب للمزود";
+    await recordProviderHealth(params.providerId, "offline", message);
+    return { ok: false, error: message };
   }
 }

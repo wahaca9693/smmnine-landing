@@ -365,10 +365,17 @@ export default function ApiAccessPage() {
               />
               <CodeBox
                 title="4. إرسال طلب — جسم JSON"
-                code={`{"service": "1", "link": "https://instagram.com/user", "quantity": 1000}`}
+                code={`{"service": "provider:123", "link": "https://instagram.com/user", "quantity": 1000, "idempotency_key": "order_20260821_abc123"}`}
+              />
+              <CodeBox
+                title="5. إعادة الإرسال الآمنة — ترويسة اختيارية"
+                code={`Idempotency-Key: order_20260821_abc123\nAuthorization: Bearer ${activeKey}`}
+                compact
               />
               <p className="text-zinc-500">
-                الأسعار تخصم من رصيد محفظتك مباشرة حسب عرض المنصة، وأي تحديث جديد على خدمات {brandName} يظهر فورًا عند استدعاء جلب الخدمات، وكل طلب يصل عبر هذا المفتاح يسجل في قائمة طلباتك.
+                استخدم <span className="font-bold text-zinc-300">provider:&lt;local_id&gt;</span> للخدمات التابعة لمزود محدد. إذا استخدمت المعرّف البعيد وحده وكان مكررًا بين مزودين، سيعيد API حالة 409 ويطلب المعرّف المؤهل.
+                احتفظ بمفتاح idempotency نفسه عند إعادة إرسال الطلب بعد مهلة أو خطأ شبكي؛ سيعيد API الطلب المحلي نفسه ولن يخصم الرصيد أو يرسل طلبًا مكررًا.
+                الأسعار تخصم من رصيد محفظتك مباشرة حسب عرض المنصة، وكل طلب يصل عبر هذا المفتاح يسجل في قائمة طلباتك.
                 عند الضغط على &quot;تغيير المفتاح&quot; يتم تعطيل المفتاح السابق فورًا وتفعيل المفتاح الجديد فقط — أي طلب يصل بالمفتاح القديم لن يُنفذ بعد ذلك.
               </p>
             </div>

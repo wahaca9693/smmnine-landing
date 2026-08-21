@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { randomBytes } from "crypto";
+import { invalidateApiKeyCache } from "@/lib/api-key-cache";
 
 type DbRow = Record<string, unknown>;
 type ApiKeyBody = { name?: unknown; id?: unknown; action?: unknown };
@@ -53,6 +54,7 @@ export async function POST(request: Request) {
       sql: "INSERT INTO api_keys (user_id, api_key, name) VALUES (?, ?, ?)",
       args: [session.userId!, apiKey, name || "مفتاحي الرئيسي"],
     });
+    invalidateApiKeyCache();
     return NextResponse.json(withApiUrl(request, { message: "تم إنشاء المفتاح", apiKey }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "تعذر إنشاء مفتاح API";
@@ -68,10 +70,12 @@ export async function PATCH(request: Request) {
     const action = typeof body.action === "string" ? body.action : "";
     if (action === "revoke") {
       await db.execute({ sql: "UPDATE api_keys SET is_active = 0 WHERE id = ? AND user_id = ?", args: [id, session.userId!] });
+      invalidateApiKeyCache();
       return NextResponse.json(withApiUrl(request, { message: "تم إلغاء المفتاح" }));
     }
     if (action === "regenerate") {
       await db.execute({ sql: "UPDATE api_keys SET api_key = ?, requests_count = 0, is_active = 1 WHERE id = ? AND user_id = ?", args: [genKey(), id, session.userId!] });
+      invalidateApiKeyCache();
       const fresh = await db.execute({ sql: "SELECT api_key FROM api_keys WHERE id = ? AND user_id = ?", args: [id, session.userId!] });
       const freshRow = fresh.rows[0] as DbRow | undefined;
       return NextResponse.json(withApiUrl(request, { message: "تم تجديد المفتاح", apiKey: freshRow?.api_key }));

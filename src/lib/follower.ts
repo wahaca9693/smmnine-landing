@@ -13,11 +13,11 @@ function isJsonPayload(value: unknown): value is JsonPayload {
   return Array.isArray(value) ? value.every(isJsonRecord) : isJsonRecord(value);
 }
 
-async function requestPayload(params: Record<string, string>): Promise<JsonPayload> {
+async function requestPayload(params: Record<string, string>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<JsonPayload> {
   if (!API_KEY) throw new Error("مزود الخدمات الخارجي غير مهيأ بعد");
   const body = new URLSearchParams({ key: API_KEY, ...params });
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(API_URL, {
@@ -55,14 +55,14 @@ async function requestPayload(params: Record<string, string>): Promise<JsonPaylo
   }
 }
 
-export async function smmnineRequest(params: Record<string, string>): Promise<JsonRecord> {
-  const data = await requestPayload(params);
+export async function smmnineRequest(params: Record<string, string>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<JsonRecord> {
+  const data = await requestPayload(params, timeoutMs);
   if (!isJsonRecord(data)) throw new Error("استجابة غير صالحة من مزود الخدمات");
   return data;
 }
 
-export async function getServices(): Promise<JsonRecord[]> {
-  const data = await requestPayload({ action: "services" });
+export async function getServices(timeoutMs = REQUEST_TIMEOUT_MS): Promise<JsonRecord[]> {
+  const data = await requestPayload({ action: "services" }, timeoutMs);
   return Array.isArray(data) ? data : [];
 }
 

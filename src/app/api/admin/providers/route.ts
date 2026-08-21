@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { db, initDb } from "@/lib/db";
 import { invalidateServicesCache } from "@/lib/services-cache";
+import { invalidateServiceCatalogCache } from "@/lib/service-catalog";
 
 const DEFAULT_MARKUP = 0; // لا يوجد هامش تلقائي؛ يفعّله الأدمن صراحةً فقط
 type JsonObject = Record<string, unknown>;
@@ -285,7 +286,10 @@ export async function POST(request: Request) {
     await initDb();
     const body = (await request.json()) as JsonObject;
     const { action } = body;
-    if (SERVICE_MUTATING_ACTIONS.has(String(action))) invalidateServicesCache();
+    if (SERVICE_MUTATING_ACTIONS.has(String(action))) {
+      invalidateServicesCache();
+      invalidateServiceCatalogCache();
+    }
 
     // 1) إضافة/تعديل مزود — حفظ محلي سريع، والفحص الخارجي مستقل عبر action=probe.
     if (action === "save") {
@@ -374,6 +378,7 @@ export async function POST(request: Request) {
       const existing = new Map((existingRows.rows as JsonObject[]).map((row) => [String(row.remote_service_id), row]));
       let inserted = 0;
       let updated = 0;
+      const syncStatements: Array<{ sql: string; args: Array<string | number | null> }> = [];
       for (const s of services) {
         const remoteId = String(s.service);
         const current = existing.get(remoteId);
@@ -381,14 +386,14 @@ export async function POST(request: Request) {
         if (current) {
           const keepManual = String(current.pricing_mode || "markup") === "manual";
           const sellRate = keepManual ? Number(current.manual_price ?? current.sell_rate ?? costRate) : (pricingEnabled ? applyMarkup(costRate, markupPct) : roundRate(costRate));
-          await db.execute({
-            sql: `UPDATE provider_services SET name=?, category=?, rate=?, min=?, max=?, type=?, sell_rate=?, is_new=0 WHERE id=?`,
+          syncStatements.push({
+            sql: `UPDATE provider_services SET name=?, category=?, rate=?, min=?, max=?, type=?, sell_rate=?, is_new=0, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
             args: [String(s.name || current.name || ""), String(s.category || ""), costRate, Number(s.min) || 0, Number(s.max) || 0, String(s.type || ""), sellRate, Number(current.id)],
           });
           updated++;
         } else {
           const sellRate = pricingEnabled ? applyMarkup(costRate, markupPct) : roundRate(costRate);
-          await db.execute({
+          syncStatements.push({
             sql: `INSERT INTO provider_services (provider_id, remote_service_id, name, category, rate, min, max, type, markup_percent, sell_rate, pricing_mode, manual_price, is_new)
                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)`,
             args: [Number(providerId), remoteId, String(s.name || ""), String(s.category || ""), costRate, Number(s.min) || 0, Number(s.max) || 0, String(s.type || ""), markupPct, sellRate, "markup", null],
@@ -396,12 +401,15 @@ export async function POST(request: Request) {
           inserted++;
         }
       }
+      for (let offset = 0; offset < syncStatements.length; offset += 100) {
+        await db.batch(syncStatements.slice(offset, offset + 100), "write");
+      }
       const balance = await fetchProviderBalance(String(p.api_url), String(p.api_key));
       await db.execute({
         sql: `UPDATE providers SET balance=?, balance_fetched_at=CURRENT_TIMESTAMP WHERE id=?`,
         args: [balance, Number(providerId)],
       });
-      return NextResponse.json({ imported: inserted, updated, balance, services: inserted });
+      return NextResponse.json({ imported: inserted, updated, balance, services: inserted + updated });
     }
 
     // 3) تحديث رصيد جميع المزودين من سيرفراتهم الخارجية
