@@ -5,6 +5,29 @@ import { db } from "@/lib/db";
 import { readServicesCache, writeServicesCache } from "@/lib/services-cache";
 
 type ServiceRecord = Record<string, unknown>;
+type ServicesPayload = {
+  services: ServiceRecord[];
+  categories: string[];
+  platforms: typeof platforms;
+  count: number;
+};
+
+const SERVICES_READ_TIMEOUT_MS = 2_200;
+let servicesLoadInFlight: Promise<ServicesPayload> | null = null;
+
+async function withTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 async function getProviderServices(): Promise<ServiceRecord[]> {
   try {
@@ -56,56 +79,62 @@ const platforms = [
   { id: "all", name: "الكل", color: "var(--color-primary)" },
 ];
 
+async function buildServicesPayload(): Promise<ServicesPayload> {
+  const [servicesResult, providerServices] = await Promise.all([
+    // القراءة الخارجية للكتالوج فقط؛ لا تنفذ أي إنشاء أو تعديل طلب.
+    withTimeout(getServices(SERVICES_READ_TIMEOUT_MS).catch(() => [] as ServiceRecord[]), [], SERVICES_READ_TIMEOUT_MS),
+    withTimeout(getProviderServices(), [], SERVICES_READ_TIMEOUT_MS),
+  ]);
+  const services = Array.isArray(servicesResult) ? servicesResult : [];
+
+  // دمج خدمات المزودين الخارجيين مع الخدمات المحلية
+  const providerMapped = providerServices.map((s: ServiceRecord) => ({
+    ...s,
+    service: s.local_id != null ? `provider:${String(s.local_id)}` : String(s.service),
+    remote_service_id: String(s.service),
+    rate: String(s.rate),
+    min: String(s.min),
+    max: String(s.max),
+    refill: false,
+    source: "provider",
+    provider_id: s.provider_id,
+    provider_name: s.provider_name,
+    is_new: Number(s.is_new) === 1,
+  }));
+  const merged = [...services, ...providerMapped];
+
+  const enrichedServices = merged.map((s: ServiceRecord) => ({
+    ...s,
+    platform: s.platform || detectPlatform(String(s.category || ""), String(s.name || "")),
+    serviceType: s.serviceType || detectServiceType(String(s.name || "")),
+    name: s.provider_name ? `${String(s.name || "")} [مزود: ${String(s.provider_name)}]` : s.name,
+    is_new: Boolean(s.is_new),
+  }));
+
+  const categories = [...new Set(merged.map((s: ServiceRecord) => String(s.category || "عام")))].sort();
+  const payload: ServicesPayload = {
+    services: enrichedServices,
+    categories,
+    platforms,
+    count: merged.length,
+  };
+  // لا نحول تعثر المزود إلى كاش فارغ لمدة دقيقة كاملة.
+  if (merged.length > 0) writeServicesCache(payload);
+  return payload;
+}
+
 export async function GET() {
+  const cached = readServicesCache();
+  if (cached) return json(cached);
+
+  const load = servicesLoadInFlight ?? buildServicesPayload();
+  servicesLoadInFlight = load;
   try {
-    const cached = readServicesCache();
-    if (cached) return json(cached);
-
-    const [servicesResult, providerServices] = await Promise.all([
-      getServices().catch(() => {
-        // مزود Follower غير مربوط بمفتاح — نعمل بالخدمات المحلية ومزودين فقط
-        return [] as ServiceRecord[];
-      }),
-      getProviderServices(),
-    ]);
-    const services = Array.isArray(servicesResult) ? servicesResult : [];
-
-    // دمج خدمات المزودين الخارجيين مع الخدمات المحلية
-    const providerMapped = providerServices.map((s: ServiceRecord) => ({
-      ...s,
-      service: s.local_id != null ? `provider:${String(s.local_id)}` : String(s.service),
-      remote_service_id: String(s.service),
-      rate: String(s.rate),
-      min: String(s.min),
-      max: String(s.max),
-      refill: false,
-      source: "provider",
-      provider_id: s.provider_id,
-      provider_name: s.provider_name,
-      is_new: Number(s.is_new) === 1,
-    }));
-    const merged = [...services, ...providerMapped];
-
-    const enrichedServices = merged.map((s: ServiceRecord) => ({
-      ...s,
-      platform: s.platform || detectPlatform(String(s.category || ""), String(s.name || "")),
-      serviceType: s.serviceType || detectServiceType(String(s.name || "")),
-      name: s.provider_name ? `${String(s.name || "")} [مزود: ${String(s.provider_name)}]` : s.name,
-      is_new: Boolean(s.is_new),
-    }));
-
-    const categories = [...new Set(merged.map((s: ServiceRecord) => String(s.category || "عام")))].sort();
-
-    const payload = {
-      services: enrichedServices,
-      categories,
-      platforms,
-      count: merged.length,
-    };
-    writeServicesCache(payload);
-    return json(payload);
+    return json(await load);
   } catch (error) {
     const message = error instanceof Error ? error.message : "تعذر تحميل الخدمات";
     return json({ error: message }, { status: 500 });
+  } finally {
+    if (servicesLoadInFlight === load) servicesLoadInFlight = null;
   }
 }

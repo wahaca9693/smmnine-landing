@@ -38,16 +38,30 @@ export async function getSession() {
 
 export async function requireAuth() {
   const session = await getSession();
-  if (!session.isLoggedIn) {
+  if (!session.isLoggedIn || typeof session.userId !== "number") {
     throw new Error("Unauthorized");
   }
-  // Check ban status from DB
-  const result = await db.execute({ sql: "SELECT is_banned FROM users WHERE id = ?", args: [session.userId!] });
-  const user = result.rows[0] as { is_banned?: unknown } | undefined;
-  if (user && Number(user.is_banned)) {
-    throw new Error("Account banned");
+
+  // Fail closed instead of allowing a stalled database read to hang every authenticated route.
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      db.execute({ sql: "SELECT is_banned FROM users WHERE id = ?", args: [session.userId] }),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error("Auth state lookup timeout")), 3000);
+      }),
+    ]);
+    const user = result.rows[0] as { is_banned?: unknown } | undefined;
+    if (!user) {
+      throw new Error("Unauthorized");
+    }
+    if (Number(user.is_banned)) {
+      throw new Error("Account banned");
+    }
+    return session;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
-  return session;
 }
 
 export async function requireAdmin() {

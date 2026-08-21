@@ -4,6 +4,7 @@ type SettingsRow = Record<string, unknown>;
 type ApiRateState = { windowStartedAt: number; count: number };
 
 const SETTINGS_TTL_MS = 30_000;
+const SETTINGS_READ_TIMEOUT_MS = 3_000;
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT_PER_KEY = 120;
 const rateStates = new Map<number, ApiRateState>();
@@ -25,14 +26,25 @@ export async function isApiV2Enabled(): Promise<boolean> {
   if (enabledInFlight?.generation === generation) return enabledInFlight.promise;
 
   const load = (async (): Promise<boolean> => {
-    const result = await db.execute("SELECT apiV2Enabled FROM site_settings LIMIT 1");
-    const row = result.rows[0] as unknown as SettingsRow | undefined;
-    const value = readBoolean(row?.apiV2Enabled, true);
-    if (enabledGeneration === generation) {
-      enabledCache = { value, expiresAt: Date.now() + SETTINGS_TTL_MS };
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const result = await Promise.race([
+        db.execute("SELECT apiV2Enabled FROM site_settings LIMIT 1"),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("API_V2_SETTINGS_TIMEOUT")), SETTINGS_READ_TIMEOUT_MS);
+        }),
+      ]);
+      const row = result.rows[0] as unknown as SettingsRow | undefined;
+      const value = readBoolean(row?.apiV2Enabled, true);
+      if (enabledGeneration === generation) {
+        enabledCache = { value, expiresAt: Date.now() + SETTINGS_TTL_MS };
+      }
+      return value;
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
-    return value;
   })();
+
   const inFlight = { generation, promise: load };
   enabledInFlight = inFlight;
   try {
@@ -47,7 +59,13 @@ export function invalidateApiV2EnabledCache(): void {
   enabledGeneration += 1;
 }
 
-export function checkApiRateLimit(keyId: number): { allowed: boolean; remaining: number; retryAfter: number } {
+export function checkApiRateLimit(
+  keyId: number,
+  configuredLimit = RATE_LIMIT_PER_KEY,
+): { allowed: boolean; remaining: number; retryAfter: number } {
+  const limit = Number.isFinite(configuredLimit)
+    ? Math.min(Math.max(Math.floor(configuredLimit), 10), 5_000)
+    : RATE_LIMIT_PER_KEY;
   const now = Date.now();
   const current = rateStates.get(keyId);
   if (!current || now - current.windowStartedAt >= RATE_WINDOW_MS) {
@@ -57,16 +75,16 @@ export function checkApiRateLimit(keyId: number): { allowed: boolean; remaining:
         if (now - state.windowStartedAt >= RATE_WINDOW_MS) rateStates.delete(id);
       }
     }
-    return { allowed: true, remaining: RATE_LIMIT_PER_KEY - 1, retryAfter: 0 };
+    return { allowed: true, remaining: Math.max(0, limit - 1), retryAfter: 0 };
   }
 
-  if (current.count >= RATE_LIMIT_PER_KEY) {
+  if (current.count >= limit) {
     const retryAfter = Math.max(1, Math.ceil((RATE_WINDOW_MS - (now - current.windowStartedAt)) / 1000));
     return { allowed: false, remaining: 0, retryAfter };
   }
 
   current.count += 1;
-  return { allowed: true, remaining: RATE_LIMIT_PER_KEY - current.count, retryAfter: 0 };
+  return { allowed: true, remaining: Math.max(0, limit - current.count), retryAfter: 0 };
 }
 
 export const API_RATE_LIMIT = RATE_LIMIT_PER_KEY;

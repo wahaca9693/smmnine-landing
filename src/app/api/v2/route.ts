@@ -3,16 +3,17 @@ import { db } from "@/lib/db";
 import { cancelProviderOrder, executeProviderOrder, getProviderOrderStatus } from "@/lib/providers";
 import type { ProviderOrderResult } from "@/lib/providers";
 import { cancelOrder, createOrder, getOrderStatus } from "@/lib/follower";
-import { findCatalogService, loadServiceCatalog } from "@/lib/service-catalog";
+import { findCatalogService, findCatalogServiceByPublicId, getPublicServiceId, loadServiceCatalog } from "@/lib/service-catalog";
 import { canRequestOrderCancellation, normalizeOrderStatus, orderStatusKey } from "@/lib/order-status";
 import { API_RATE_LIMIT, checkApiRateLimit, isApiV2Enabled } from "@/lib/api-v2-guard";
 import { resolveApiKey } from "@/lib/api-key-cache";
+import { getApiKeyPolicy, type ApiKeyPolicy } from "@/lib/api-key-policy";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type JsonRecord = Record<string, unknown>;
-type ApiResolution = { userId: number; keyId: number };
+type ApiResolution = { userId: number; keyId: number; policy: ApiKeyPolicy };
 
 const pendingApiUsage = new Map<number, number>();
 let usageFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -46,6 +47,9 @@ function idempotencyKey(request: Request, body: JsonRecord): string | null {
 }
 
 async function authorizeApi(request: Request): Promise<ApiResolution | NextResponse> {
+  const resolved = await resolveApiKeyFromRequest(request);
+  if (!resolved) return json({ error: "مفتاح API غير صالح أو غير نشط" }, { status: 401 });
+
   try {
     if (!(await isApiV2Enabled())) {
       return json({ error: "واجهة API v2 متوقفة مؤقتًا من الإدارة" }, { status: 503, headers: { "Retry-After": "60" } });
@@ -54,11 +58,10 @@ async function authorizeApi(request: Request): Promise<ApiResolution | NextRespo
     return json({ error: "تعذر التحقق من حالة واجهة API حاليًا" }, { status: 503, headers: { "Retry-After": "30" } });
   }
 
-  const resolved = await resolveApiKeyFromRequest(request);
-  if (!resolved) return json({ error: "مفتاح API غير صالح أو غير نشط" }, { status: 401 });
-  const rate = checkApiRateLimit(resolved.keyId);
+  const policy = await getApiKeyPolicy(resolved.keyId);
+  const rate = checkApiRateLimit(resolved.keyId, policy.customRateLimit);
   const rateHeaders = {
-    "X-RateLimit-Limit": String(API_RATE_LIMIT),
+    "X-RateLimit-Limit": String(policy.customRateLimit || API_RATE_LIMIT),
     "X-RateLimit-Remaining": String(rate.remaining),
   };
   if (!rate.allowed) {
@@ -67,7 +70,7 @@ async function authorizeApi(request: Request): Promise<ApiResolution | NextRespo
       headers: { ...rateHeaders, "Retry-After": String(rate.retryAfter) },
     });
   }
-  return resolved;
+  return { ...resolved, policy };
 }
 
 function asRecord(value: unknown): JsonRecord {
@@ -84,6 +87,18 @@ function json(data: unknown, init?: ResponseInit) {
       ...(init?.headers || {}),
     },
   });
+}
+
+async function publicServiceIdForOrder(row: JsonRecord): Promise<string | null> {
+  const stored = String(row.public_service_id ?? "").trim();
+  if (/^svc_[a-f0-9]{20}$/.test(stored)) return stored;
+  const serviceId = String(row.service_id ?? "").trim();
+  const providerId = Number(row.provider_id);
+  const catalog = await loadServiceCatalog().catch(() => []);
+  const matched = catalog.find((service) => providerId > 0
+    ? service.providerId === providerId && String(service.providerServiceId ?? "") === serviceId
+    : service.source === "follower" && service.remoteServiceId === serviceId);
+  return matched ? getPublicServiceId(matched) : null;
 }
 
 function isConfirmedCancellation(data: unknown): boolean {
@@ -124,7 +139,7 @@ async function refundFailedOrder(orderId: number, userId: number, charge: number
 }
 
 // بوابة API العامة SMM v2 — للمستخدمين (تستقبل key أو Bearer token)
-async function resolveApiKeyFromRequest(request: Request): Promise<ApiResolution | null> {
+async function resolveApiKeyFromRequest(request: Request): Promise<{ userId: number; keyId: number } | null> {
   const url = new URL(request.url);
   const keyParam = url.searchParams.get("key");
   const auth = request.headers.get("authorization") || "";
@@ -143,14 +158,42 @@ export async function GET(request: Request) {
   const resolved = authorization;
 
   const url = new URL(request.url);
+  const action = url.searchParams.get("action");
+  if (action === "info" || action === "capabilities") {
+    return json({
+      api_version: "v2",
+      service_id_format: "svc_<20 lowercase hex>",
+      wallet_scope: "authenticated_user_only",
+      rate_limit: {
+        limit_per_minute: resolved.policy.customRateLimit || API_RATE_LIMIT,
+        remaining: checkApiRateLimit(resolved.keyId, resolved.policy.customRateLimit).remaining,
+      },
+      permissions: {
+        catalog: resolved.policy.allowCatalog,
+        balance: resolved.policy.allowBalance,
+        order_status: resolved.policy.allowOrderStatus,
+        order_create: resolved.policy.allowOrderCreate,
+        order_cancel: resolved.policy.allowOrderCancel,
+      },
+      hidden_services_count: resolved.policy.hiddenServices.length,
+      idempotency: "supported_for_order_creation",
+    });
+  }
+  if (action === "balance") {
+    if (!resolved.policy.allowBalance) return json({ error: "صلاحية الرصيد غير مفعّلة لهذا المفتاح" }, { status: 403 });
+    const balanceResult = await db.execute({ sql: "SELECT balance FROM users WHERE id = ?", args: [resolved.userId] });
+    const balance = Number((balanceResult.rows[0] as unknown as JsonRecord | undefined)?.balance ?? 0);
+    return json({ balance: Number.isFinite(balance) ? balance : 0, currency: "USD" });
+  }
   const rawOrderId = url.searchParams.get("order");
   const orderId = rawOrderId ? Number(rawOrderId) : null;
   if (rawOrderId && (!Number.isInteger(orderId) || Number(orderId) <= 0)) {
     return json({ error: "رقم الطلب غير صالح" }, { status: 400 });
   }
   if (orderId) {
+    if (!resolved.policy.allowOrderStatus) return json({ error: "صلاحية متابعة الطلبات غير مفعّلة لهذا المفتاح" }, { status: 403 });
     const result = await db.execute({
-      sql: "SELECT id, service_id, service_name, link, quantity, charge, status, smmnine_order_id, provider_id, start_count, remains, cancel_requested_at, refunded_at, created_at, updated_at FROM orders WHERE id = ? AND user_id = ?",
+      sql: "SELECT id, service_id, public_service_id, service_name, link, quantity, charge, status, smmnine_order_id, provider_id, start_count, remains, cancel_requested_at, refunded_at, created_at, updated_at FROM orders WHERE id = ? AND user_id = ?",
       args: [Number(orderId), resolved.userId],
     });
     const row = result.rows[0] as unknown as JsonRecord | undefined;
@@ -159,7 +202,7 @@ export async function GET(request: Request) {
     return json({
       order: {
         id: row.id,
-        service: row.service_id,
+        service: await publicServiceIdForOrder(row),
         name: row.service_name,
         link: row.link,
         quantity: Number(row.quantity),
@@ -167,8 +210,6 @@ export async function GET(request: Request) {
         status: row.status,
         status_key: orderStatusKey(normalizedStatus),
         can_cancel: canRequestOrderCancellation(normalizedStatus) && !row.refunded_at,
-        provider_order: row.smmnine_order_id ?? null,
-        provider_id: row.provider_id == null ? null : Number(row.provider_id),
         start_count: row.start_count == null ? null : Number(row.start_count),
         remains: row.remains == null ? null : Number(row.remains),
         cancel_requested: Boolean(row.cancel_requested_at),
@@ -183,21 +224,18 @@ export async function GET(request: Request) {
   const pageValue = Number(url.searchParams.get("page") ?? "1");
   const limit = Number.isInteger(limitValue) ? Math.min(Math.max(limitValue, 1), 500) : 100;
   const page = Number.isInteger(pageValue) ? Math.max(pageValue, 1) : 1;
-  const catalog = await loadServiceCatalog();
+  if (!resolved.policy.allowCatalog) return json({ error: "صلاحية كتالوج الخدمات غير مفعّلة لهذا المفتاح" }, { status: 403 });
+  const catalog = (await loadServiceCatalog()).filter((service) => !resolved.policy.hiddenServices.includes(getPublicServiceId(service)));
   const start = (page - 1) * limit;
   const pageItems = catalog.slice(start, start + limit);
   const services = pageItems.map((service) => ({
-    service: service.serviceId,
-    remote_service_id: service.remoteServiceId,
+    service: getPublicServiceId(service),
     name: service.name,
     category: service.category,
     type: service.type,
     rate: service.rate,
     min: service.min,
     max: service.max,
-    source: service.source,
-    provider_id: service.providerId,
-    local_service_id: service.providerServiceId,
   }));
   return json({
     services,
@@ -217,6 +255,7 @@ export async function POST(request: Request) {
   const body = asRecord(await request.json().catch(() => ({})));
 
   if (body.action === "cancel") {
+    if (!resolved.policy.allowOrderCancel) return json({ error: "صلاحية إلغاء الطلبات غير مفعّلة لهذا المفتاح" }, { status: 403 });
     const orderId = Number(body.id);
     if (!Number.isInteger(orderId) || orderId <= 0) return json({ error: "يرجى إرسال رقم طلب صالح" }, { status: 400 });
 
@@ -303,6 +342,8 @@ export async function POST(request: Request) {
     });
   }
 
+  if (!resolved.policy.allowOrderCreate) return json({ error: "صلاحية إنشاء الطلبات غير مفعّلة لهذا المفتاح" }, { status: 403 });
+
   let requestIdempotencyKey: string | null = null;
   try {
     requestIdempotencyKey = idempotencyKey(request, body);
@@ -321,7 +362,6 @@ export async function POST(request: Request) {
         replayed: true,
         order: {
           id: Number(existing.id),
-          smmnine_order_id: existing.smmnine_order_id ?? null,
           service_name: existing.service_name,
           charge: Number(existing.charge),
           status: existing.status,
@@ -345,13 +385,18 @@ export async function POST(request: Request) {
     return json({ error: "الكمية يجب أن تكون رقمًا صحيحًا موجبًا" }, { status: 400 });
   }
 
-  const svc = await findCatalogService(service);
+  const svc = await findCatalogServiceByPublicId(service) ?? await findCatalogService(service);
   if (!svc) {
     const ambiguous = !service.startsWith("provider:") && (await loadServiceCatalog())
       .filter((item) => item.remoteServiceId === service).length > 1;
     if (ambiguous) {
-      return json({ error: "معرّف الخدمة غير فريد؛ استخدم المعرّف الظاهر بصيغة provider:<id>" }, { status: 409 });
+      return json({ error: "معرّف الخدمة غير فريد؛ استخدم المعرّف العام الظاهر بصيغة svc_<id>" }, { status: 409 });
     }
+    return json({ error: "الخدمة غير متوفرة أو غير نشطة" }, { status: 400 });
+  }
+
+  const publicServiceId = getPublicServiceId(svc);
+  if (resolved.policy.hiddenServices.includes(publicServiceId)) {
     return json({ error: "الخدمة غير متوفرة أو غير نشطة" }, { status: 400 });
   }
 
@@ -369,43 +414,36 @@ export async function POST(request: Request) {
     return json({ error: "معرّف خدمة follower غير مدعوم حاليًا" }, { status: 400 });
   }
 
-  const userResult = await db.execute({ sql: "SELECT balance FROM users WHERE id = ?", args: [resolved.userId] });
-  const user = userResult.rows[0] as unknown as JsonRecord | undefined;
-  if (!user || Number(user.balance) < cost) {
-    return json({ error: "رصيد المحفظة غير كافٍ" }, { status: 400 });
-  }
-
-  const debit = await db.execute({
-    sql: "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
-    args: [cost, resolved.userId, cost],
-  });
-  if (Number(debit.rowsAffected || 0) !== 1) {
-    return json({ error: "رصيد المحفظة غير كافٍ أو تغيّر أثناء المعالجة" }, { status: 409 });
-  }
-
   let orderId = 0;
+  let transaction: Awaited<ReturnType<typeof db.transaction>> | null = null;
   try {
-    const order = await db.execute({
-      sql: `INSERT INTO orders (user_id, provider_id, service_id, service_name, link, quantity, charge, status, idempotency_key)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'processing', ?)`,
-      args: [resolved.userId, svc.providerId, svc.providerServiceId ?? Number(svc.remoteServiceId), String(svc.name), String(link), qty, cost, requestIdempotencyKey],
+    transaction = await db.transaction("write");
+    const debit = await transaction.execute({
+      sql: "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
+      args: [cost, resolved.userId, cost],
+    });
+    if (Number(debit.rowsAffected || 0) !== 1) {
+      await transaction.rollback();
+      return json({ error: "رصيد المحفظة غير كافٍ أو تغيّر أثناء المعالجة" }, { status: 409 });
+    }
+
+    const order = await transaction.execute({
+      sql: `INSERT INTO orders (user_id, provider_id, service_id, public_service_id, service_name, link, quantity, charge, status, idempotency_key)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?)`,
+      args: [resolved.userId, svc.providerId, svc.providerServiceId ?? Number(svc.remoteServiceId), getPublicServiceId(svc), String(svc.name), String(link), qty, cost, requestIdempotencyKey],
     });
     orderId = Number(order.lastInsertRowid);
-    await db.execute({
+    await transaction.execute({
       sql: "INSERT INTO provider_order_logs (local_order_id, provider_id, remote_order_id, status) VALUES (?, ?, NULL, 'pending')",
       args: [orderId, svc.providerId],
     });
+    await transaction.commit();
+    transaction = null;
   } catch (error: unknown) {
-    await db.execute({ sql: "UPDATE users SET balance = balance + ? WHERE id = ?", args: [cost, resolved.userId] });
-    if (orderId > 0) {
-      await db.execute({
-        sql: "UPDATE orders SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        args: [orderId],
-      }).catch(() => undefined);
-    }
+    await transaction?.rollback().catch(() => undefined);
     if (requestIdempotencyKey) {
       const existingResult = await db.execute({
-        sql: "SELECT id, smmnine_order_id, service_name, charge, status, link, quantity FROM orders WHERE user_id = ? AND idempotency_key = ? LIMIT 1",
+        sql: "SELECT id, service_id, public_service_id, smmnine_order_id, service_name, charge, status, link, quantity, provider_id FROM orders WHERE user_id = ? AND idempotency_key = ? LIMIT 1",
         args: [resolved.userId, requestIdempotencyKey],
       });
       const existing = existingResult.rows[0] as unknown as JsonRecord | undefined;
@@ -414,7 +452,7 @@ export async function POST(request: Request) {
           replayed: true,
           order: {
             id: Number(existing.id),
-            smmnine_order_id: existing.smmnine_order_id ?? null,
+            service: await publicServiceIdForOrder(existing),
             service_name: existing.service_name,
             charge: Number(existing.charge),
             status: existing.status,
@@ -451,7 +489,7 @@ export async function POST(request: Request) {
     if (!refunded) {
       return json({ error: "فشل المزود وتعذر تثبيت الاسترداد تلقائيًا؛ أوقف إعادة الإرسال وراجع الدعم", order: orderId, reconciliation_required: true }, { status: 503 });
     }
-    return json({ error: `فشل إنشاء الطلب لدى المزود: ${providerError}`, refunded: true }, { status: 502 });
+    return json({ error: "فشل إنشاء الطلب لدى الخدمة وتمت إعادة الرصيد إلى محفظتك", error_code: "UPSTREAM_ORDER_FAILED", refunded: true }, { status: 502 });
   }
 
   const remoteOrderId = providerOrder.remoteOrderId;
@@ -483,7 +521,6 @@ export async function POST(request: Request) {
     return json({
       error: "قبل المزود الطلب، لكن تعذر تثبيته محليًا؛ لا تعاود الإرسال بنفس الطلب",
       order: orderId,
-      provider_order: remoteOrderId,
       reconciliation_required: true,
     }, { status: 503 });
   }
@@ -496,7 +533,6 @@ export async function POST(request: Request) {
     charge: cost,
     status: "processing",
     rem: Number.isFinite(currentBalance) ? currentBalance : 0,
-    provider_order: remoteOrderId,
     idempotency_key: requestIdempotencyKey,
   });
 }

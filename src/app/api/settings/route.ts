@@ -71,7 +71,9 @@ type SettingsRow = Record<string, unknown>;
 type SettingsData = Record<string, string | number | boolean>;
 
 const SETTINGS_CACHE_TTL_MS = 30_000;
+const SETTINGS_READ_TIMEOUT_MS = 2_200;
 let settingsCache: { value: SettingsData; expiresAt: number } | null = null;
+let settingsLoadInFlight: Promise<SettingsData> | null = null;
 
 function readSettings(row: SettingsRow): SettingsData {
   const settings: Record<string, string | number | boolean> = {};
@@ -87,14 +89,37 @@ function readSettings(row: SettingsRow): SettingsData {
   return settings;
 }
 
-async function loadSettingsFromDatabase() {
+async function loadSettingsFromDatabase(): Promise<SettingsData> {
   const now = Date.now();
   if (settingsCache && settingsCache.expiresAt > now) return settingsCache.value;
+  if (settingsLoadInFlight) return settingsLoadInFlight;
 
-  const result = await db.execute("SELECT * FROM site_settings LIMIT 1");
-  const settings = readSettings(result.rows[0] || {});
-  settingsCache = { value: settings, expiresAt: now + SETTINGS_CACHE_TTL_MS };
-  return settings;
+  const load = (async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const result = await Promise.race([
+        db.execute("SELECT * FROM site_settings LIMIT 1"),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("SETTINGS_READ_TIMEOUT")), SETTINGS_READ_TIMEOUT_MS);
+        }),
+      ]);
+      const settings = readSettings(result.rows[0] || {});
+      settingsCache = { value: settings, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS };
+      return settings;
+    } catch {
+      // لا نسمح لتعثر قاعدة البيانات بتعليق واجهة المنصة؛ القيم الافتراضية آمنة للقراءة فقط.
+      return readSettings({});
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  })();
+
+  settingsLoadInFlight = load;
+  try {
+    return await load;
+  } finally {
+    if (settingsLoadInFlight === load) settingsLoadInFlight = null;
+  }
 }
 
 function validColor(value: unknown) {

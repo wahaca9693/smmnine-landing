@@ -6,6 +6,17 @@ import DashboardLayout from "../components/DashboardLayout";
 import { useTheme } from "../components/ThemeProvider";
 import { KeyRound, Copy, Check, RefreshCw, Ban, Plus, ArrowLeft, Terminal, Wallet, Activity, GraduationCap, Server, ShieldAlert, Rocket, Eye, EyeOff } from "lucide-react";
 
+interface ApiPolicy {
+  mode: "classic" | "custom";
+  allowCatalog: boolean;
+  allowBalance: boolean;
+  allowOrderStatus: boolean;
+  allowOrderCreate: boolean;
+  allowOrderCancel: boolean;
+  customRateLimit: number;
+  hiddenServices: string[];
+}
+
 interface ApiKey {
   id: number;
   api_key: string;
@@ -14,6 +25,14 @@ interface ApiKey {
   last_used_at: string | null;
   is_active: number;
   created_at: string;
+  policy: ApiPolicy;
+}
+
+interface PublicService {
+  id: string;
+  name: string;
+  category: string;
+  type: string;
 }
 
 /** صندوق كود ذهبي مع زر نسخ — يعرض الروابط بشكل مرتب داخل حدود واضحة */
@@ -82,6 +101,9 @@ export default function ApiAccessPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [apiBaseUrl, setApiBaseUrl] = useState("/api/v2");
+  const [revealedKey, setRevealedKey] = useState<{ id: number; value: string } | null>(null);
+  const [services, setServices] = useState<PublicService[]>([]);
+  const [savingSettings, setSavingSettings] = useState(false);
 
   const refresh = useCallback(async () => {
     setMessage(null);
@@ -120,9 +142,9 @@ export default function ApiAccessPage() {
     return () => window.clearTimeout(timer);
   }, [refresh]);
 
-  const copy = async (key: ApiKey) => {
-    await navigator.clipboard.writeText(key.api_key);
-    setCopiedId(key.id);
+  const copy = async (value: string, id: number) => {
+    await navigator.clipboard.writeText(value);
+    setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
@@ -139,7 +161,8 @@ export default function ApiAccessPage() {
       if (data.apiBaseUrl) setApiBaseUrl(String(data.apiBaseUrl));
       if (data.error) setMessage(String(data.error));
       else {
-        setMessage("تم إنشاء المفتاح ورابط API الخاص بك بنجاح");
+        if (data.apiKey && data.keyId) setRevealedKey({ id: Number(data.keyId), value: String(data.apiKey) });
+        setMessage("تم إنشاء المفتاح. احفظه الآن لأنه لن يظهر كاملًا مرة أخرى");
         await refresh();
       }
     } catch {
@@ -161,7 +184,9 @@ export default function ApiAccessPage() {
       if (data.apiBaseUrl) setApiBaseUrl(String(data.apiBaseUrl));
       if (data.error) setMessage(String(data.error));
       else {
-        setMessage(action === "revoke" ? "تم إلغاء المفتاح" : "تم تجديد المفتاح ورابط API ثابت");
+        if (action === "regenerate" && data.apiKey) setRevealedKey({ id, value: String(data.apiKey) });
+        if (action === "revoke" && revealedKey?.id === id) setRevealedKey(null);
+        setMessage(action === "revoke" ? "تم إلغاء المفتاح" : "تم تجديد المفتاح. احفظه الآن لأنه لن يظهر كاملًا مرة أخرى");
         await refresh();
       }
     } catch {
@@ -169,9 +194,66 @@ export default function ApiAccessPage() {
     }
   };
 
+  const loadServices = async () => {
+    try {
+      const res = await fetch("/api/api-access?resource=catalog", { cache: "no-store" });
+      const data = await res.json();
+      if (data.services) setServices(data.services as PublicService[]);
+      else setMessage(String(data.error || "تعذر تحميل كتالوج الخدمات"));
+    } catch {
+      setMessage("تعذر تحميل كتالوج الخدمات الآن. حاول مرة أخرى.");
+    }
+  };
+
+  const savePolicy = async (key: ApiKey, patch: Partial<ApiPolicy>) => {
+    setSavingSettings(true);
+    setMessage(null);
+    const policy = { ...key.policy, ...patch };
+    try {
+      const res = await fetch("/api/api-access", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: key.id, action: "settings", ...policy }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setMessage(String(data.error));
+      } else {
+        setKeys((current) => current.map((item) => item.id === key.id ? { ...item, policy: data.policy as ApiPolicy } : item));
+        setMessage("تم حفظ إعدادات المفتاح فورًا");
+      }
+    } catch {
+      setMessage("تعذر حفظ الإعدادات الآن. حاول مرة أخرى.");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const resetPolicy = async (key: ApiKey) => {
+    setSavingSettings(true);
+    try {
+      const res = await fetch("/api/api-access", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: key.id, action: "reset-settings" }),
+      });
+      const data = await res.json();
+      if (data.error) setMessage(String(data.error));
+      else {
+        setKeys((current) => current.map((item) => item.id === key.id ? { ...item, policy: data.policy as ApiPolicy } : item));
+        setMessage("عادت إعدادات المفتاح إلى الوضع الكلاسيكي");
+      }
+    } catch {
+      setMessage("تعذر إعادة الإعدادات الآن. حاول مرة أخرى.");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
   const activeKey = keys.find((k) => Number(k.is_active));
   const API_URL = apiBaseUrl;
-  const authHeader = activeKey ? `Authorization: Bearer ${activeKey.api_key}` : "Authorization: Bearer YOUR_API_KEY";
+  const activeRawKey = activeKey && revealedKey?.id === activeKey.id ? revealedKey.value : null;
+  const authHeader = activeRawKey ? `Authorization: Bearer ${activeRawKey}` : "Authorization: Bearer YOUR_API_KEY";
 
   return (
     <DashboardLayout>
@@ -253,16 +335,17 @@ export default function ApiAccessPage() {
               <div className="mt-3 flex items-center gap-2 rounded-2xl border border-[var(--color-gold)]/30 bg-gradient-to-r from-black/70 to-[#1a1204] px-3 py-2.5 shadow-[inset_0_0_24px_-16px_rgba(255,215,0,0.3)]">
                 <Terminal size={14} className="shrink-0 text-[var(--color-gold-bright)]" />
                 <code dir="ltr" className="min-w-0 flex-1 truncate font-mono text-[11px] text-white">
-                  {activeKey.api_key}
+                  {activeRawKey || activeKey.api_key}
                 </code>
                 <button
-                  onClick={() => copy(activeKey)}
+                  onClick={() => activeRawKey && copy(activeRawKey, activeKey.id)}
+                  disabled={!activeRawKey}
                   className="shrink-0 rounded-lg border border-[var(--color-gold)]/40 bg-[var(--color-gold)]/10 px-2.5 py-1.5 text-[10px] font-black text-[var(--color-gold-bright)] transition hover:bg-[var(--color-gold)]/20"
                 >
                   {copiedId === activeKey.id ? (
                     <span className="flex items-center gap-1"><Check size={10} strokeWidth={4} /> تم</span>
                   ) : (
-                    <span className="flex items-center gap-1"><Copy size={10} /> نسخ</span>
+                    <span className="flex items-center gap-1"><Copy size={10} /> {activeRawKey ? "نسخ" : "يظهر مرة واحدة"}</span>
                   )}
                 </button>
               </div>
@@ -343,6 +426,114 @@ export default function ApiAccessPage() {
           </div>
         </div>
 
+        {activeKey && (
+          <div className="rounded-3xl border border-[var(--color-gold)]/30 bg-gradient-to-br from-[#33260c] via-[#241a08] to-[#171004] p-5 shadow-[0_0_40px_-16px_rgba(255,215,0,0.35),inset_0_1px_0_rgba(255,215,0,0.15)]">
+            <div className="mb-1 flex items-center gap-2 text-sm font-black text-white">
+              <ShieldAlert size={16} className="text-[var(--color-gold-bright)]" /> إعدادات التحكم بمفتاح API
+            </div>
+            <p className="mb-4 text-[11px] leading-relaxed text-zinc-400">اختر الإعدادات الكلاسيكية أو خصّص ما يستطيع هذا المفتاح الوصول إليه. التغيير يخص هذا المفتاح فقط ولا يغيّر محفظتك أو مفاتيحك الأخرى.</p>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => resetPolicy(activeKey)}
+                disabled={savingSettings || activeKey.policy.mode === "classic"}
+                className={`rounded-xl border px-3 py-2.5 text-[11px] font-black transition ${activeKey.policy.mode === "classic" ? "border-[var(--color-gold)] bg-[var(--color-gold)]/15 text-[var(--color-gold-bright)]" : "border-white/10 bg-black/20 text-zinc-400 hover:border-[var(--color-gold)]/40"}`}
+              >
+                كلاسيكي — كل الصلاحيات
+              </button>
+              <button
+                type="button"
+                onClick={() => savePolicy(activeKey, { mode: "custom" })}
+                disabled={savingSettings}
+                className={`rounded-xl border px-3 py-2.5 text-[11px] font-black transition ${activeKey.policy.mode === "custom" ? "border-[var(--color-gold)] bg-[var(--color-gold)]/15 text-[var(--color-gold-bright)]" : "border-white/10 bg-black/20 text-zinc-400 hover:border-[var(--color-gold)]/40"}`}
+              >
+                مخصص — تحكم دقيق
+              </button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {([
+                ["allowCatalog", "قراءة كتالوج الخدمات", "عرض الخدمات العامة والأسعار"],
+                ["allowBalance", "قراءة الرصيد", "قراءة رصيد محفظتك فقط"],
+                ["allowOrderStatus", "متابعة الطلبات", "قراءة حالة طلبات هذا المفتاح"],
+                ["allowOrderCreate", "إنشاء الطلبات", "إرسال طلب جديد والخصم من محفظتك"],
+                ["allowOrderCancel", "إلغاء الطلبات", "طلب إلغاء الطلب حسب حالته"],
+              ] as const).map(([field, label, description]) => (
+                <label key={field} className="flex cursor-pointer items-start gap-2 rounded-2xl border border-white/10 bg-black/20 p-3">
+                  <input
+                    type="checkbox"
+                    checked={activeKey.policy[field]}
+                    disabled={savingSettings}
+                    onChange={(event) => savePolicy(activeKey, { [field]: event.target.checked } as Partial<ApiPolicy>)}
+                    className="mt-0.5 h-4 w-4 accent-[#f4c95d]"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-[11px] font-black text-white">{label}</span>
+                    <span className="mt-0.5 block text-[10px] text-zinc-500">{description}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            <label className="mt-3 block rounded-2xl border border-white/10 bg-black/20 p-3">
+              <span className="flex items-center justify-between gap-2 text-[11px] font-black text-white">
+                <span>حد الطلبات في الدقيقة</span>
+                <span className="text-[var(--color-gold-bright)]">{activeKey.policy.customRateLimit}</span>
+              </span>
+              <input
+                type="range"
+                min={10}
+                max={5000}
+                step={10}
+                value={activeKey.policy.customRateLimit}
+                disabled={savingSettings}
+                onChange={(event) => savePolicy(activeKey, { customRateLimit: Number(event.target.value), mode: "custom" })}
+                className="mt-2 w-full accent-[#f4c95d]"
+              />
+              <span className="mt-1 block text-[10px] text-zinc-500">يُطبّق على هذا المفتاح فقط، والحد الافتراضي الآمن 120 طلبًا في الدقيقة.</span>
+            </label>
+
+            <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-[11px] font-black text-white">إخفاء خدمات من كتالوج هذا المفتاح</div>
+                  <div className="mt-0.5 text-[10px] text-zinc-500">الخدمات المخفية لن تظهر ولن يمكن طلبها بهذا المفتاح، دون كشف مصدرها.</div>
+                </div>
+                <button type="button" onClick={() => void loadServices()} className="shrink-0 rounded-xl border border-[var(--color-gold)]/40 bg-[var(--color-gold)]/10 px-3 py-2 text-[10px] font-black text-[var(--color-gold-bright)]">تحميل الكتالوج</button>
+              </div>
+              {services.length > 0 && (
+                <div className="mt-3 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-white/10 p-2">
+                  {services.map((service) => {
+                    const hidden = activeKey.policy.hiddenServices.includes(service.id);
+                    return (
+                      <label key={service.id} className="flex cursor-pointer items-center gap-2 rounded-xl bg-white/[0.03] p-2">
+                        <input
+                          type="checkbox"
+                          checked={hidden}
+                          disabled={savingSettings}
+                          onChange={(event) => {
+                            const hiddenServices = event.target.checked
+                              ? [...activeKey.policy.hiddenServices, service.id]
+                              : activeKey.policy.hiddenServices.filter((id) => id !== service.id);
+                            void savePolicy(activeKey, { hiddenServices, mode: "custom" });
+                          }}
+                          className="h-4 w-4 accent-[#f4c95d]"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[10px] font-bold text-zinc-200">{service.name}</span>
+                          <span dir="ltr" className="block truncate font-mono text-[9px] text-zinc-600">{service.id}</span>
+                        </span>
+                        <span className="text-[9px] text-zinc-500">{hidden ? "مخفية" : "ظاهرة"}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* دليل الاستخدام — صناديق كود منظمة بدل النصوص المكسورة */}
         {activeKey && (
           <div className="rounded-3xl border border-[var(--color-gold)]/30 bg-gradient-to-br from-[#33260c] via-[#241a08] to-[#171004] p-5 shadow-[0_0_40px_-16px_rgba(255,215,0,0.35),inset_0_1px_0_rgba(255,215,0,0.15)]">
@@ -365,16 +556,16 @@ export default function ApiAccessPage() {
               />
               <CodeBox
                 title="4. إرسال طلب — جسم JSON"
-                code={`{"service": "provider:123", "link": "https://instagram.com/user", "quantity": 1000, "idempotency_key": "order_20260821_abc123"}`}
+                code={`{"service": "svc_0123456789abcdef0123", "link": "https://instagram.com/user", "quantity": 1000, "idempotency_key": "order_20260821_abc123"}`}
               />
               <CodeBox
                 title="5. إعادة الإرسال الآمنة — ترويسة اختيارية"
-                code={`Idempotency-Key: order_20260821_abc123\nAuthorization: Bearer ${activeKey}`}
+                code={`Idempotency-Key: order_20260821_abc123\nAuthorization: Bearer ${activeRawKey ?? "YOUR_API_KEY"}`}
                 compact
               />
               <p className="text-zinc-500">
-                استخدم <span className="font-bold text-zinc-300">provider:&lt;local_id&gt;</span> للخدمات التابعة لمزود محدد. إذا استخدمت المعرّف البعيد وحده وكان مكررًا بين مزودين، سيعيد API حالة 409 ويطلب المعرّف المؤهل.
-                احتفظ بمفتاح idempotency نفسه عند إعادة إرسال الطلب بعد مهلة أو خطأ شبكي؛ سيعيد API الطلب المحلي نفسه ولن يخصم الرصيد أو يرسل طلبًا مكررًا.
+                استخدم <span className="font-bold text-zinc-300">svc_&lt;public_id&gt;</span> كما يظهر في كتالوج الخدمات. هذا المعرّف موحّد ولا يكشف مصدر الخدمة أو أي مزود داخلي.
+                يمكنك قراءة الرصيد عبر <span className="font-bold text-zinc-300">GET ?action=balance</span>، وقراءة حالة طلبك عبر <span className="font-bold text-zinc-300">GET ?order=&lt;id&gt;</span>، وتبقى الصلاحيات قابلة للتخصيص من لوحة الإعدادات أدناه. احتفظ بمفتاح idempotency نفسه عند إعادة إرسال الطلب بعد مهلة أو خطأ شبكي؛ سيعيد API الطلب المحلي نفسه ولن يخصم الرصيد أو يرسل طلبًا مكررًا.
                 الأسعار تخصم من رصيد محفظتك مباشرة حسب عرض المنصة، وكل طلب يصل عبر هذا المفتاح يسجل في قائمة طلباتك.
                 عند الضغط على &quot;تغيير المفتاح&quot; يتم تعطيل المفتاح السابق فورًا وتفعيل المفتاح الجديد فقط — أي طلب يصل بالمفتاح القديم لن يُنفذ بعد ذلك.
               </p>

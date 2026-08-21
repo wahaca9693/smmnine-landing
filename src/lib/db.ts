@@ -373,6 +373,21 @@ const schemaStatements = [
     is_active INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
+  `CREATE TABLE IF NOT EXISTS api_key_settings (
+    api_key_id INTEGER PRIMARY KEY,
+    mode TEXT NOT NULL DEFAULT 'classic',
+    allow_catalog INTEGER NOT NULL DEFAULT 1,
+    allow_balance INTEGER NOT NULL DEFAULT 1,
+    allow_order_status INTEGER NOT NULL DEFAULT 1,
+    allow_order_create INTEGER NOT NULL DEFAULT 1,
+    allow_order_cancel INTEGER NOT NULL DEFAULT 1,
+    custom_rate_limit INTEGER NOT NULL DEFAULT 120,
+    hidden_services TEXT NOT NULL DEFAULT '[]',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE
+  )`,
+  `INSERT OR IGNORE INTO api_key_settings (api_key_id) SELECT id FROM api_keys`,
   `INSERT OR IGNORE INTO site_settings (id) VALUES ('default')`,
 ] as const;
 
@@ -386,6 +401,7 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS idx_orders_provider_status ON orders(provider_id, status, updated_at DESC)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_user_idempotency ON orders(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_api_keys_user_active ON api_keys(user_id, is_active)`,
+  `CREATE INDEX IF NOT EXISTS idx_api_key_settings_updated ON api_key_settings(updated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_admin_navigation_active ON admin_navigation_items(is_active, audience, sort_order, id)`,
   `CREATE INDEX IF NOT EXISTS idx_auth_attempts_updated_at ON auth_attempts(updated_at)`,
@@ -404,6 +420,7 @@ const schemaMigrations: SchemaMigration[] = [
       ["remains", "INTEGER"],
       ["cancel_requested_at", "DATETIME"],
       ["refunded_at", "DATETIME"],
+      ["public_service_id", "TEXT"],
     ],
   },
   {

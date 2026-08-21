@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { db } from "@/lib/db";
 import { getServices } from "@/lib/follower";
 
@@ -35,6 +36,18 @@ const PROVIDER_CATALOG_TIMEOUT_MS = 2_500;
 let catalogCache: { at: number; payload: CatalogService[] } | null = null;
 let catalogGeneration = 0;
 let catalogInFlight: { generation: number; promise: Promise<CatalogService[]> } | null = null;
+
+export function getPublicServiceId(service: CatalogService): string {
+  const identity = `${service.source}:${service.providerId ?? 0}:${service.remoteServiceId}`;
+  return `svc_${createHash("sha256").update(identity).digest("hex").slice(0, 20)}`;
+}
+
+export async function findCatalogServiceByPublicId(publicServiceId: string): Promise<CatalogService | null> {
+  const normalized = String(publicServiceId ?? "").trim();
+  if (!/^svc_[a-f0-9]{20}$/.test(normalized)) return null;
+  const catalog = await loadServiceCatalog();
+  return catalog.find((service) => getPublicServiceId(service) === normalized) ?? null;
+}
 
 export function invalidateServiceCatalogCache(): void {
   catalogCache = null;

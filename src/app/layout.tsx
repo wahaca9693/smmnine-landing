@@ -20,8 +20,14 @@ type Branding = { siteName: string; siteDescription: string; brandMediaUrl: stri
 type BrandingRow = { siteName?: unknown; siteDescription?: unknown; brandMediaUrl?: unknown; brandMediaType?: unknown };
 
 async function getBranding(): Promise<Branding> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
-    const result = await db.execute("SELECT siteName, siteDescription, brandMediaUrl, brandMediaType FROM site_settings LIMIT 1");
+    const result = await Promise.race([
+      db.execute("SELECT siteName, siteDescription, brandMediaUrl, brandMediaType FROM site_settings LIMIT 1"),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error("branding lookup timeout")), 1500);
+      }),
+    ]);
     const row = result.rows[0] as BrandingRow | undefined;
     return {
       siteName: typeof row?.siteName === "string" && row.siteName.trim() ? row.siteName.trim() : fallbackBranding.siteName,
@@ -31,6 +37,8 @@ async function getBranding(): Promise<Branding> {
     };
   } catch {
     return fallbackBranding;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
 
