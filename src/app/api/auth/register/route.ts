@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { getSession } from "@/lib/auth";
+import type { InStatement, ResultSet } from "@libsql/client";
 import {
   checkAuthRateLimit,
   isSuspiciousRegistration,
@@ -11,6 +12,38 @@ import {
 } from "@/lib/security";
 
 type RegistrationSettingsRow = { registrationEnabled?: unknown };
+type ExistingUserRow = { username?: unknown; email?: unknown };
+
+class RegistrationStorageUnavailable extends Error {
+  constructor() {
+    super("Registration storage unavailable");
+    this.name = "RegistrationStorageUnavailable";
+  }
+}
+
+const REGISTRATION_DB_TIMEOUT_MS = 7000;
+
+async function registrationDbExecute(statement: InStatement, operation: string): Promise<ResultSet> {
+  try {
+    return await Promise.race([
+      db.execute(statement),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new RegistrationStorageUnavailable()), REGISTRATION_DB_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error: unknown) {
+    console.error("Registration storage operation failed", {
+      operation,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    if (error instanceof RegistrationStorageUnavailable) throw error;
+    throw new RegistrationStorageUnavailable();
+  }
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return error instanceof Error && /unique|constraint/i.test(error.message);
+}
 
 export async function POST(request: Request) {
   try {
@@ -33,7 +66,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "يرجى إدخال اسم المستخدم والبريد الإلكتروني وكلمة المرور" }, { status: 400 });
     }
 
-    const registrationSetting = await db.execute("SELECT registrationEnabled FROM site_settings LIMIT 1");
+    const registrationSetting = await registrationDbExecute(
+      { sql: "SELECT registrationEnabled FROM site_settings LIMIT 1", args: [] },
+      "read-registration-setting",
+    );
     const registrationRow = registrationSetting.rows[0] as unknown as RegistrationSettingsRow | undefined;
     const registrationEnabled = registrationSetting.rows.length === 0 || Boolean(Number(registrationRow?.registrationEnabled ?? 1));
     if (!registrationEnabled) {
@@ -89,36 +125,62 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "كلمة المرور يجب أن تحتوي على حروف وأرقام" }, { status: 400 });
     }
 
-    const existingUser = await db.execute({
-      sql: "SELECT id FROM users WHERE username = ? COLLATE NOCASE",
-      args: [username],
-    });
+    // قراءة واحدة للتكرار تقلل زمن التسجيل وتبقي رسالة واضحة للمستخدم.
+    const existingUser = await registrationDbExecute(
+      {
+        sql: "SELECT username, email FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE LIMIT 1",
+        args: [username, email],
+      },
+      "check-registration-uniqueness",
+    );
 
-    if (existingUser.rows.length > 0) {
-      return NextResponse.json({ error: "تعذر إنشاء الحساب بهذه البيانات" }, { status: 400 });
-    }
-
-    const existingEmail = await db.execute({
-      sql: "SELECT id FROM users WHERE email = ? COLLATE NOCASE",
-      args: [email],
-    });
-
-    if (existingEmail.rows.length > 0) {
-      return NextResponse.json({ error: "تعذر إنشاء الحساب بهذه البيانات" }, { status: 400 });
+    const existingRow = existingUser.rows[0] as unknown as ExistingUserRow | undefined;
+    if (existingRow) {
+      const existingUsername = String(existingRow.username ?? "").toLowerCase();
+      return NextResponse.json(
+        {
+          error: existingUsername === username.toLowerCase()
+            ? "اسم المستخدم مستخدم بالفعل. اختر اسمًا آخر."
+            : "هذا البريد الإلكتروني مستخدم بالفعل. استخدم بريدًا آخر أو سجّل الدخول.",
+        },
+        { status: 409 },
+      );
     }
 
     const hash = await bcrypt.hash(password, 12);
-    const result = await db.execute({
-      sql: "INSERT INTO users (username, email, password_hash, balance, role, terms_accepted) VALUES (?, ?, ?, 0, 'user', 1)",
-      args: [username, email, hash],
-    });
+    let result: ResultSet;
+    try {
+      result = await registrationDbExecute(
+        {
+          sql: "INSERT INTO users (username, email, password_hash, balance, role, terms_accepted) VALUES (?, ?, ?, 0, 'user', 1)",
+          args: [username, email, hash],
+        },
+        "create-user",
+      );
+    } catch (error: unknown) {
+      // يعالج سباق التسجيل بين فحص التكرار والإدراج دون كشف رسالة SQL.
+      if (isUniqueConstraintError(error)) {
+        return NextResponse.json({ error: "بيانات الحساب مستخدمة بالفعل. اختر اسمًا أو بريدًا آخر." }, { status: 409 });
+      }
+      throw error;
+    }
 
     const userId = Number(result.lastInsertRowid);
 
-    await db.execute({
-      sql: "INSERT INTO notifications (user_id, title, body) VALUES (?, ?, ?)",
-      args: [userId, "مرحباً بك!", "تم إنشاء حسابك بنجاح. اقرأ شروط الاستخدام قبل الطلب."],
-    });
+    // الإشعار ترحيبي اختياري؛ لا ينبغي أن يمنع تسجيل الحساب إذا تعذر حفظه.
+    try {
+      await registrationDbExecute(
+        {
+          sql: "INSERT INTO notifications (user_id, title, body) VALUES (?, ?, ?)",
+          args: [userId, "مرحباً بك!", "تم إنشاء حسابك بنجاح. اقرأ شروط الاستخدام قبل الطلب."],
+        },
+        "create-welcome-notification",
+      );
+    } catch (error: unknown) {
+      console.warn("Welcome notification was skipped", {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
 
     const session = await getSession();
     session.userId = userId;
@@ -136,11 +198,15 @@ export async function POST(request: Request) {
       },
     });
   } catch (error: unknown) {
-    console.error("Register error:", error);
+    console.error("Register error", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
     if (error instanceof SecurityServiceUnavailable) {
       return NextResponse.json({ error: "حماية التسجيل غير متاحة مؤقتًا. أعد المحاولة بعد قليل." }, { status: 503 });
     }
-    const message = error instanceof Error ? error.message : "حدث خطأ";
-    return NextResponse.json({ error: message }, { status: 500 });
+    if (error instanceof RegistrationStorageUnavailable) {
+      return NextResponse.json({ error: "تعذر إنشاء الحساب حاليًا. تحقق من الاتصال وحاول مرة أخرى." }, { status: 503 });
+    }
+    return NextResponse.json({ error: "تعذر إنشاء الحساب حاليًا. حاول مرة أخرى بعد قليل." }, { status: 500 });
   }
 }
