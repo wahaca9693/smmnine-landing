@@ -21,6 +21,8 @@ export default function LoginPage() {
   const [website, setWebsite] = useState("");
   const [formStartedAt, setFormStartedAt] = useState(() => Date.now());
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [securityCode, setSecurityCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [serviceStatus, setServiceStatus] = useState<"checking" | "online" | "offline">("checking");
   const router = useRouter();
@@ -114,7 +116,20 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/services");
+      // If registration success with security code
+      if (!isLogin && data.securityCode) {
+        setSuccess("تم إنشاء حسابك بنجاح!");
+        setSecurityCode(data.securityCode);
+        setLoading(false);
+        return;
+      }
+
+      // If 2FA is required, redirect to verification page
+      if (data.requires2fa) {
+        router.push("/verify-2fa");
+      } else {
+        router.push("/services");
+      }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "حدث خطأ";
       const isTimeout = err instanceof DOMException && err.name === "AbortError";
@@ -182,17 +197,54 @@ export default function LoginPage() {
             </div>
           )}
 
+          {success && (
+            <div className="mb-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-3 text-center text-sm font-bold text-emerald-400">
+              {success}
+            </div>
+          )}
+
+          {securityCode && (
+            <div className="mb-6 animate-fadeIn rounded-2xl border border-[var(--color-gold)]/30 bg-[var(--color-gold)]/5 p-6 text-center shadow-[0_0_40px_-10px_rgba(212,175,55,0.2)]">
+              <h3 className="mb-2 text-lg font-black text-[var(--color-gold)]">
+                {t('auth.securityCodeTitle') || 'رمز الأمان الخاص بك'}
+              </h3>
+              <p className="mb-5 text-[11px] leading-relaxed text-zinc-400">
+                {t('auth.securityCodeDesc') || 'احفظ هذا الرمز في مكان آمن، لن يظهر لك مرة أخرى. ستحتاج إليه عند كل عملية دخول أو تغيير إعدادات الأمان.'}
+              </p>
+              <div className="mb-6 flex justify-center gap-2">
+                {securityCode.split('').map((char, i) => (
+                  <span key={i} className="flex h-12 w-10 items-center justify-center rounded-xl border border-[var(--color-gold)]/30 bg-[#1c1308] text-2xl font-black text-[var(--color-gold)] shadow-[0_0_15px_rgba(212,175,55,0.1)] ring-1 ring-[var(--color-gold)]/20">
+                    {char}
+                  </span>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => router.push('/verify-2fa')}
+                className="w-full rounded-xl gradient-luxe py-3.5 text-sm font-black text-[#111] shadow-[0_8px_24px_-8px_rgba(212,175,55,0.5)] transition hover:brightness-110"
+              >
+                {t('auth.continueToVerify') || 'متابعة للتحقق والدخول'}
+              </button>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="mb-2 block text-sm font-black text-white">{t("auth.username")}</label>
+              <label className="mb-2 block text-sm font-black text-white">
+                {isLogin ? "اسم المستخدم أو البريد الإلكتروني" : t("auth.username")}
+              </label>
               <div className="relative">
-                <User className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--color-gold)]/70" size={19} />
+                {isLogin && username.includes("@") ? (
+                  <Mail className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--color-gold)]/70" size={19} />
+                ) : (
+                  <User className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--color-gold)]/70" size={19} />
+                )}
                 <input
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5 pr-11 text-white placeholder:text-zinc-500 outline-none focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-gold)]/40"
-                  placeholder={t("auth.usernamePlaceholder")}
+                  placeholder={isLogin ? "ادخل بيانات الدخول" : t("auth.usernamePlaceholder")}
                   autoComplete="username"
                   required
                 />

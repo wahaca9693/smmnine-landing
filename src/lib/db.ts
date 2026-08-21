@@ -389,6 +389,12 @@ const schemaStatements = [
   )`,
   `INSERT OR IGNORE INTO api_key_settings (api_key_id) SELECT id FROM api_keys`,
   `INSERT OR IGNORE INTO site_settings (id) VALUES ('default')`,
+  // Security Updates 2026-08-21
+  `ALTER TABLE users ADD COLUMN login_preference TEXT DEFAULT 'both'`,
+  `ALTER TABLE users ADD COLUMN security_code_hash TEXT`,
+  `ALTER TABLE users ADD COLUMN is_2fa_enabled INTEGER DEFAULT 0`,
+  `ALTER TABLE users ADD COLUMN two_fa_frequency TEXT DEFAULT 'always'`,
+  `ALTER TABLE users ADD COLUMN last_2fa_verified_at DATETIME`,
 ] as const;
 
 const indexStatements = [

@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "../../components/DashboardLayout";
 import { broadcastBrandingUpdate, useTheme } from "../../components/ThemeProvider";
 import Link from "next/link";
 import Image from "next/image";
-import { AlertCircle, ArrowRight, Image as ImageIcon, Palette, RefreshCcw, Save, Trash2, UploadCloud, Video } from "lucide-react";
+import { AlertCircle, ArrowRight, Image as ImageIcon, Palette, RefreshCcw, Save } from "lucide-react";
 
 const fields = [
   { key: "primaryColor", label: "اللون الرئيسي", description: "الأزرار والعناوين المهمة." },
@@ -43,8 +43,7 @@ export default function AdminThemePage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const mediaInputRef = useRef<HTMLInputElement>(null);
+  // Uploading and mediaInputRef are disabled to protect official brand logo
 
   useEffect(() => {
     let active = true;
@@ -74,42 +73,7 @@ export default function AdminThemePage() {
 
   const set = (key: string, value: string) => setSettings((current) => ({ ...current, [key]: value }));
 
-  const uploadMedia = async (file: File) => {
-    const imageTypes = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"];
-    const videoTypes = ["video/mp4", "video/webm", "video/quicktime"];
-    const isVideo = videoTypes.includes(file.type);
-    const isAllowed = imageTypes.includes(file.type) || isVideo;
-    const maxBytes = isVideo ? 50 * 1024 * 1024 : 8 * 1024 * 1024;
-    if (!isAllowed) {
-      setError("نوع الملف غير مدعوم. استخدم صورة JPG أو PNG أو WEBP أو GIF أو SVG، أو فيديو MP4 أو WEBM أو MOV.");
-      return;
-    }
-    if (file.size <= 0 || file.size > maxBytes) {
-      setError(`حجم ${isVideo ? "الفيديو" : "الصورة"} يجب ألا يتجاوز ${isVideo ? "50MB" : "8MB"}.`);
-      return;
-    }
-
-    setUploading(true); setMessage(""); setError("");
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await fetch("/api/admin/branding/upload", { method: "POST", credentials: "include", body: formData });
-      const data = await response.json() as { url?: string; mediaType?: string; error?: string };
-      if (!response.ok || !data.url) throw new Error(data.error || "تعذر رفع الوسيط");
-      setSettings((current) => ({ ...current, brandMediaUrl: data.url || "", brandMediaType: data.mediaType === "video" ? "video" : "image" }));
-      setMessage("تم رفع الوسيط بنجاح. اضغط حفظ الهوية لتطبيقه في المنصة.");
-    } catch (value: unknown) {
-      setError(value instanceof Error ? value.message : "تعذر رفع الوسيط");
-    } finally {
-      setUploading(false);
-      if (mediaInputRef.current) mediaInputRef.current.value = "";
-    }
-  };
-
-  const onMediaChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) void uploadMedia(file);
-  };
+  // Uploading and media changes are intentionally disabled to protect the official brand logo.
 
   const save = async () => {
     const siteName = (settings.siteName || "").trim();
@@ -179,16 +143,15 @@ export default function AdminThemePage() {
         </div>
 
         <section className="admin-card p-4 sm:p-5">
-          <div className="mb-4 flex items-start justify-between gap-3"><div><h2 className="text-lg font-black text-white">الشعار والوسائط</h2><p className="mt-1 text-[10px] leading-5 text-zinc-500">ارفع صورة أو فيديو قصيرًا ليظهر في الهوية. الصور حتى 8MB والفيديو حتى 50MB.</p></div><span className="rounded-xl bg-[var(--color-primary)]/10 p-2 text-[var(--color-primary)]">{settings.brandMediaType === "video" ? <Video size={17} /> : <ImageIcon size={17} />}</span></div>
-          <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-black/15 p-3">
-            {hasMedia ? (settings.brandMediaType === "video" ? <video src={settings.brandMediaUrl} className="h-16 w-16 shrink-0 rounded-xl object-cover" muted autoPlay loop playsInline /> : <Image src={settings.brandMediaUrl} alt="معاينة الشعار" width={64} height={64} unoptimized className="h-16 w-16 shrink-0 rounded-xl object-cover" />) : <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-[var(--color-primary)]/10 text-[var(--color-primary)]"><ImageIcon size={22} /></div>}
-            <div className="min-w-0 flex-1"><p className="truncate text-xs font-black text-zinc-200">{hasMedia ? "وسيط مخصص" : "الشعار الافتراضي"}</p><p className="mt-1 truncate text-[10px] text-zinc-500">{settings.brandMediaUrl || "/logo.gif"}</p></div>
-            {hasMedia && <button type="button" onClick={() => { set("brandMediaUrl", ""); set("brandMediaType", "image"); }} className="admin-action-button text-red-300" title="إزالة الوسيط" aria-label="إزالة الوسيط"><Trash2 size={16} /></button>}
+          <div className="mb-4 flex items-start justify-between gap-3"><div><h2 className="text-lg font-black text-white">الشعار والوسائط</h2><p className="mt-1 text-[10px] leading-5 text-zinc-500">الشعار الرسمي للمنصة ثابت ولا يمكن تغييره لضمان استقرار الهوية.</p></div><span className="rounded-xl bg-zinc-500/10 p-2 text-zinc-500"><ImageIcon size={17} /></span></div>
+          <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-black/15 p-3 opacity-75">
+            {hasMedia ? (settings.brandMediaType === "video" ? <video src={settings.brandMediaUrl} className="h-16 w-16 shrink-0 rounded-xl object-cover" muted autoPlay loop playsInline /> : <Image src={settings.brandMediaUrl} alt="الشعار الرسمي" width={64} height={64} unoptimized className="h-16 w-16 shrink-0 rounded-xl object-cover" />) : <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-[var(--color-primary)]/10 text-[var(--color-primary)]"><ImageIcon size={22} /></div>}
+            <div className="min-w-0 flex-1"><p className="truncate text-xs font-black text-zinc-200">الشعار الرسمي (ثابت)</p><p className="mt-1 truncate text-[10px] text-zinc-500">{settings.brandMediaUrl || "/logo.gif"}</p></div>
           </div>
-          <input ref={mediaInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml,video/mp4,video/webm,video/quicktime" className="hidden" onChange={onMediaChange} />
-          <button type="button" disabled={uploading} onClick={() => mediaInputRef.current?.click()} className="btn-secondary mt-3 flex w-full items-center justify-center gap-2 disabled:opacity-50"><UploadCloud size={16} />{uploading ? "جارٍ رفع الوسيط..." : "رفع صورة أو فيديو"}</button>
-          <FieldLabel label="رابط عام اختياري" description="استخدم رابط HTTPS مباشرًا إذا لم ترد رفع ملف."><input value={settings.brandMediaUrl || ""} onChange={(event) => set("brandMediaUrl", event.target.value)} placeholder="https://..." maxLength={2048} dir="ltr" className="input-premium mt-2 w-full text-left" /></FieldLabel>
-          <div className="mt-3 grid grid-cols-2 gap-2"><button type="button" onClick={() => set("brandMediaType", "image")} className={`btn-secondary ${settings.brandMediaType !== "video" ? "border-[var(--color-gold)] bg-[var(--color-gold)]/15" : ""}`}>صورة<div className="mt-1 text-[10px] font-normal text-zinc-500">للشعار الثابت</div></button><button type="button" onClick={() => set("brandMediaType", "video")} className={`btn-secondary ${settings.brandMediaType === "video" ? "border-[var(--color-gold)] bg-[var(--color-gold)]/15" : ""}`}>فيديو<div className="mt-1 text-[10px] font-normal text-zinc-500">لشعار متحرك قصير</div></button></div>
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-zinc-500/20 bg-zinc-500/5 p-3 text-[10px] font-bold text-zinc-400">
+            <AlertCircle size={14} className="shrink-0" />
+            <span>تغيير الشعار متوقف حاليًا للحفاظ على هوية المنصة الرسمية.</span>
+          </div>
         </section>
 
         <section className="admin-card p-4 sm:p-5">
@@ -198,7 +161,7 @@ export default function AdminThemePage() {
 
         {message && <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 p-3 text-xs font-bold leading-5 text-emerald-200">{message}</div>}
         {error && <ErrorMessage>{error}</ErrorMessage>}
-        <div className="sticky bottom-2 z-20 flex flex-col gap-2 rounded-2xl border border-[var(--color-border)] bg-[rgba(13,10,5,0.94)] p-2 shadow-2xl backdrop-blur sm:flex-row sm:items-center sm:justify-between"><p className="px-2 text-[10px] leading-4 text-zinc-500">الحفظ يحدّث الهوية المركزية والعنوان والواجهة فورًا.</p><button type="button" onClick={save} disabled={saving || uploading} className="btn-gold flex w-full items-center justify-center gap-2 sm:w-auto sm:min-w-48">{saving ? <RefreshCcw className="animate-spin" size={17} /> : <Save size={17} />}{saving ? "جارٍ الحفظ..." : "حفظ الهوية والتطبيق"}</button></div>
+        <div className="sticky bottom-2 z-20 flex flex-col gap-2 rounded-2xl border border-[var(--color-border)] bg-[rgba(13,10,5,0.94)] p-2 shadow-2xl backdrop-blur sm:flex-row sm:items-center sm:justify-between"><p className="px-2 text-[10px] leading-4 text-zinc-500">الحفظ يحدّث الهوية المركزية والعنوان والواجهة فورًا.</p><button type="button" onClick={save} disabled={saving} className="btn-gold flex w-full items-center justify-center gap-2 sm:w-auto sm:min-w-48">{saving ? <RefreshCcw className="animate-spin" size={17} /> : <Save size={17} />}{saving ? "جارٍ الحفظ..." : "حفظ الهوية والتطبيق"}</button></div>
         <Link href="/admin/settings" className="inline-flex items-center gap-1 rounded-xl border border-[var(--color-border)] px-3 py-2 text-xs font-bold text-zinc-300 hover:bg-white/5"><ArrowRight size={14} />العودة إلى مركز الإعدادات</Link>
       </main>
     </DashboardLayout>

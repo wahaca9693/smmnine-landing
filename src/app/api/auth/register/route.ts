@@ -66,12 +66,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "يرجى إدخال اسم المستخدم والبريد الإلكتروني وكلمة المرور" }, { status: 400 });
     }
 
-    const registrationSetting = await registrationDbExecute(
-      { sql: "SELECT registrationEnabled FROM site_settings LIMIT 1", args: [] },
-      "read-registration-setting",
-    );
-    const registrationRow = registrationSetting.rows[0] as unknown as RegistrationSettingsRow | undefined;
-    const registrationEnabled = registrationSetting.rows.length === 0 || Boolean(Number(registrationRow?.registrationEnabled ?? 1));
+    let registrationEnabled = true;
+    try {
+      const registrationSetting = await registrationDbExecute(
+        { sql: "SELECT registrationEnabled FROM site_settings LIMIT 1", args: [] },
+        "read-registration-setting",
+      );
+      const registrationRow = registrationSetting.rows[0] as unknown as RegistrationSettingsRow | undefined;
+      registrationEnabled = registrationSetting.rows.length === 0 || Boolean(Number(registrationRow?.registrationEnabled ?? 1));
+    } catch (e) {
+      console.warn("Could not read registration settings, defaulting to enabled", e);
+    }
     if (!registrationEnabled) {
       return NextResponse.json({ error: "التسجيل الجديد متوقف مؤقتًا من الإدارة. يرجى المحاولة لاحقًا." }, { status: 403 });
     }
@@ -148,15 +153,17 @@ export async function POST(request: Request) {
     }
 
     const hash = await bcrypt.hash(password, 12);
+
+    // Generate a random 6-digit security code for the new user
+    const securityCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const securityCodeHash = await bcrypt.hash(securityCode, 10);
+
     let result: ResultSet;
     try {
-      result = await registrationDbExecute(
-        {
-          sql: "INSERT INTO users (username, email, password_hash, balance, role, terms_accepted) VALUES (?, ?, ?, 0, 'user', 1)",
-          args: [username, email, hash],
-        },
-        "create-user",
-      );
+      result = await db.execute({
+        sql: "INSERT INTO users (username, email, password_hash, security_code_hash, login_preference, balance, role, terms_accepted, is_2fa_enabled, two_fa_frequency) VALUES (?, ?, ?, ?, 'both', 0, 'user', 1, 1, 'always')",
+        args: [username, email, hash, securityCodeHash],
+      });
     } catch (error: unknown) {
       // يعالج سباق التسجيل بين فحص التكرار والإدراج دون كشف رسالة SQL.
       if (isUniqueConstraintError(error)) {
@@ -196,6 +203,7 @@ export async function POST(request: Request) {
         role: "user",
         balance: 0,
       },
+      securityCode, // Return the code to be shown to the user once
     });
   } catch (error: unknown) {
     console.error("Register error", {

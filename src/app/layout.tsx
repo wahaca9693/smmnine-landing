@@ -44,7 +44,7 @@ async function getBranding(): Promise<Branding> {
 
 export async function generateMetadata(): Promise<Metadata> {
   const branding = await getBranding();
-  const mediaIcon = branding.brandMediaType === "image" && branding.brandMediaUrl ? branding.brandMediaUrl : "/logo-icon.png";
+  const mediaIcon = "/logo.gif"; // Fixed official brand logo icon
   return {
     metadataBase: new URL(appUrl),
     title: { default: branding.siteName, template: `%s | ${branding.siteName}` },

@@ -7,6 +7,7 @@ export interface SessionData {
   username?: string;
   role?: string;
   isLoggedIn?: boolean;
+  is2faVerified?: boolean;
 }
 
 const sessionSecret = process.env.SESSION_SECRET;
@@ -46,18 +47,24 @@ export async function requireAuth() {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     const result = await Promise.race([
-      db.execute({ sql: "SELECT is_banned FROM users WHERE id = ?", args: [session.userId] }),
+      db.execute({ sql: "SELECT is_banned, is_2fa_enabled FROM users WHERE id = ?", args: [session.userId] }),
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => reject(new Error("Auth state lookup timeout")), 3000);
       }),
     ]);
-    const user = result.rows[0] as { is_banned?: unknown } | undefined;
+    const user = result.rows[0] as { is_banned?: unknown, is_2fa_enabled?: unknown } | undefined;
     if (!user) {
       throw new Error("Unauthorized");
     }
     if (Number(user.is_banned)) {
       throw new Error("Account banned");
     }
+
+    // If 2FA is enabled but not verified in session, block access except for specific routes
+    if (Number(user.is_2fa_enabled) && !session.is2faVerified) {
+      throw new Error("2FA_REQUIRED");
+    }
+
     return session;
   } finally {
     if (timeoutId) clearTimeout(timeoutId);

@@ -22,7 +22,7 @@ export async function GET() {
 
     const [result, notifCount] = await Promise.all([
       db.execute({
-        sql: "SELECT id, username, email, balance, role FROM users WHERE id = ?",
+        sql: "SELECT id, username, email, balance, role, is_2fa_enabled FROM users WHERE id = ?",
         args: [userId],
       }),
       db.execute({
@@ -31,12 +31,14 @@ export async function GET() {
       }),
     ]);
 
-    const user = result.rows[0] as unknown as UserRow | undefined;
+    const user = result.rows[0] as unknown as (UserRow & { is_2fa_enabled: number }) | undefined;
     if (!user) {
       const s = await getSession();
       s.destroy();
       return NextResponse.json({ error: "User not found" }, { status: 401 });
     }
+
+    const currentSession = await getSession();
 
     return NextResponse.json({
       user: {
@@ -45,6 +47,8 @@ export async function GET() {
         email: user.email,
         balance: Number(user.balance),
         role: user.role,
+        is2faEnabled: Boolean(user.is_2fa_enabled),
+        is2faVerified: Boolean(currentSession.is2faVerified)
       },
       unreadNotifications: Number(notifCount.rows[0]?.count || 0),
     });

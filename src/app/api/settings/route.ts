@@ -171,6 +171,10 @@ export async function POST(request: Request) {
     for (const [rawKey, rawValue] of Object.entries(body || {})) {
       const key = (keys as readonly string[]).includes(rawKey) ? rawKey as SettingKey : aliases[rawKey];
       if (!key) continue;
+
+      // Protect official brand logo from being changed via API
+      if (key === "brandMediaUrl" || key === "brandMediaType") continue;
+
       const value = normalizeValue(key, rawValue);
       if (value === null) return json({ error: `قيمة غير صالحة للإعداد: ${rawKey}` }, 400);
       updates.set(key, value);

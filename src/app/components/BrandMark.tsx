@@ -28,33 +28,19 @@ export default function BrandMark({
 }: BrandMarkProps) {
   const { settings } = useTheme();
   const name = settings.siteName?.trim() || "follower";
-  const mediaUrl = settings.brandMediaUrl?.trim();
-  const mediaType = settings.brandMediaType === "video" ? "video" : "image";
+  // Official fixed brand logo - cannot be overridden to ensure brand consistency
+  const mediaUrl = "/logo.gif";
   const mediaClassName = `${sizeClasses[size]} shrink-0 object-cover ${imageClassName}`;
 
   return (
     <div className={`flex min-w-0 items-center gap-2 ${className}`}>
-      {mediaUrl && mediaType === "video" ? (
-        <video
-          key={mediaUrl}
-          src={mediaUrl}
-          className={mediaClassName}
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="metadata"
-          aria-label={name}
-        />
-      ) : (
-        <img
-          key={mediaUrl || "default-brand"}
-          src={mediaUrl || "/logo.gif"}
-          alt={name}
-          className={mediaClassName}
-          loading="eager"
-        />
-      )}
+      <img
+        key="official-brand-logo"
+        src={mediaUrl}
+        alt={name}
+        className={mediaClassName}
+        loading="eager"
+      />
       {showName && <span className={`min-w-0 truncate ${nameClassName}`}>{name}</span>}
     </div>
   );

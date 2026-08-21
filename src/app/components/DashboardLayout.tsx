@@ -6,7 +6,13 @@ import BottomNav from "./BottomNav";
 import Sidebar from "./Sidebar";
 import { useLiveRefresh } from "./useLiveRefresh";
 
-type DashboardUser = { username: string; balance: number; role: string };
+type DashboardUser = {
+  username: string;
+  balance: number;
+  role: string;
+  is2faEnabled?: boolean;
+  is2faVerified?: boolean;
+};
 
 type UserSnapshot = {
   user: DashboardUser;
@@ -61,6 +67,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         const data = await res.json();
         if (!data?.user) return;
 
+        // Redirect to 2FA verification if enabled but not verified
+        if (data.user.is2faEnabled && !data.user.is2faVerified && pathname !== "/verify-2fa") {
+          router.replace("/verify-2fa");
+          return;
+        }
+
         const nextSnapshot: UserSnapshot = {
           user: data.user,
           unread: Number(data.unreadNotifications || 0),
@@ -84,7 +96,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     } finally {
       if (clientRequest === request) clientRequest = null;
     }
-  }, [router]);
+  }, [router, pathname]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -96,6 +108,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useLiveRefresh(refreshUser, { intervalMs: 30_000 });
 
+  // Hide full layout content if 2FA is required but not verified
+  const is2faRequired = user?.is2faEnabled && !user?.is2faVerified && pathname !== "/verify-2fa";
+
   return (
     <div className="relative flex min-h-screen flex-col bg-[var(--color-bg)]">
       {loading && (
@@ -103,10 +118,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="h-full w-1/3 animate-pulse bg-[var(--color-primary)]" />
         </div>
       )}
-      <Header onMenuClick={() => setSidebarOpen(true)} user={user} unreadNotifications={unread} />
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} user={user} />
-      <main key={pathname} className="flex-1 pb-28 pt-4 px-4 animate-fadeIn">{children}</main>
-      <BottomNav />
+
+      {!is2faRequired && (
+        <>
+          <Header onMenuClick={() => setSidebarOpen(true)} user={user} unreadNotifications={unread} />
+          <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} user={user} />
+        </>
+      )}
+
+      <main key={pathname} className={`flex-1 ${!is2faRequired ? 'pb-28 pt-4 px-4' : ''} animate-fadeIn`}>
+        {is2faRequired ? (
+          <div className="flex h-[80vh] items-center justify-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--color-border)] border-t-[var(--color-primary)]" />
+          </div>
+        ) : children}
+      </main>
+
+      {!is2faRequired && <BottomNav />}
     </div>
   );
 }

@@ -48,13 +48,36 @@ export async function POST(request: Request) {
     }
 
     const result = await db.execute({
-      sql: "SELECT id, username, password_hash, role, balance, is_banned FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE",
+      sql: "SELECT id, username, email, password_hash, role, balance, is_banned, login_preference, is_2fa_enabled, security_code_hash FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE",
       args: [username, username],
     });
 
     const user = result.rows[0] as Record<string, unknown> | undefined;
     if (!user) {
       return NextResponse.json({ error: "اسم المستخدم أو كلمة المرور غير صحيحة" }, { status: 401 });
+    }
+
+    // Validate login preference
+    const inputIdentifier = username.toLowerCase();
+    const dbUsername = String(user.username || "").toLowerCase();
+    const dbEmail = String(user.email || "").toLowerCase();
+    const preference = String(user.login_preference || "both");
+
+    const isEmailInput = inputIdentifier.includes("@");
+
+    if (preference === "username" && isEmailInput) {
+      return NextResponse.json({ error: "هذا الحساب مخصص للدخول عبر اسم المستخدم فقط" }, { status: 403 });
+    }
+    if (preference === "email" && !isEmailInput) {
+      return NextResponse.json({ error: "هذا الحساب مخصص للدخول عبر البريد الإلكتروني فقط" }, { status: 403 });
+    }
+
+    // Check if the input matches the allowed identifier
+    if (isEmailInput && inputIdentifier !== dbEmail) {
+      return NextResponse.json({ error: "البريد الإلكتروني غير مسجل" }, { status: 401 });
+    }
+    if (!isEmailInput && inputIdentifier !== dbUsername) {
+      return NextResponse.json({ error: "اسم المستخدم غير صحيح" }, { status: 401 });
     }
 
     if (Number(user.is_banned)) {
@@ -73,6 +96,11 @@ export async function POST(request: Request) {
     session.username = String(user.username);
     session.role = String(user.role);
     session.isLoggedIn = true;
+
+    // If 2FA is enabled, don't set is2faVerified yet
+    const is2faEnabled = Boolean(Number(user.is_2fa_enabled));
+    session.is2faVerified = !is2faEnabled;
+
     await session.save();
 
     return NextResponse.json({
@@ -82,6 +110,7 @@ export async function POST(request: Request) {
         role: user.role,
         balance: Number(user.balance),
       },
+      requires2fa: is2faEnabled,
     });
   } catch (error: unknown) {
     console.error("Login error:", error);
