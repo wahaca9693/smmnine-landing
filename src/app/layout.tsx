@@ -14,7 +14,7 @@ const tajawal = Tajawal({
 });
 
 const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-const fallbackBranding = { siteName: "smmnine", siteDescription: "منصة خدمات تسويق اجتماعي احترافية", brandMediaUrl: "", brandMediaType: "image" } as const;
+const fallbackBranding = { siteName: "follower", siteDescription: "منصة خدمات تسويق اجتماعي احترافية", brandMediaUrl: "", brandMediaType: "image" } as const;
 
 type Branding = { siteName: string; siteDescription: string; brandMediaUrl: string; brandMediaType: "image" | "video" };
 type BrandingRow = { siteName?: unknown; siteDescription?: unknown; brandMediaUrl?: unknown; brandMediaType?: unknown };

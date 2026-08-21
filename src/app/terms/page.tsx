@@ -6,7 +6,7 @@ import { Shield, AlertTriangle, CheckCircle, RefreshCw, XCircle } from "lucide-r
 
 export default function TermsPage() {
   const { settings } = useTheme();
-  const brandName = settings.siteName || "smmnine";
+  const brandName = settings.siteName || "follower";
   return (
     <div className="min-h-screen bg-[var(--color-bg)] px-5 py-8 text-white">
       <div className="mx-auto max-w-2xl">

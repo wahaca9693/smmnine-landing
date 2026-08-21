@@ -75,7 +75,7 @@ function BackButton() {
 
 export default function ApiAccessPage() {
   const { settings } = useTheme();
-  const brandName = settings.siteName || "smmnine";
+  const brandName = settings.siteName || "follower";
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [balance, setBalance] = useState(0);
   const [copiedId, setCopiedId] = useState<number | null>(null);

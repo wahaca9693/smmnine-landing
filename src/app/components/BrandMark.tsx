@@ -27,7 +27,7 @@ export default function BrandMark({
   size = "md",
 }: BrandMarkProps) {
   const { settings } = useTheme();
-  const name = settings.siteName?.trim() || "smmnine";
+  const name = settings.siteName?.trim() || "follower";
   const mediaUrl = settings.brandMediaUrl?.trim();
   const mediaType = settings.brandMediaType === "video" ? "video" : "image";
   const mediaClassName = `${sizeClasses[size]} shrink-0 object-cover ${imageClassName}`;

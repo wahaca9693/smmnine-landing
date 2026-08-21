@@ -189,7 +189,7 @@ const schemaStatements = [
   )`,
   `CREATE TABLE IF NOT EXISTS site_settings (
     id TEXT PRIMARY KEY,
-    siteName TEXT DEFAULT 'smmnine',
+    siteName TEXT DEFAULT 'follower',
     brandMediaUrl TEXT,
     brandMediaType TEXT DEFAULT 'image',
     primaryColor TEXT DEFAULT '#f97316',
@@ -220,6 +220,8 @@ const schemaStatements = [
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     label_ar TEXT NOT NULL,
     label_en TEXT,
+    description_ar TEXT,
+    description_en TEXT,
     href TEXT NOT NULL,
     icon TEXT DEFAULT 'Zap',
     badge TEXT,
@@ -422,6 +424,13 @@ const schemaMigrations: SchemaMigration[] = [
       ["connection_status", "TEXT DEFAULT 'unknown'"],
       ["last_error", "TEXT"],
       ["last_probe_at", "DATETIME"],
+    ],
+  },
+  {
+    table: "admin_navigation_items",
+    columns: [
+      ["description_ar", "TEXT"],
+      ["description_en", "TEXT"],
     ],
   },
   {

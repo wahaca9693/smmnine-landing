@@ -42,7 +42,7 @@ const aliases: Record<string, SettingKey> = {
 };
 
 const defaults: Record<SettingKey, string | number> = {
-  siteName: "smmnine",
+  siteName: "follower",
   brandMediaUrl: "",
   brandMediaType: "image",
   siteDescription: "منصة خدمات تسويق اجتماعي احترافية",

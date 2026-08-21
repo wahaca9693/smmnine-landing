@@ -28,7 +28,7 @@ interface ThemeContextType {
 export const BRANDING_REFRESH_KEY = "smmnine:branding-updated";
 
 export const defaultSettings: SiteSettings = {
-  siteName: "smmnine",
+  siteName: "follower",
   brandMediaUrl: "",
   brandMediaType: "image",
   siteDescription: "منصة خدمات تسويق اجتماعي احترافية",
@@ -50,7 +50,14 @@ const ThemeContext = createContext<ThemeContextType>({
 });
 
 function normalizeSettings(value: unknown): SiteSettings {
-  const source = value && typeof value === "object" ? value as Partial<Record<keyof SiteSettings, unknown>> : {};
+  const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const source: Record<string, unknown> = {
+    ...raw,
+    siteName: raw.siteName ?? raw.site_name,
+    siteDescription: raw.siteDescription ?? raw.site_description,
+    brandMediaUrl: raw.brandMediaUrl ?? raw.brand_media_url,
+    brandMediaType: raw.brandMediaType ?? raw.brand_media_type,
+  };
   const stringValue = (key: keyof SiteSettings, fallback: string) => {
     const candidate = source[key];
     return typeof candidate === "string" && candidate.trim() ? candidate.trim() : fallback;
@@ -132,6 +139,15 @@ export function ThemeProvider({ children, initialSettings }: { children: ReactNo
     if (settings.siteName) {
       document.title = settings.siteName;
       document.documentElement.dataset.siteName = settings.siteName;
+      setMetaContent("description", settings.siteDescription);
+      setMetaContent("og:title", settings.siteName);
+      setMetaContent("og:description", settings.siteDescription);
+      setMetaContent("twitter:title", settings.siteName);
+      setMetaContent("twitter:description", settings.siteDescription);
+      if (settings.brandMediaUrl && settings.brandMediaType === "image") {
+        setIconLink("icon", settings.brandMediaUrl);
+        setIconLink("shortcut icon", settings.brandMediaUrl);
+      }
     }
   }, [settings]);
 
@@ -148,6 +164,26 @@ export function ThemeProvider({ children, initialSettings }: { children: ReactNo
 
 export function useTheme() {
   return useContext(ThemeContext);
+}
+
+function setMetaContent(name: string, content: string) {
+  let element = document.querySelector<HTMLMetaElement>(`meta[name="${name}"], meta[property="${name}"]`);
+  if (!element) {
+    element = document.createElement("meta");
+    element.setAttribute(name.startsWith("og:") ? "property" : "name", name);
+    document.head.appendChild(element);
+  }
+  element.content = content;
+}
+
+function setIconLink(rel: string, href: string) {
+  let element = document.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`);
+  if (!element) {
+    element = document.createElement("link");
+    element.rel = rel;
+    document.head.appendChild(element);
+  }
+  element.href = href;
 }
 
 function darken(hex: string, percent: number) {

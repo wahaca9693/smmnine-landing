@@ -17,7 +17,7 @@ type UserData = {
 export default function ProfilePage() {
   const { t } = useLanguage();
   const { settings } = useTheme();
-  const brandName = settings.siteName || "smmnine";
+  const brandName = settings.siteName || "follower";
   const [user, setUser] = useState<UserData | null>(null);
 
   useEffect(() => {

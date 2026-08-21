@@ -10,6 +10,8 @@ export type NavigationItem = {
   id: number;
   label_ar: string;
   label_en: string | null;
+  description_ar: string | null;
+  description_en: string | null;
   href: string;
   icon: NavigationIcon;
   badge: string | null;

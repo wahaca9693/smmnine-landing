@@ -51,3 +51,6 @@ database.db
 /*.zip
 *.tar.gz.enc
 *-package-password*.txt
+
+# local branding uploads
+/public/uploads/

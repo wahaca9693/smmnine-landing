@@ -50,7 +50,7 @@ const features = [
 
 export default function Features() {
   const { settings } = useTheme();
-  const brandName = settings.siteName || "smmnine";
+  const brandName = settings.siteName || "follower";
   return (
     <section id="features" className="px-5 py-20 lg:py-[80px]">
       <div className="mx-auto max-w-[1100px]">

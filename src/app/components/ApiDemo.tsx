@@ -76,7 +76,7 @@ const statusColors: Record<string, string> = {
 
 export default function ApiDemo() {
   const { settings } = useTheme();
-  const brandName = settings.siteName || "smmnine";
+  const brandName = settings.siteName || "follower";
   const [services, setServices] = useState<Service[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [balance, setBalance] = useState<Balance | null>(null);
