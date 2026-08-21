@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 type DbRow = Record<string, unknown>;
 type AdminTicketBody = { action?: unknown; ticketId?: unknown; reply?: unknown; status?: unknown };
 
+const VALID_STATUSES = new Set(["open", "pending", "in_progress", "resolved", "closed"]);
+
 const TYPE_LABELS: Record<string, string> = {
   speed_up: "تسريع طلب",
   refill: "تعويض طلب",
@@ -55,8 +57,9 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ tickets });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "يرجى تسجيل الدخول";
-    return NextResponse.json({ error: message }, { status: 401 });
+    const message = error instanceof Error ? error.message : "";
+    const status = message === "Unauthorized" ? 401 : message === "Forbidden" || message === "Account banned" ? 403 : 500;
+    return NextResponse.json({ error: status === 401 ? "يرجى تسجيل الدخول" : status === 403 ? "غير مصرح" : "تعذر تحميل التذاكر" }, { status });
   }
 }
 
@@ -87,13 +90,14 @@ export async function POST(request: Request) {
     }
 
     if (action === "status") {
-      if (!status) {
-        return NextResponse.json({ error: "الحالة مطلوبة" }, { status: 400 });
+      if (!VALID_STATUSES.has(status)) {
+        return NextResponse.json({ error: "حالة التذكرة غير صالحة" }, { status: 400 });
       }
-      await db.execute({
+      const updated = await db.execute({
         sql: "UPDATE tickets SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         args: [status, ticketId],
       });
+      if (Number(updated.rowsAffected || 0) !== 1) return NextResponse.json({ error: "التذكرة غير موجودة" }, { status: 404 });
       return NextResponse.json({ success: true, message: "تم تحديث الحالة" });
     }
 

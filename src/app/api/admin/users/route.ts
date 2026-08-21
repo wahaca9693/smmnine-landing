@@ -120,12 +120,29 @@ export async function POST(request: Request) {
       const balanceRow = userRes.rows[0] as DbRow | undefined;
       const current = Number(balanceRow?.balance || 0);
       if (delta < 0 && current + delta < 0) return json({ error: "لا يمكن أن يصبح الرصيد سالبًا" }, 400);
-      await db.execute({ sql: "UPDATE users SET balance = balance + ? WHERE id = ?", args: [delta, uid] });
-      await db.execute({
-        sql: "INSERT INTO transactions (user_id, type, amount, status, description, method) VALUES (?, 'deposit', ?, 'completed', ?, 'admin')",
-        args: [uid, delta, delta > 0 ? `إضافة رصيد من الأدمن #${admin.userId}` : `خصم رصيد من الأدمن #${admin.userId}`],
-      });
-      await audit(admin.userId, uid, action, { amount: delta, previous_balance: current, new_balance: current + delta });
+      const transaction = await db.transaction("write");
+      try {
+        const updated = await transaction.execute({
+          sql: action === "subtractBalance"
+            ? "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?"
+            : "UPDATE users SET balance = balance + ? WHERE id = ?",
+          args: action === "subtractBalance" ? [amount, uid, amount] : [amount, uid],
+        });
+        if (Number(updated.rowsAffected || 0) !== 1) throw new Error("BALANCE_CONFLICT");
+        await transaction.execute({
+          sql: "INSERT INTO transactions (user_id, type, amount, status, description, method) VALUES (?, 'deposit', ?, 'completed', ?, 'admin')",
+          args: [uid, delta, delta > 0 ? `إضافة رصيد من الأدمن #${admin.userId}` : `خصم رصيد من الأدمن #${admin.userId}`],
+        });
+        await transaction.execute({
+          sql: "INSERT INTO admin_audit_logs (admin_user_id, target_user_id, action, details) VALUES (?, ?, ?, ?)",
+          args: [admin.userId ?? null, uid, action, JSON.stringify({ amount: delta, previous_balance: current, new_balance: current + delta })],
+        });
+        await transaction.commit();
+      } catch (error: unknown) {
+        await transaction.rollback().catch(() => undefined);
+        if (error instanceof Error && error.message === "BALANCE_CONFLICT") return json({ error: "تغيّر الرصيد أو لم يعد كافيًا؛ أعد المحاولة" }, 409);
+        throw error;
+      }
       return json({ success: true, message: `${delta > 0 ? "تمت إضافة" : "تم خصم"} $${Math.abs(delta).toFixed(6)}`, balance: current + delta });
     }
 

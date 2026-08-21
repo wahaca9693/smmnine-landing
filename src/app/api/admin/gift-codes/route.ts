@@ -35,6 +35,13 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "";
 }
 
+function errorStatus(error: unknown): number {
+  const message = errorText(error);
+  if (message === "Unauthorized") return 401;
+  if (message === "Forbidden" || message === "Account banned") return 403;
+  return 500;
+}
+
 export async function GET() {
   try {
     await requireAdmin();
@@ -42,9 +49,8 @@ export async function GET() {
     const result = await db.execute({ sql: "SELECT * FROM gift_codes ORDER BY created_at DESC, id DESC", args: [] });
     return NextResponse.json({ codes: result.rows });
   } catch (error: unknown) {
-    const rawMessage = errorText(error);
-    const message = rawMessage === "Unauthorized" || rawMessage === "Forbidden" ? rawMessage : "تعذر تحميل الأكواد";
-    return NextResponse.json({ error: message }, { status: message === "Forbidden" ? 403 : 401 });
+    const status = errorStatus(error);
+    return NextResponse.json({ error: status === 401 ? "يرجى تسجيل الدخول" : status === 403 ? "غير مصرح" : "تعذر تحميل الأكواد" }, { status });
   }
 }
 
@@ -87,8 +93,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ ok: true, code, amount, max_uses: maxUses, expires_at: expiresAt });
   } catch (error: unknown) {
-    const rawMessage = errorText(error);
-    const message = rawMessage === "Unauthorized" || rawMessage === "Forbidden" ? rawMessage : "تعذر تنفيذ العملية";
-    return NextResponse.json({ error: message }, { status: message === "Forbidden" ? 403 : 401 });
+    const status = errorStatus(error);
+    return NextResponse.json({ error: status === 401 ? "يرجى تسجيل الدخول" : status === 403 ? "غير مصرح" : "تعذر تنفيذ العملية" }, { status });
   }
 }

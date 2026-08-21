@@ -8,6 +8,8 @@ const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT_PER_KEY = 120;
 const rateStates = new Map<number, ApiRateState>();
 let enabledCache: { value: boolean; expiresAt: number } | null = null;
+let enabledGeneration = 0;
+let enabledInFlight: { generation: number; promise: Promise<boolean> } | null = null;
 
 function readBoolean(value: unknown, fallback: boolean): boolean {
   if (value === true || value === 1 || value === "1") return true;
@@ -18,15 +20,31 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
 export async function isApiV2Enabled(): Promise<boolean> {
   const now = Date.now();
   if (enabledCache && enabledCache.expiresAt > now) return enabledCache.value;
-  const result = await db.execute("SELECT apiV2Enabled FROM site_settings LIMIT 1");
-  const row = result.rows[0] as unknown as SettingsRow | undefined;
-  const value = readBoolean(row?.apiV2Enabled, true);
-  enabledCache = { value, expiresAt: now + SETTINGS_TTL_MS };
-  return value;
+
+  const generation = enabledGeneration;
+  if (enabledInFlight?.generation === generation) return enabledInFlight.promise;
+
+  const load = (async (): Promise<boolean> => {
+    const result = await db.execute("SELECT apiV2Enabled FROM site_settings LIMIT 1");
+    const row = result.rows[0] as unknown as SettingsRow | undefined;
+    const value = readBoolean(row?.apiV2Enabled, true);
+    if (enabledGeneration === generation) {
+      enabledCache = { value, expiresAt: Date.now() + SETTINGS_TTL_MS };
+    }
+    return value;
+  })();
+  const inFlight = { generation, promise: load };
+  enabledInFlight = inFlight;
+  try {
+    return await load;
+  } finally {
+    if (enabledInFlight === inFlight) enabledInFlight = null;
+  }
 }
 
 export function invalidateApiV2EnabledCache(): void {
   enabledCache = null;
+  enabledGeneration += 1;
 }
 
 export function checkApiRateLimit(keyId: number): { allowed: boolean; remaining: number; retryAfter: number } {

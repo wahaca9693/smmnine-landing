@@ -12,17 +12,10 @@ function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const SERVICE_MUTATING_ACTIONS = new Set([
-  "sync",
-  "delete",
-  "delete-service",
-  "add-service",
-  "bulk-add-services",
-  "delete-services",
-  "update-service",
-  "update-provider-services",
-  "reset-provider-pricing",
-]);
+function invalidateProviderCatalogCaches(): void {
+  invalidateServicesCache();
+  invalidateServiceCatalogCache();
+}
 
 function authErrorStatus(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error ?? "");
@@ -286,11 +279,6 @@ export async function POST(request: Request) {
     await initDb();
     const body = (await request.json()) as JsonObject;
     const { action } = body;
-    if (SERVICE_MUTATING_ACTIONS.has(String(action))) {
-      invalidateServicesCache();
-      invalidateServiceCatalogCache();
-    }
-
     // 1) إضافة/تعديل مزود — حفظ محلي سريع، والفحص الخارجي مستقل عبر action=probe.
     if (action === "save") {
       const { id, name, api_url, api_key, notes } = body;
@@ -342,6 +330,7 @@ export async function POST(request: Request) {
               FROM providers WHERE id = ?`,
         args: [providerId],
       });
+      invalidateProviderCatalogCaches();
       return NextResponse.json({ provider: saved.rows[0], queued: true });
     }
 
@@ -409,6 +398,7 @@ export async function POST(request: Request) {
         sql: `UPDATE providers SET balance=?, balance_fetched_at=CURRENT_TIMESTAMP WHERE id=?`,
         args: [balance, Number(providerId)],
       });
+      invalidateProviderCatalogCaches();
       return NextResponse.json({ imported: inserted, updated, balance, services: inserted + updated });
     }
 
@@ -455,18 +445,21 @@ export async function POST(request: Request) {
         args: [providerId],
       });
       const row = await db.execute({ sql: "SELECT id, is_active FROM providers WHERE id = ?", args: [providerId] });
+      invalidateProviderCatalogCaches();
       return NextResponse.json({ ok: true, provider: row.rows[0] || { id: providerId } });
     }
 
     // 5) حذف مزود
     if (action === "delete") {
       await db.execute({ sql: "DELETE FROM providers WHERE id = ?", args: [Number(body.id)] });
+      invalidateProviderCatalogCaches();
       return NextResponse.json({ ok: true });
     }
 
     // 6) حذف خدمة مزود (تخفى نهائيًا — تعود عند المزامنة التالية)
     if (action === "delete-service") {
       await db.execute({ sql: "DELETE FROM provider_services WHERE id = ?", args: [Number(body.id)] });
+      invalidateProviderCatalogCaches();
       return NextResponse.json({ ok: true });
     }
 
@@ -512,6 +505,7 @@ export async function POST(request: Request) {
                 WHERE ps.provider_id = ? AND ps.remote_service_id = ? LIMIT 1`,
           args: [Number(providerId), String(target.service)],
         });
+        invalidateProviderCatalogCaches();
         return NextResponse.json({ ok: true, service: (inserted.rows as JsonObject[])[0] || { ...target, provider_id: Number(providerId), remote_service_id: String(target.service), markup_percent: markupPct, sell_rate: sellRate, is_active: 1, is_new: 1 } });
       } catch (err: unknown) {
         return NextResponse.json({ error: "تعذر إضافة الخدمة: " + (err instanceof Error ? err.message : "") }, { status: 502 });
@@ -589,6 +583,7 @@ export async function POST(request: Request) {
         });
         insertedServices = insertedRows.rows as JsonObject[];
       }
+      invalidateProviderCatalogCaches();
       return NextResponse.json({ ok: true, added: statements.length, skipped, invalid, services: insertedServices });
     }
 
@@ -600,10 +595,12 @@ export async function POST(request: Request) {
       if (ids.length > 5000) return NextResponse.json({ error: "عدد الخدمات كبير جدًا — نفذ الحذف على دفعات" }, { status: 413 });
       if (ids.length === 0) {
         const result = await db.execute({ sql: "DELETE FROM provider_services WHERE provider_id = ?", args: [providerId] });
+        invalidateProviderCatalogCaches();
         return NextResponse.json({ ok: true, deleted: Number((result as { rowsAffected?: number }).rowsAffected || 0), scope: "provider" });
       }
       const placeholders = ids.map(() => "?").join(",");
       const result = await db.execute({ sql: `DELETE FROM provider_services WHERE provider_id = ? AND id IN (${placeholders})`, args: [providerId, ...ids] });
+      invalidateProviderCatalogCaches();
       return NextResponse.json({ ok: true, deleted: Number((result as { rowsAffected?: number }).rowsAffected || 0), scope: "selected" });
     }
 
@@ -611,6 +608,7 @@ export async function POST(request: Request) {
     if (action === "rename-service") {
       const { id, name } = body;
       await db.execute({ sql: "UPDATE provider_services SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", args: [String(name), Number(id)] });
+      invalidateProviderCatalogCaches();
       return NextResponse.json({ ok: true });
     }
 
@@ -618,6 +616,7 @@ export async function POST(request: Request) {
     if (action === "clear-new-badge") {
       const { id } = body;
       await db.execute({ sql: "UPDATE provider_services SET is_new = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", args: [Number(id)] });
+      invalidateProviderCatalogCaches();
       return NextResponse.json({ ok: true });
     }
 
@@ -633,6 +632,7 @@ export async function POST(request: Request) {
         sql: `UPDATE provider_services SET markup_percent=?, pricing_mode=?, manual_price=?, sell_rate=?, is_active=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
         args: [pricing.markup, pricing.mode, pricing.mode === "manual" ? pricing.manual : null, sellRate, is_active === undefined ? Number(s.is_active ?? 1) : (Number(is_active) ? 1 : 0), Number(id)],
       });
+      invalidateProviderCatalogCaches();
       return NextResponse.json({ ok: true, pricing_mode: pricing.mode, manual_price: pricing.manual, sell_rate: sellRate });
     }
 
@@ -665,6 +665,7 @@ export async function POST(request: Request) {
         sql: `UPDATE provider_services SET markup_percent=?, pricing_mode=?, manual_price=?, sell_rate=CASE WHEN ? = 'manual' THEN ? ELSE ROUND(rate * (1 + ? / 100), 6) END, updated_at=CURRENT_TIMESTAMP ${where}`,
         args,
       });
+      invalidateProviderCatalogCaches();
       return NextResponse.json({ ok: true, updated: Number((result as { rowsAffected?: number }).rowsAffected || 0), scope, pricing_mode: pricing.mode, manual_price: pricing.manual });
     }
 
@@ -687,6 +688,7 @@ export async function POST(request: Request) {
           : "WHERE provider_id=?";
       const args = scope === "selected" ? [providerId, ...ids] : scope === "category" ? [providerId, category, category] : [providerId];
       const result = await db.execute({ sql: `UPDATE provider_services SET markup_percent=0, pricing_mode='markup', manual_price=NULL, sell_rate=ROUND(rate, 6), updated_at=CURRENT_TIMESTAMP ${where}`, args });
+      invalidateProviderCatalogCaches();
       return NextResponse.json({ ok: true, updated: Number((result as { rowsAffected?: number }).rowsAffected || 0), scope });
     }
 

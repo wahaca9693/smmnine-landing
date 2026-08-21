@@ -33,10 +33,12 @@ export type CatalogService = {
 const CATALOG_CACHE_MS = 60_000;
 const PROVIDER_CATALOG_TIMEOUT_MS = 2_500;
 let catalogCache: { at: number; payload: CatalogService[] } | null = null;
-let catalogInFlight: Promise<CatalogService[]> | null = null;
+let catalogGeneration = 0;
+let catalogInFlight: { generation: number; promise: Promise<CatalogService[]> } | null = null;
 
 export function invalidateServiceCatalogCache(): void {
   catalogCache = null;
+  catalogGeneration += 1;
 }
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -89,7 +91,8 @@ export async function loadServiceCatalog(): Promise<CatalogService[]> {
   if (catalogCache && Date.now() - catalogCache.at < CATALOG_CACHE_MS) {
     return catalogCache.payload;
   }
-  if (catalogInFlight) return catalogInFlight;
+  const generation = catalogGeneration;
+  if (catalogInFlight?.generation === generation) return catalogInFlight.promise;
 
   const load = (async (): Promise<CatalogService[]> => {
     const [followerResult, providerResult] = await Promise.all([
@@ -119,14 +122,17 @@ export async function loadServiceCatalog(): Promise<CatalogService[]> {
   }
 
     const payload = [...catalog, ...providerResult];
-    catalogCache = { at: Date.now(), payload };
+    if (catalogGeneration === generation) {
+      catalogCache = { at: Date.now(), payload };
+    }
     return payload;
   })();
-  catalogInFlight = load;
+  const inFlight = { generation, promise: load };
+  catalogInFlight = inFlight;
   try {
     return await load;
   } finally {
-    if (catalogInFlight === load) catalogInFlight = null;
+    if (catalogInFlight === inFlight) catalogInFlight = null;
   }
 }
 

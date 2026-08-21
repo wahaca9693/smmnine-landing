@@ -18,6 +18,9 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("userId");
     const status = searchParams.get("status");
+    if (userId !== null && (!/^\d+$/.test(userId) || Number(userId) <= 0)) {
+      return NextResponse.json({ error: "معرّف المستخدم غير صالح" }, { status: 400 });
+    }
 
     let sql = "SELECT o.*, u.username FROM orders o JOIN users u ON o.user_id = u.id WHERE 1=1";
     const args: SqlArg[] = [];
@@ -38,8 +41,8 @@ export async function GET(request: Request) {
         id: Number(item.id),
         user_id: Number(item.user_id),
         username: String(item.username || ""),
-        smmnine_order_id: Number(item.smmnine_order_id),
-        service_id: Number(item.service_id),
+        smmnine_order_id: item.smmnine_order_id == null ? null : String(item.smmnine_order_id),
+        service_id: item.service_id == null ? null : String(item.service_id),
         service_name: String(item.service_name || ""),
         link: String(item.link || ""),
         quantity: Number(item.quantity),
