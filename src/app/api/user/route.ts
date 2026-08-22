@@ -62,6 +62,11 @@ export async function GET() {
       unreadNotifications: Number(notifCount.rows[0]?.count || 0),
     });
   } catch (error: unknown) {
-    return NextResponse.json({ error: errorMessage(error) }, { status: 401 });
+    const message = errorMessage(error);
+    if (message === "Unauthorized" || message === "Account banned") {
+      return NextResponse.json({ error: message }, { status: 401 });
+    }
+    console.error("User bootstrap error:", error);
+    return NextResponse.json({ error: "تعذر تحديث بيانات الحساب مؤقتًا" }, { status: 503 });
   }
 }

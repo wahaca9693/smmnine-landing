@@ -96,9 +96,11 @@ export async function POST(request: Request) {
     session.username = String(user.username);
     session.role = String(user.role);
     session.isLoggedIn = true;
+    session.balance = Number(user.balance || 0);
 
     // If 2FA is enabled, don't set is2faVerified yet
     const is2faEnabled = Boolean(Number(user.is_2fa_enabled));
+    session.is2faEnabled = is2faEnabled;
     session.is2faVerified = !is2faEnabled;
 
     await session.save();

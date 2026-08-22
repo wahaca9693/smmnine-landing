@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import DashboardLayout from "../components/DashboardLayout";
+import DashboardLayout from "@/app/components/DashboardLayout";
+import { useInitialAuthUser } from "@/app/components/Providers";
 import Link from "next/link";
 import {
   Activity,
@@ -145,7 +146,8 @@ function StatCard({ icon: Icon, label, value, hint, tone = "gold" }: { icon: typ
 }
 
 export default function AdminPage() {
-  const [authorized, setAuthorized] = useState<boolean | null>(null);
+  const initialUser = useInitialAuthUser();
+  const authorized = initialUser ? initialUser.role === "admin" : null;
   const [analytics, setAnalytics] = useState<AnalyticsData>(emptyAnalytics);
   const [range, setRange] = useState<Range>("30d");
   const [loadingAnalytics, setLoadingAnalytics] = useState(true);
@@ -158,13 +160,6 @@ export default function AdminPage() {
   const [quickSearch, setQuickSearch] = useState("");
   const analyticsAbortRef = useRef<AbortController | null>(null);
   const analyticsRequestRef = useRef(0);
-
-  useEffect(() => {
-    fetch("/api/user", { cache: "no-store", credentials: "include" })
-      .then((res) => res.json())
-      .then((data) => setAuthorized(data.user?.role === "admin"))
-      .catch(() => setAuthorized(false));
-  }, []);
 
   const loadAnalytics = useCallback(async () => {
     analyticsAbortRef.current?.abort();

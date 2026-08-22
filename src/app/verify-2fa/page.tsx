@@ -5,8 +5,12 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Shield, Lock, ArrowRight, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useLanguage } from "@/app/components/LanguageProvider";
+import { announceAuthChange, type ClientAuthUser } from "@/app/components/auth-client";
 
-type VerifyResponse = { error?: string };
+type VerifyResponse = {
+  error?: string;
+  user?: ClientAuthUser;
+};
 
 async function readVerifyResponse(response: Response): Promise<VerifyResponse> {
   const text = await response.text();
@@ -24,6 +28,11 @@ export default function Verify2FAPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [returnPath] = useState(() => {
+    if (typeof window === "undefined") return "/services";
+    const next = new URLSearchParams(window.location.search).get("next");
+    return next && next.startsWith("/") && !next.startsWith("//") ? next : "/services";
+  });
   const router = useRouter();
 
   const handleVerify = async (e: React.FormEvent) => {
@@ -44,9 +53,10 @@ export default function Verify2FAPage() {
       const data = await readVerifyResponse(res);
       if (!res.ok) throw new Error(data.error || "رمز الأمان غير صحيح");
 
+      if (data.user) announceAuthChange(data.user);
       setSuccess(true);
       window.setTimeout(() => {
-        router.replace("/services");
+        router.replace(returnPath);
       }, 700);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "رمز الأمان غير صحيح");

@@ -16,11 +16,17 @@ export async function POST(request: Request) {
     }
 
     const result = await db.execute({
-      sql: "SELECT security_code_hash FROM users WHERE id = ?",
+      sql: "SELECT security_code_hash, username, role, balance, is_2fa_enabled FROM users WHERE id = ?",
       args: [session.userId],
     });
 
-    const user = result.rows[0] as { security_code_hash?: string } | undefined;
+    const user = result.rows[0] as {
+      security_code_hash?: string;
+      username?: string;
+      role?: string;
+      balance?: number | string;
+      is_2fa_enabled?: number | boolean | string;
+    } | undefined;
     if (!user || !user.security_code_hash) {
       return NextResponse.json({ error: "لم يتم إعداد رمز أمان لهذا الحساب" }, { status: 400 });
     }
@@ -39,7 +45,18 @@ export async function POST(request: Request) {
       args: [session.userId],
     });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      user: user.username && user.role
+        ? {
+            username: user.username,
+            role: user.role,
+            balance: Number(user.balance || 0),
+            is2faEnabled: Boolean(user.is_2fa_enabled),
+            is2faVerified: true,
+          }
+        : undefined,
+    });
   } catch (error) {
     console.error("2FA verification error:", error);
     return NextResponse.json({ error: "حدث خطأ أثناء التحقق" }, { status: 500 });

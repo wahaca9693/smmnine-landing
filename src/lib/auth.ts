@@ -8,6 +8,8 @@ export interface SessionData {
   role?: string;
   isLoggedIn?: boolean;
   is2faVerified?: boolean;
+  is2faEnabled?: boolean;
+  balance?: number;
 }
 
 const sessionSecret = process.env.SESSION_SECRET;

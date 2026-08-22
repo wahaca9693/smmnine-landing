@@ -7,11 +7,13 @@ import Link from "next/link";
 import TurnstileWidget from "@/app/components/TurnstileWidget";
 import { useLanguage } from "@/app/components/LanguageProvider";
 import BrandMark from "@/app/components/BrandMark";
+import { announceAuthChange } from "@/app/components/auth-client";
 
 type AuthResponse = {
   error?: string;
   securityCode?: string;
   requires2fa?: boolean;
+  user?: { username?: unknown; role?: unknown; balance?: unknown };
 };
 
 async function readAuthResponse(response: Response): Promise<AuthResponse> {
@@ -26,6 +28,12 @@ async function readAuthResponse(response: Response): Promise<AuthResponse> {
         : "تعذر الاتصال بخادم المصادقة حاليًا. أعد المحاولة بعد لحظات.",
     };
   }
+}
+
+function getSafeReturnPath() {
+  if (typeof window === "undefined") return "/services";
+  const next = new URLSearchParams(window.location.search).get("next");
+  return next && next.startsWith("/") && !next.startsWith("//") ? next : "/services";
 }
 
 export default function LoginPage() {
@@ -46,6 +54,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [serviceStatus, setServiceStatus] = useState<"checking" | "online" | "offline">("checking");
   const router = useRouter();
+  const [returnPath] = useState(getSafeReturnPath);
 
   const setAuthMode = (nextIsLogin: boolean) => {
     setIsLogin(nextIsLogin);
@@ -58,7 +67,8 @@ export default function LoginPage() {
     setSecurityCode(null);
     setPassword("");
     if (nextIsLogin) setEmail("");
-    window.history.replaceState(null, "", nextIsLogin ? "/login" : "/login#register");
+    const nextQuery = returnPath !== "/services" ? `?next=${encodeURIComponent(returnPath)}` : "";
+    window.history.replaceState(null, "", `/login${nextQuery}${nextIsLogin ? "" : "#register"}`);
   };
 
   useEffect(() => {
@@ -188,11 +198,22 @@ export default function LoginPage() {
         return;
       }
 
-      // If 2FA is required, redirect to verification page
+      if (data.user && typeof data.user.username === "string" && typeof data.user.role === "string") {
+        announceAuthChange({
+          username: data.user.username,
+          role: data.user.role,
+          balance: Number(data.user.balance || 0),
+          is2faEnabled: Boolean(data.requires2fa),
+          is2faVerified: !data.requires2fa,
+        });
+      }
+
+      // Keep the visitor's requested destination after authentication.
+      const destination = getSafeReturnPath();
       if (data.requires2fa) {
-        router.push("/verify-2fa");
+        router.push(`/verify-2fa?next=${encodeURIComponent(destination)}`);
       } else {
-        router.push("/services");
+        router.push(destination);
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "حدث خطأ";
@@ -208,7 +229,7 @@ export default function LoginPage() {
       {/* شريط علوي: زر إنشاء الحساب والشعار فقط قبل الدخول */}
       <div className="relative flex items-center justify-between gap-2">
         <Link
-          href="#register"
+          href={`/login?next=${encodeURIComponent(returnPath)}#register`}
           onClick={(e) => {
             e.preventDefault();
             setAuthMode(false);
@@ -284,7 +305,7 @@ export default function LoginPage() {
               </div>
               <button
                 type="button"
-                onClick={() => router.push("/verify-2fa")}
+                onClick={() => router.push(`/verify-2fa?next=${encodeURIComponent(getSafeReturnPath())}`)}
                 className="w-full rounded-xl gradient-luxe py-3.5 text-sm font-black text-[#111] shadow-[0_8px_24px_-8px_rgba(212,175,55,0.5)] transition hover:brightness-110"
               >
                 {t('auth.continueToVerify') || 'متابعة للتحقق والدخول'}

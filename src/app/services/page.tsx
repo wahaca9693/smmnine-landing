@@ -11,6 +11,8 @@ import Header from "../components/Header";
 import Sidebar from "../components/Sidebar";
 import BottomNav from "../components/BottomNav";
 import { defaultPlatformOptions, normalizePlatformId, platformOption, type PlatformOption } from "@/lib/platform-mapping";
+import { AUTH_CHANGED_EVENT, type ClientAuthUser } from "../components/auth-client";
+import { useInitialAuthUser } from "../components/Providers";
 
 type ServiceRecord = {
   service?: string | number;
@@ -106,6 +108,9 @@ function detectGuarantees(name: string, t: (key: string) => string): { isGuarant
 
 export default function ServicesPage() {
   const { locale, t } = useLanguage();
+  const initialUser = useInitialAuthUser();
+  const [accountUser, setAccountUser] = useState<ClientAuthUser | null>(initialUser);
+  const [accountAuthState, setAccountAuthState] = useState<"checking" | "authenticated" | "guest">(initialUser ? "authenticated" : "checking");
   const [services, setServices] = useState<ServiceRecord[]>(servicesSnapshot?.services || []);
   const [platforms, setPlatforms] = useState<PlatformOption[]>(servicesSnapshot?.platforms || defaultPlatformOptions);
   const [selectedPlatform, setSelectedPlatform] = useState<string>("all");
@@ -122,6 +127,45 @@ export default function ServicesPage() {
   const [guaranteedStep, setGuaranteedStep] = useState<"platform" | "services">("platform");
   const [guaranteedPlatform, setGuaranteedPlatform] = useState<string | null>(null);
   const [guaranteedTypeFilter, setGuaranteedTypeFilter] = useState<string>("all");
+
+  useEffect(() => {
+    let active = true;
+
+    const syncAccount = async () => {
+      try {
+        const response = await fetch("/api/user", { cache: "no-store", credentials: "include" });
+        if (!active) return;
+        if (response.status === 401) {
+          setAccountUser(null);
+          setAccountAuthState("guest");
+          return;
+        }
+        if (!response.ok) return;
+        const data = await response.json() as { user?: ClientAuthUser };
+        if (data.user) {
+          setAccountUser(data.user);
+          setAccountAuthState("authenticated");
+        }
+      } catch {
+        // Keep the server bootstrap during transient network failures.
+      }
+    };
+
+    const handleAuthChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ user?: ClientAuthUser | null }>).detail;
+      if (detail && Object.prototype.hasOwnProperty.call(detail, "user")) {
+        setAccountUser(detail.user || null);
+        setAccountAuthState(detail.user ? "authenticated" : "guest");
+      }
+    };
+
+    window.addEventListener(AUTH_CHANGED_EVENT, handleAuthChange);
+    void syncAccount();
+    return () => {
+      active = false;
+      window.removeEventListener(AUTH_CHANGED_EVENT, handleAuthChange);
+    };
+  }, [initialUser]);
 
   const loadServices = useCallback(async (silent = false) => {
     if (!silent && servicesSnapshot) {
@@ -314,8 +358,12 @@ export default function ServicesPage() {
 
   return (
     <div className="relative flex min-h-screen flex-col bg-[var(--color-bg)]">
-      <Header onMenuClick={() => setSidebarOpen(true)} user={null} unreadNotifications={0} />
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} user={null} />
+      {accountAuthState !== "checking" && (
+        <>
+          <Header onMenuClick={() => setSidebarOpen(true)} user={accountUser} unreadNotifications={0} />
+          <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} user={accountUser} />
+        </>
+      )}
       <main className="flex-1 px-4 pb-28 pt-4 animate-fadeIn">
       <div className="mx-auto max-w-5xl">
       <div className="relative space-y-5">

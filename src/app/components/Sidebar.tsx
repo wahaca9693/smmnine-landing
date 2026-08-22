@@ -26,6 +26,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useLanguage } from "./LanguageProvider";
+import { clearAuthBootstrap } from "./auth-client";
 
 interface SidebarProps {
   open: boolean;
@@ -149,8 +150,10 @@ export default function Sidebar({ open, onClose, user }: SidebarProps) {
   const getDescription = (key: string, fallback: string) => sidebarDescriptions[locale]?.[key] || sidebarDescriptions.en[key] || fallback;
 
   const logout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
+          const response = await fetch("/api/auth/logout", { method: "POST" });
+      if (response.ok) clearAuthBootstrap();
+      router.push("/login");
+
   };
 
   const menuItems: MenuItem[] = [

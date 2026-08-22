@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Tajawal } from "next/font/google";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
+import { getSession } from "@/lib/auth";
+import type { ClientAuthUser } from "./components/auth-client";
 import "./globals.css";
 import Providers from "./components/Providers";
 import type { Locale } from "./components/LanguageProvider";
@@ -18,6 +20,48 @@ const fallbackBranding = { siteName: "follower", siteDescription: "منصة خد
 
 type Branding = { siteName: string; siteDescription: string; brandMediaUrl: string; brandMediaType: "image" | "video" };
 type BrandingRow = { siteName?: unknown; siteDescription?: unknown; brandMediaUrl?: unknown; brandMediaType?: unknown };
+
+async function getInitialUser(): Promise<ClientAuthUser | null> {
+  try {
+    const session = await getSession();
+    if (!session.isLoggedIn || typeof session.userId !== "number" || !session.username || !session.role) return null;
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        db.execute({
+          sql: "SELECT balance, role, is_2fa_enabled FROM users WHERE id = ? LIMIT 1",
+          args: [session.userId],
+        }),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error("Initial user lookup timeout")), 1500);
+        }),
+      ]);
+      const row = result.rows[0] as { balance?: unknown; role?: unknown; is_2fa_enabled?: unknown } | undefined;
+      if (!row) return null;
+      const is2faEnabled = Boolean(Number(row.is_2fa_enabled || 0));
+      return {
+        username: session.username,
+        balance: Number(row.balance || 0),
+        role: typeof row.role === "string" ? row.role : session.role,
+        is2faEnabled,
+        is2faVerified: is2faEnabled ? session.is2faVerified === true : true,
+      };
+    } catch {
+      return {
+        username: session.username,
+        balance: Number(session.balance || 0),
+        role: session.role,
+        is2faEnabled: Boolean(session.is2faEnabled),
+        is2faVerified: session.is2faVerified !== false,
+      };
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  } catch {
+    return null;
+  }
+}
 
 async function getBranding(): Promise<Branding> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -63,12 +107,13 @@ export default async function RootLayout({
   const cookieStore = await cookies();
   const savedLocale = cookieStore.get("follower-locale")?.value;
   const branding = await getBranding();
+  const initialUser = await getInitialUser();
   const initialLocale: Locale = ["ar", "en", "ru", "zh", "hi"].includes(savedLocale as Locale) ? (savedLocale as Locale) : "ar";
 
   return (
     <html lang={initialLocale} dir={initialLocale === "ar" ? "rtl" : "ltr"} className={`${tajawal.variable} h-full antialiased`} data-locale={initialLocale}>
       <body className="min-h-full bg-[var(--color-bg)] text-white">
-        <Providers initialLocale={initialLocale} initialBranding={branding}>{children}</Providers>
+        <Providers initialLocale={initialLocale} initialBranding={branding} initialUser={initialUser}>{children}</Providers>
       </body>
     </html>
   );
