@@ -19,7 +19,7 @@ const platformKeywords: Record<string, string[]> = {
   twitter: ["twitter", "تويتر", "x / twitter", "x/twitter"],
   telegram: ["telegram", "تيليجرام", "تلجرام"],
   whatsapp: ["whatsapp", "واتساب", "واتس"],
-  snapchat: ["snapchat", "سناب جات", "سناب"],
+  snapchat: ["snapchat", "snap chat", "سناب شات", "سناب جات", "سناب"],
   discord: [  "discord", "ديسكورد"],
   twitch: ["twitch", "تويتش"],
   spotify: ["spotify", "سبوتيفاي"],
@@ -34,7 +34,7 @@ const platformNames: Record<string, string> = {
   tiktok: "تيك توك",
   instagram: "إنستغرام",
   whatsapp: "واتساب",
-  twitter: "تويتر / X",
+  twitter: "X / تويتر",
   youtube: "يوتيوب",
   telegram: "تيليجرام",
   discord: "ديسكورد",
@@ -46,6 +46,25 @@ const platformNames: Record<string, string> = {
   spotify: "سبوتيفاي",
   dribbble: "دريبل",
   other: "أخرى",
+};
+
+const platformEnglishNames: Record<string, string> = {
+  facebook: "Facebook",
+  tiktok: "TikTok",
+  instagram: "Instagram",
+  whatsapp: "WhatsApp",
+  twitter: "X / Twitter",
+  youtube: "YouTube",
+  telegram: "Telegram",
+  discord: "Discord",
+  snapchat: "Snapchat",
+  threads: "Threads",
+  twitch: "Twitch",
+  kuaishou: "Kuaishou",
+  likee: "Likee",
+  spotify: "Spotify",
+  dribbble: "Dribbble",
+  other: "Other",
 };
 
 const platformColors: Record<string, string> = {
@@ -81,6 +100,16 @@ const platformVariantSuffixes = new Set([
 ]);
 
 const platformAliases: Record<string, string> = {
+  x: "twitter",
+  "x-twitter": "twitter",
+  "twitter-x": "twitter",
+  snap: "snapchat",
+  "snap-chat": "snapchat",
+  "snapchat-ghost": "snapchat",
+  thread: "threads",
+  "threads-app": "threads",
+  "twitch-tv": "twitch",
+  "kuaishou-app": "kuaishou",
   dribble: "dribbble",
   "dribble-server": "dribbble",
   "dribbble-server": "dribbble",
@@ -169,6 +198,11 @@ export function platformDisplayName(id: string): string {
     .filter(Boolean)
     .map((part) => part.length > 1 ? `${part.charAt(0).toUpperCase()}${part.slice(1)}` : part)
     .join(" ") || platformNames.other;
+}
+
+export function platformEnglishDisplayName(id: string): string {
+  const normalizedId = normalizePlatformId(id);
+  return platformEnglishNames[normalizedId] || normalizedId;
 }
 
 export function platformColor(id: string): string {

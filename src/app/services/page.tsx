@@ -10,7 +10,7 @@ import { useLanguage, translatePlatform, translateServiceName, translateServiceT
 import Header from "../components/Header";
 import Sidebar from "../components/Sidebar";
 import BottomNav from "../components/BottomNav";
-import { defaultPlatformOptions, normalizePlatformId, platformOption, type PlatformOption } from "@/lib/platform-mapping";
+import { defaultPlatformOptions, normalizePlatformId, platformEnglishDisplayName, platformOption, type PlatformOption } from "@/lib/platform-mapping";
 import { AUTH_CHANGED_EVENT, type ClientAuthUser } from "../components/auth-client";
 import { useInitialAuthUser } from "../components/Providers";
 
@@ -360,6 +360,19 @@ export default function ServicesPage() {
   };
 
   const platformList = platformOptions.filter((p) => p.id !== "all");
+  const builtinPlatformIds = useMemo(() => new Set(defaultPlatformOptions.map((p) => p.id)), []);
+  const displayPlatformLabel = (platform: PlatformOption) => {
+    if (platform.id === "all") return t("service.all");
+    const canonicalId = normalizePlatformId(platform.id);
+    if (builtinPlatformIds.has(canonicalId)) {
+      return locale === "ar" ? platformOption(canonicalId).name : platformEnglishDisplayName(canonicalId);
+    }
+    return locale === "ar" ? platform.nameAr || platform.name : platform.nameEn || platform.nameAr || platform.name;
+  };
+  const displayPlatformBrand = (platform: PlatformOption) => {
+    const canonicalId = normalizePlatformId(platform.id);
+    return builtinPlatformIds.has(canonicalId) ? platformEnglishDisplayName(canonicalId) : null;
+  };
 
   return (
     <div className="relative flex min-h-screen flex-col bg-[var(--color-bg)]">
@@ -491,8 +504,9 @@ export default function ServicesPage() {
                       animated={!active}
                     />
                   )}
-                  <span className="mt-2 line-clamp-2 text-center text-[10px] font-bold text-zinc-300">
-                    {p.id === "all" ? t("service.all") : (locale === "ar" ? p.nameAr || p.name : p.nameEn || p.nameAr || p.name)}
+                  <span className="mt-2 flex min-h-[2.35rem] flex-col items-center justify-center text-center leading-tight">
+                    <span className="line-clamp-2 text-[10px] font-black text-zinc-200">{displayPlatformLabel(p)}</span>
+                    {displayPlatformBrand(p) && <span dir="ltr" className="mt-0.5 truncate text-[8px] font-semibold tracking-wide text-zinc-500">{displayPlatformBrand(p)}</span>}
                   </span>
 
               </button>
