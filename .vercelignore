@@ -1,0 +1,16 @@
+node_modules
+.next
+deliverables
+artifacts
+shots
+docs
+coverage
+*.zip
+*.tar
+*.tgz
+.env
+.env.*
+!.env.example
+.git
+.vercel
+.DS_Store
