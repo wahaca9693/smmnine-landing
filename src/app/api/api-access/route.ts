@@ -159,10 +159,8 @@ export async function POST(request: Request) {
     const session = await requireAuth();
     const body = await request.json().catch(() => ({})) as ApiKeyBody;
     const name = typeof body.name === "string" ? body.name.trim().slice(0, 80) : "";
-    const count = await db.execute({ sql: "SELECT COUNT(*) AS c FROM api_keys WHERE user_id = ?", args: [session.userId!] });
-    if (Number((count.rows[0] as DbRow | undefined)?.c || 0) >= 3) {
-      return NextResponse.json({ error: "الحد الأقصى 3 مفاتيح لكل مستخدم" }, { status: 400 });
-    }
+    // لا يوجد حدّ منخفض لعدد عمليات التدوير؛ يبقى مفتاح واحد فعّالًا فقط.
+    await db.execute({ sql: "UPDATE api_keys SET is_active = 0 WHERE user_id = ?", args: [session.userId!] });
     const apiKey = genKey();
     const inserted = await db.execute({
       sql: "INSERT INTO api_keys (user_id, api_key, name) VALUES (?, ?, ?)",
@@ -205,6 +203,7 @@ export async function PATCH(request: Request) {
 
     if (action === "regenerate") {
       const apiKey = genKey();
+      await db.execute({ sql: "UPDATE api_keys SET is_active = 0 WHERE user_id = ? AND id != ?", args: [session.userId!, id] });
       await db.execute({ sql: "UPDATE api_keys SET api_key = ?, requests_count = 0, is_active = 1 WHERE id = ? AND user_id = ?", args: [apiKey, id, session.userId!] });
       invalidateApiKeyCache();
       return NextResponse.json(withApiUrl(request, { message: "تم تجديد المفتاح؛ احفظه الآن لأنه لن يظهر كاملًا مرة أخرى", keyId: id, apiKey }));

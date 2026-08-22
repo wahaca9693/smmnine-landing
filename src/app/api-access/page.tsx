@@ -316,9 +316,9 @@ export default function ApiAccessPage() {
 
         {/* بطاقة المفتاح — تصميم ذهبي لامع بدل الزجاجي */}
         <div className="rounded-3xl border border-[var(--color-gold)]/30 bg-gradient-to-br from-[#33260c] via-[#241a08] to-[#171004] p-5 shadow-[0_0_40px_-16px_rgba(255,215,0,0.35),inset_0_1px_0_rgba(255,215,0,0.15)]">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm font-black text-white">
-              <KeyRound size={16} className="text-[var(--color-gold-bright)]" /> مفتاحك الخاص
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2 text-sm font-black text-white">
+              <KeyRound size={16} className="shrink-0 text-[var(--color-gold-bright)]" /> مفتاحك الخاص
             </div>
             {activeKey ? (
               <span className="rounded-full bg-green-500/15 px-2.5 py-1 text-[10px] font-black text-green-400">
@@ -328,6 +328,7 @@ export default function ApiAccessPage() {
               <span className="rounded-full bg-red-500/15 px-2.5 py-1 text-[10px] font-black text-red-400">لا يوجد مفتاح</span>
             )}
           </div>
+          <p className="mt-2 text-[10px] leading-relaxed text-zinc-500">يمكنك تغيير المفتاح أو إلغاؤه متى شئت دون حدّ منخفض لعمليات التدوير؛ يبقى آخر مفتاح فعّالًا فقط.</p>
 
           {activeKey ? (
             <>

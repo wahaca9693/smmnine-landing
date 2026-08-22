@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "../components/Modal";
-import { Search, Layers, ChevronDown, ChevronUp, ShoppingCart, ShieldCheck, Sparkles, Zap, Infinity, RefreshCw, type LucideIcon } from "lucide-react";
+import { Search, Layers, ChevronDown, ChevronUp, ShoppingCart, ShieldCheck, Sparkles, Zap, Infinity, RefreshCw, Wallet, type LucideIcon } from "lucide-react";
 import { PlatformIcon } from "../components/Icons";
 import Link from "next/link";
 import { useLiveRefresh } from "../components/useLiveRefresh";
@@ -122,36 +122,40 @@ export default function ServicesPage() {
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [refreshingBalance, setRefreshingBalance] = useState(false);
 
   const [showGuaranteed, setShowGuaranteed] = useState(false);
   const [guaranteedStep, setGuaranteedStep] = useState<"platform" | "services">("platform");
   const [guaranteedPlatform, setGuaranteedPlatform] = useState<string | null>(null);
   const [guaranteedTypeFilter, setGuaranteedTypeFilter] = useState<string>("all");
 
+  const refreshAccountBalance = useCallback(async () => {
+    setRefreshingBalance(true);
+    try {
+      const response = await fetch("/api/user", { cache: "no-store", credentials: "include" });
+      if (response.status === 401) {
+        setAccountUser(null);
+        setAccountAuthState("guest");
+        return;
+      }
+      if (!response.ok) return;
+      const data = await response.json() as { user?: ClientAuthUser };
+      if (data.user) {
+        setAccountUser(data.user);
+        setAccountAuthState("authenticated");
+      }
+    } catch {
+      // Keep the last trusted balance when a refresh is temporarily unavailable.
+    } finally {
+      setRefreshingBalance(false);
+    }
+  }, []);
+
   useEffect(() => {
     let active = true;
 
-    const syncAccount = async () => {
-      try {
-        const response = await fetch("/api/user", { cache: "no-store", credentials: "include" });
-        if (!active) return;
-        if (response.status === 401) {
-          setAccountUser(null);
-          setAccountAuthState("guest");
-          return;
-        }
-        if (!response.ok) return;
-        const data = await response.json() as { user?: ClientAuthUser };
-        if (data.user) {
-          setAccountUser(data.user);
-          setAccountAuthState("authenticated");
-        }
-      } catch {
-        // Keep the server bootstrap during transient network failures.
-      }
-    };
-
     const handleAuthChange = (event: Event) => {
+      if (!active) return;
       const detail = (event as CustomEvent<{ user?: ClientAuthUser | null }>).detail;
       if (detail && Object.prototype.hasOwnProperty.call(detail, "user")) {
         setAccountUser(detail.user || null);
@@ -160,12 +164,13 @@ export default function ServicesPage() {
     };
 
     window.addEventListener(AUTH_CHANGED_EVENT, handleAuthChange);
-    void syncAccount();
+    const timer = window.setTimeout(() => { void refreshAccountBalance(); }, 0);
     return () => {
       active = false;
+      window.clearTimeout(timer);
       window.removeEventListener(AUTH_CHANGED_EVENT, handleAuthChange);
     };
-  }, [initialUser]);
+  }, [refreshAccountBalance]);
 
   const loadServices = useCallback(async (silent = false) => {
     if (!silent && servicesSnapshot) {
@@ -382,23 +387,48 @@ export default function ServicesPage() {
             </div>
           </div>
           <div className="divider-glow mt-4" />
-          <div className="mt-3 flex items-center justify-between gap-3 text-[11px]">
+          <div className="mt-3 flex flex-col gap-2.5 text-[11px] sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-2 text-zinc-400">
               <span className={`h-2 w-2 shrink-0 rounded-full ${fetchError ? "bg-red-400" : "bg-emerald-400"} ${syncing ? "animate-pulse" : ""}`} />
               <span className="truncate">
                 {fetchError ? t("service.syncError") : lastSyncedAt ? `${t("service.lastUpdatedPrefix")} ${lastSyncedAt.toLocaleTimeString(locale === "ar" ? "ar-AE" : locale, { hour: "2-digit", minute: "2-digit" })}` : t("service.syncing")}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => void loadServices()}
-              disabled={syncing}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 font-bold text-[var(--color-primary-light)] transition hover:border-[var(--color-primary)]/60 disabled:cursor-wait disabled:opacity-60"
-              aria-label={t("service.refresh")}
-            >
-              <RefreshCw size={13} className={syncing ? "animate-spin" : ""} />
-              {t("service.refresh")}
-            </button>
+            <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
+              {accountUser && (
+                <div className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-xl border border-[var(--color-primary)]/25 bg-[var(--color-primary)]/[0.07] px-2.5 py-1.5 shadow-[0_8px_22px_-16px_var(--color-primary)] sm:min-w-[168px] sm:flex-none">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--color-primary)]/25 bg-[var(--color-primary)]/10 text-[var(--color-primary-light)]">
+                      <Wallet size={14} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[9px] font-semibold text-zinc-500">{t("profile.balance")}</span>
+                      <strong dir="ltr" className="block text-sm font-black leading-none text-[var(--color-primary-light)]">${Number(accountUser.balance ?? 0).toFixed(2)}</strong>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void refreshAccountBalance()}
+                    disabled={refreshingBalance}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--color-primary)]/25 text-[var(--color-primary-light)] transition hover:bg-[var(--color-primary)]/15 disabled:cursor-wait disabled:opacity-60"
+                    aria-label={t("service.refresh")}
+                    title={t("service.refresh")}
+                  >
+                    <RefreshCw size={13} className={refreshingBalance ? "animate-spin" : ""} />
+                  </button>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => void loadServices()}
+                disabled={syncing}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-2 font-bold text-[var(--color-primary-light)] transition hover:border-[var(--color-primary)]/60 disabled:cursor-wait disabled:opacity-60"
+                aria-label={t("service.refresh")}
+              >
+                <RefreshCw size={13} className={syncing ? "animate-spin" : ""} />
+                {t("service.refresh")}
+              </button>
+            </div>
           </div>
         </div>
 
