@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { getSession } from "@/lib/auth";
+import { emailVerificationRequired } from "@/lib/email-verification";
 import {
   checkAuthRateLimit,
   clearAuthRateLimit,
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
     }
 
     const result = await db.execute({
-      sql: "SELECT id, username, email, password_hash, role, balance, is_banned, login_preference, is_2fa_enabled, security_code_hash FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE",
+      sql: "SELECT id, username, email, password_hash, role, balance, is_banned, login_preference, is_2fa_enabled, security_code_hash, email_verified FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE",
       args: [username, username],
     });
 
@@ -102,6 +103,8 @@ export async function POST(request: Request) {
     const is2faEnabled = Boolean(Number(user.is_2fa_enabled));
     session.is2faEnabled = is2faEnabled;
     session.is2faVerified = !is2faEnabled;
+    const isEmailVerified = !emailVerificationRequired() || Number(user.email_verified) === 1;
+    session.emailVerified = isEmailVerified;
 
     await session.save();
 
@@ -111,8 +114,10 @@ export async function POST(request: Request) {
         username: user.username,
         role: user.role,
         balance: Number(user.balance),
+        emailVerified: isEmailVerified,
       },
       requires2fa: is2faEnabled,
+      requiresEmailVerification: !isEmailVerified,
     });
   } catch (error: unknown) {
     console.error("Login error:", error);

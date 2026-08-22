@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
 export default function Home() {
-  // ابدأ من بوابة الدخول مباشرة بدل المرور بصفحة الخدمات المحمية.
-  redirect("/login");
+  // الخدمات عامة للزائر؛ الصفحات الحساسة تستخدم بوابة الحساب عند الحاجة.
+  redirect("/services");
 }

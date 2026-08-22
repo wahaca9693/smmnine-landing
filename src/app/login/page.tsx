@@ -13,7 +13,9 @@ type AuthResponse = {
   error?: string;
   securityCode?: string;
   requires2fa?: boolean;
-  user?: { username?: unknown; role?: unknown; balance?: unknown };
+  requiresEmailVerification?: boolean;
+  emailVerified?: boolean;
+  user?: { username?: unknown; role?: unknown; balance?: unknown; emailVerified?: unknown };
 };
 
 async function readAuthResponse(response: Response): Promise<AuthResponse> {
@@ -192,7 +194,7 @@ export default function LoginPage() {
 
       // If registration success with security code
       if (!isLogin && data.securityCode) {
-        setSuccess("تم إنشاء حسابك بنجاح!");
+        setSuccess(data.requiresEmailVerification ? "تم إنشاء الحساب. راجع بريدك لتأكيد الحساب، ثم أكمل التحقق الأمني." : "تم إنشاء حسابك بنجاح!");
         setSecurityCode(data.securityCode);
         setLoading(false);
         return;
@@ -205,12 +207,15 @@ export default function LoginPage() {
           balance: Number(data.user.balance || 0),
           is2faEnabled: Boolean(data.requires2fa),
           is2faVerified: !data.requires2fa,
+          emailVerified: data.emailVerified !== false,
         });
       }
 
       // Keep the visitor's requested destination after authentication.
       const destination = getSafeReturnPath();
-      if (data.requires2fa) {
+      if (data.requiresEmailVerification) {
+        router.push(`/verify-email?next=${encodeURIComponent(destination)}`);
+      } else if (data.requires2fa) {
         router.push(`/verify-2fa?next=${encodeURIComponent(destination)}`);
       } else {
         router.push(destination);

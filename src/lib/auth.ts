@@ -1,6 +1,7 @@
 import { getIronSession, SessionOptions } from "iron-session";
 import { cookies } from "next/headers";
 import { db } from "./db";
+import { emailVerificationRequired } from "./email-verification";
 
 export interface SessionData {
   userId?: number;
@@ -9,6 +10,7 @@ export interface SessionData {
   isLoggedIn?: boolean;
   is2faVerified?: boolean;
   is2faEnabled?: boolean;
+  emailVerified?: boolean;
   balance?: number;
 }
 
@@ -34,6 +36,24 @@ const sessionOptions: SessionOptions = {
   },
 };
 
+function twoFaVerificationExpired(frequency: unknown, lastVerifiedAt: unknown): boolean {
+  const mode = String(frequency || "always");
+  if (mode === "always") return false;
+  if (!lastVerifiedAt) return true;
+  const raw = String(lastVerifiedAt);
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(" ", "T")}Z`;
+  const verifiedAt = Date.parse(normalized);
+  if (!Number.isFinite(verifiedAt)) return true;
+  const durations: Record<string, number> = {
+    hourly: 60 * 60 * 1000,
+    daily: 24 * 60 * 60 * 1000,
+    weekly: 7 * 24 * 60 * 60 * 1000,
+    monthly: 30 * 24 * 60 * 60 * 1000,
+  };
+  const duration = durations[mode];
+  return duration ? Date.now() - verifiedAt >= duration : true;
+}
+
 export async function getSession() {
   const cookieStore = await cookies();
   return getIronSession<SessionData>(cookieStore, sessionOptions);
@@ -49,12 +69,12 @@ export async function requireAuth() {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     const result = await Promise.race([
-      db.execute({ sql: "SELECT is_banned, is_2fa_enabled FROM users WHERE id = ?", args: [session.userId] }),
+      db.execute({ sql: "SELECT is_banned, is_2fa_enabled, two_fa_frequency, last_2fa_verified_at, email_verified FROM users WHERE id = ?", args: [session.userId] }),
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => reject(new Error("Auth state lookup timeout")), 3000);
       }),
     ]);
-    const user = result.rows[0] as { is_banned?: unknown, is_2fa_enabled?: unknown } | undefined;
+    const user = result.rows[0] as { is_banned?: unknown, is_2fa_enabled?: unknown, two_fa_frequency?: unknown, last_2fa_verified_at?: unknown, email_verified?: unknown } | undefined;
     if (!user) {
       throw new Error("Unauthorized");
     }
@@ -62,8 +82,16 @@ export async function requireAuth() {
       throw new Error("Account banned");
     }
 
+    if (emailVerificationRequired() && !Number(user.email_verified)) {
+      throw new Error("EMAIL_VERIFICATION_REQUIRED");
+    }
+
     // If 2FA is enabled but not verified in session, block access except for specific routes
-    if (Number(user.is_2fa_enabled) && !session.is2faVerified) {
+    if (Number(user.is_2fa_enabled) && (!session.is2faVerified || twoFaVerificationExpired(user.two_fa_frequency, user.last_2fa_verified_at))) {
+      if (session.is2faVerified) {
+        session.is2faVerified = false;
+        await session.save();
+      }
       throw new Error("2FA_REQUIRED");
     }
 

@@ -32,6 +32,9 @@ const schemaStatements = [
     terms_accepted INTEGER DEFAULT 0,
     is_banned INTEGER DEFAULT 0,
     status TEXT DEFAULT 'active',
+    email_verified INTEGER DEFAULT 1,
+    email_verification_token_hash TEXT,
+    email_verification_expires_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS user_preferences (
@@ -438,6 +441,9 @@ const schemaMigrations: SchemaMigration[] = [
       ["is_2fa_enabled", "INTEGER DEFAULT 0"],
       ["two_fa_frequency", "TEXT DEFAULT 'always'"],
       ["last_2fa_verified_at", "DATETIME"],
+      ["email_verified", "INTEGER DEFAULT 1"],
+      ["email_verification_token_hash", "TEXT"],
+      ["email_verification_expires_at", "DATETIME"],
       // libSQL لا يسمح بإضافة عمود قديم بقيمة افتراضية غير ثابتة عبر ALTER TABLE.
       ["updated_at", "DATETIME"],
     ],

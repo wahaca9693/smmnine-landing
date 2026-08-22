@@ -22,8 +22,10 @@ export async function GET() {
       session = await requireAuth();
     } catch (error: unknown) {
       if (error instanceof Error && error.message === "2FA_REQUIRED") {
-        // Return a special status or flag so the UI knows to redirect to /verify-2fa instead of /login
         return NextResponse.json({ error: "2FA_REQUIRED", requires2fa: true }, { status: 403 });
+      }
+      if (error instanceof Error && error.message === "EMAIL_VERIFICATION_REQUIRED") {
+        return NextResponse.json({ error: "EMAIL_VERIFICATION_REQUIRED", requiresEmailVerification: true }, { status: 403 });
       }
       throw error;
     }
@@ -31,7 +33,7 @@ export async function GET() {
 
     const [result, notifCount] = await Promise.all([
       db.execute({
-        sql: "SELECT id, username, email, balance, role, is_2fa_enabled FROM users WHERE id = ?",
+        sql: "SELECT id, username, email, balance, role, is_2fa_enabled, email_verified FROM users WHERE id = ?",
         args: [userId],
       }),
       db.execute({
@@ -40,7 +42,7 @@ export async function GET() {
       }),
     ]);
 
-    const user = result.rows[0] as unknown as (UserRow & { is_2fa_enabled: number }) | undefined;
+    const user = result.rows[0] as unknown as (UserRow & { is_2fa_enabled: number; email_verified?: number | string | boolean }) | undefined;
     if (!user) {
       const s = await getSession();
       s.destroy();
@@ -57,7 +59,8 @@ export async function GET() {
         balance: Number(user.balance),
         role: user.role,
         is2faEnabled: Boolean(user.is_2fa_enabled),
-        is2faVerified: Boolean(currentSession.is2faVerified)
+        is2faVerified: Boolean(currentSession.is2faVerified),
+        emailVerified: Number(user.email_verified) === 1,
       },
       unreadNotifications: Number(notifCount.rows[0]?.count || 0),
     });

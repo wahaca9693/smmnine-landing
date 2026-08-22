@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { getSession } from "@/lib/auth";
+import { createEmailVerificationToken, emailVerificationConfigured, emailVerificationExpiry, emailVerificationRequired, hashEmailVerificationToken, sendEmailVerification } from "@/lib/email-verification";
 import type { InStatement, ResultSet } from "@libsql/client";
 import {
   checkAuthRateLimit,
@@ -157,12 +158,19 @@ export async function POST(request: Request) {
     // Generate a random 6-digit security code for the new user
     const securityCode = Math.floor(100000 + Math.random() * 900000).toString();
     const securityCodeHash = await bcrypt.hash(securityCode, 10);
+    const shouldVerifyEmail = emailVerificationRequired();
+    if (shouldVerifyEmail && !emailVerificationConfigured()) {
+      return NextResponse.json({ error: "تحقق البريد غير مهيأ حاليًا. أعد المحاولة لاحقًا." }, { status: 503 });
+    }
+    const emailToken = shouldVerifyEmail ? createEmailVerificationToken() : "";
+    const emailTokenHash = emailToken ? hashEmailVerificationToken(emailToken) : null;
+    const emailTokenExpiry = emailToken ? emailVerificationExpiry() : null;
 
     let result: ResultSet;
     try {
       result = await db.execute({
-        sql: "INSERT INTO users (username, email, password_hash, security_code_hash, login_preference, balance, role, terms_accepted, is_2fa_enabled, two_fa_frequency) VALUES (?, ?, ?, ?, 'both', 0, 'user', 1, 1, 'always')",
-        args: [username, email, hash, securityCodeHash],
+        sql: "INSERT INTO users (username, email, password_hash, security_code_hash, login_preference, balance, role, terms_accepted, is_2fa_enabled, two_fa_frequency, email_verified, email_verification_token_hash, email_verification_expires_at) VALUES (?, ?, ?, ?, 'both', 0, 'user', 1, 1, 'always', ?, ?, ?)",
+        args: [username, email, hash, securityCodeHash, shouldVerifyEmail ? 0 : 1, emailTokenHash, emailTokenExpiry],
       });
     } catch (error: unknown) {
       // يعالج سباق التسجيل بين فحص التكرار والإدراج دون كشف رسالة SQL.
@@ -189,14 +197,24 @@ export async function POST(request: Request) {
       });
     }
 
+    if (shouldVerifyEmail && emailToken) {
+      try {
+        await sendEmailVerification({ to: email, username, token: emailToken });
+      } catch (error) {
+        console.error("Email verification delivery failed", { errorName: error instanceof Error ? error.name : "UnknownError" });
+      }
+    }
+
     const session = await getSession();
     session.userId = userId;
     session.username = username;
     session.role = "user";
     session.isLoggedIn = true;
     session.balance = 0;
-    session.is2faEnabled = false;
-    session.is2faVerified = true;
+    // الحسابات الجديدة تُنشأ مع 2FA مفعّلًا؛ يجب إكمال التحقق قبل فتح الصفحات المحمية.
+    session.is2faEnabled = true;
+    session.is2faVerified = false;
+    session.emailVerified = !shouldVerifyEmail;
     await session.save();
 
     return NextResponse.json({
@@ -207,6 +225,7 @@ export async function POST(request: Request) {
         balance: 0,
       },
       securityCode, // Return the code to be shown to the user once
+      requiresEmailVerification: shouldVerifyEmail,
     });
   } catch (error: unknown) {
     console.error("Register error", {

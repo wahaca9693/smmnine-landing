@@ -75,8 +75,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         if (res.status === 403) {
           const data = await res.json();
-          if (data.requires2fa && pathname !== "/verify-2fa") {
-            router.replace("/verify-2fa");
+          if (data.requiresEmailVerification && pathname !== "/verify-email") {
+            router.replace(`/verify-email?next=${encodeURIComponent(pathname || "/services")}`);
+          } else if (data.requires2fa && pathname !== "/verify-2fa") {
+            router.replace(`/verify-2fa?next=${encodeURIComponent(pathname || "/services")}`);
           }
           return;
         }

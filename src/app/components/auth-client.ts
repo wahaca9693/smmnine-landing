@@ -6,6 +6,7 @@ export type ClientAuthUser = {
   role: string;
   is2faEnabled?: boolean;
   is2faVerified?: boolean;
+  emailVerified?: boolean;
 };
 
 export const AUTH_CHANGED_EVENT = "follower-auth-changed";

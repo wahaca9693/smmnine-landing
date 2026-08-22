@@ -30,14 +30,14 @@ async function getInitialUser(): Promise<ClientAuthUser | null> {
     try {
       const result = await Promise.race([
         db.execute({
-          sql: "SELECT balance, role, is_2fa_enabled FROM users WHERE id = ? LIMIT 1",
+          sql: "SELECT balance, role, is_2fa_enabled, email_verified FROM users WHERE id = ? LIMIT 1",
           args: [session.userId],
         }),
         new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => reject(new Error("Initial user lookup timeout")), 1500);
         }),
       ]);
-      const row = result.rows[0] as { balance?: unknown; role?: unknown; is_2fa_enabled?: unknown } | undefined;
+      const row = result.rows[0] as { balance?: unknown; role?: unknown; is_2fa_enabled?: unknown; email_verified?: unknown } | undefined;
       if (!row) return null;
       const is2faEnabled = Boolean(Number(row.is_2fa_enabled || 0));
       return {
@@ -46,6 +46,7 @@ async function getInitialUser(): Promise<ClientAuthUser | null> {
         role: typeof row.role === "string" ? row.role : session.role,
         is2faEnabled,
         is2faVerified: is2faEnabled ? session.is2faVerified === true : true,
+        emailVerified: Number(row.email_verified) === 1,
       };
     } catch {
       return {
@@ -54,6 +55,7 @@ async function getInitialUser(): Promise<ClientAuthUser | null> {
         role: session.role,
         is2faEnabled: Boolean(session.is2faEnabled),
         is2faVerified: session.is2faVerified !== false,
+        emailVerified: session.emailVerified !== false,
       };
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
