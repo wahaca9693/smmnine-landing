@@ -35,12 +35,15 @@ const schemaStatements = [
     email_verified INTEGER DEFAULT 1,
     email_verification_token_hash TEXT,
     email_verification_expires_at DATETIME,
+    firebase_uid TEXT,
+    auth_provider TEXT DEFAULT 'password',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS pending_registrations (
     registration_id TEXT PRIMARY KEY,
     username TEXT NOT NULL,
     email TEXT NOT NULL,
+    firebase_uid TEXT,
     terms_accepted INTEGER NOT NULL DEFAULT 1,
     device_id TEXT NOT NULL,
     pre_auth_session_id TEXT NOT NULL,
@@ -432,6 +435,8 @@ const indexStatements = [
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_services_provider_remote_unique ON provider_services(provider_id, remote_service_id)`,
   `CREATE INDEX IF NOT EXISTS idx_provider_services_active ON provider_services(is_active, provider_id)`,
   `CREATE INDEX IF NOT EXISTS idx_pending_registrations_email ON pending_registrations(email)`,
+  `CREATE INDEX IF NOT EXISTS idx_pending_registrations_firebase_uid ON pending_registrations(firebase_uid)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid) WHERE firebase_uid IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_pending_registrations_expires ON pending_registrations(expires_at)`,
   `CREATE INDEX IF NOT EXISTS idx_orders_user_created ON orders(user_id, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_orders_provider_status ON orders(provider_id, status, updated_at DESC)`,
@@ -449,6 +454,10 @@ const indexStatements = [
 
 const schemaMigrations: SchemaMigration[] = [
   {
+    table: "pending_registrations",
+    columns: [["firebase_uid", "TEXT"]],
+  },
+  {
     table: "users",
     columns: [
       ["login_preference", "TEXT DEFAULT 'both'"],
@@ -459,6 +468,8 @@ const schemaMigrations: SchemaMigration[] = [
       ["email_verified", "INTEGER DEFAULT 1"],
       ["email_verification_token_hash", "TEXT"],
       ["email_verification_expires_at", "DATETIME"],
+      ["firebase_uid", "TEXT"],
+      ["auth_provider", "TEXT DEFAULT 'password'"],
       // libSQL لا يسمح بإضافة عمود قديم بقيمة افتراضية غير ثابتة عبر ALTER TABLE.
       ["updated_at", "DATETIME"],
     ],
