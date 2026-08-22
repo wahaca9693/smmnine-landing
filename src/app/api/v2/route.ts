@@ -8,6 +8,7 @@ import { canRequestOrderCancellation, normalizeOrderStatus, orderStatusKey } fro
 import { API_RATE_LIMIT, checkApiRateLimit, isApiV2Enabled } from "@/lib/api-v2-guard";
 import { resolveApiKey } from "@/lib/api-key-cache";
 import { getApiKeyPolicy, type ApiKeyPolicy } from "@/lib/api-key-policy";
+import { refreshOrderStatus, resolveProviderId } from "@/lib/order-status-refresh";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -198,7 +199,26 @@ export async function GET(request: Request) {
     });
     const row = result.rows[0] as unknown as JsonRecord | undefined;
     if (!row) return json({ error: "الطلب غير موجود" }, { status: 404 });
-    const normalizedStatus = normalizeOrderStatus(row.status);
+    let liveStatus: JsonRecord | null = null;
+    let refreshError: string | null = null;
+    try {
+      liveStatus = await refreshOrderStatus({
+        id: Number(row.id),
+        user_id: resolved.userId,
+        service_id: row.service_id,
+        public_service_id: row.public_service_id,
+        service_name: row.service_name,
+        provider_id: row.provider_id,
+        smmnine_order_id: row.smmnine_order_id,
+        status: row.status,
+        start_count: row.start_count,
+        remains: row.remains,
+      });
+    } catch (error: unknown) {
+      refreshError = error instanceof Error ? error.message : "تعذر تحديث الحالة من المزود";
+    }
+    const effectiveStatus = liveStatus?.status ?? row.status;
+    const normalizedStatus = normalizeOrderStatus(effectiveStatus);
     return json({
       order: {
         id: row.id,
@@ -207,15 +227,17 @@ export async function GET(request: Request) {
         link: row.link,
         quantity: Number(row.quantity),
         charge: Number(row.charge),
-        status: row.status,
+        status: effectiveStatus,
         status_key: orderStatusKey(normalizedStatus),
         can_cancel: canRequestOrderCancellation(normalizedStatus) && !row.refunded_at,
-        start_count: row.start_count == null ? null : Number(row.start_count),
-        remains: row.remains == null ? null : Number(row.remains),
+        start_count: liveStatus?.start_count ?? (row.start_count == null ? null : Number(row.start_count)),
+        remains: liveStatus?.remains ?? (row.remains == null ? null : Number(row.remains)),
         cancel_requested: Boolean(row.cancel_requested_at),
         refunded: Boolean(row.refunded_at),
         created_at: row.created_at,
         updated_at: row.updated_at,
+        live: Boolean(liveStatus),
+        refresh_error: refreshError,
       },
     });
   }
@@ -274,7 +296,18 @@ export async function POST(request: Request) {
 
     if (order.cancel_requested_at) return json({ error: "طلب الإلغاء قيد المعالجة؛ لا تعاود الإرسال الآن" }, { status: 409, headers: { "Retry-After": "30" } });
 
-    const providerId = Number(order.provider_id) || null;
+    const providerId = await resolveProviderId({
+      id: Number(order.id),
+      user_id: resolved.userId,
+      service_id: order.service_id,
+      public_service_id: order.public_service_id,
+      service_name: order.service_name,
+      provider_id: order.provider_id,
+      smmnine_order_id: order.smmnine_order_id,
+      status: order.status,
+      start_count: order.start_count,
+      remains: order.remains,
+    });
     let remoteStatus: JsonRecord;
     try {
       remoteStatus = asRecord(providerId

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { cancelOrder, getOrderStatus } from "@/lib/follower";
 import { cancelProviderOrder, getProviderOrderStatus } from "@/lib/providers";
 import { canRequestOrderCancellation, normalizeOrderStatus, orderStatusKey } from "@/lib/order-status";
+import { resolveProviderId } from "@/lib/order-status-refresh";
 
 type DbRow = Record<string, unknown>;
 type CancelBody = { orderId?: unknown };
@@ -36,7 +37,18 @@ export async function POST(request: Request) {
     if (!order.smmnine_order_id) return NextResponse.json({ error: "لم يُسجّل الطلب لدى المزود بعد" }, { status: 409 });
     if (order.refunded_at) return NextResponse.json({ error: "تمت إعادة رصيد هذا الطلب مسبقًا" }, { status: 409 });
 
-    const providerId = Number(order.provider_id) || null;
+    const providerId = await resolveProviderId({
+      id: Number(order.id),
+      user_id: Number(order.user_id),
+      service_id: order.service_id,
+      public_service_id: order.public_service_id,
+      service_name: order.service_name,
+      provider_id: order.provider_id,
+      smmnine_order_id: order.smmnine_order_id,
+      status: order.status,
+      start_count: order.start_count,
+      remains: order.remains,
+    });
     const remoteStatus = providerId
       ? await getProviderOrderStatus(providerId, String(order.smmnine_order_id))
       : await getOrderStatus(String(order.smmnine_order_id));

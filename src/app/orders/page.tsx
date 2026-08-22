@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import { Search, RefreshCw, X, Link2, Package, Zap, Clock3, CheckCircle2, XCircle, AlertTriangle, Eye, Ban, CircleDollarSign } from "lucide-react";
 import { useLanguage } from "../components/LanguageProvider";
+import { useLiveRefresh } from "../components/useLiveRefresh";
 
 type OrderItem = Record<string, unknown> & {
   id: number;
@@ -122,14 +123,14 @@ export default function OrdersPage() {
   const [canceling, setCanceling] = useState(false);
   const [modalMessage, setModalMessage] = useState("");
 
-  const fetchOrders = useCallback(async () => {
-    setLoading(true);
+  const fetchOrders = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     try {
       const res = await fetch(`/api/orders?status=${filter}`, { cache: "no-store" });
       const data = await res.json();
       setOrders(data.orders || []);
     } catch {}
-    setLoading(false);
+    if (showLoading) setLoading(false);
   }, [filter]);
 
   useEffect(() => {
@@ -184,6 +185,11 @@ export default function OrdersPage() {
       setCanceling(false);
     }
   };
+
+  useLiveRefresh(() => {
+    if (selectedOrder) return refreshSelectedOrder();
+    return fetchOrders(false);
+  }, { intervalMs: 30000 });
 
   const filteredOrders = orders.filter((o) => String(o.service_name || "").toLowerCase().includes(search.toLowerCase()) || String(o.smmnine_order_id || o.id).includes(search));
   const filterButtons = [

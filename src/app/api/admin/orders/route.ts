@@ -67,7 +67,7 @@ export async function POST(request: Request) {
     }
 
     const result = await db.execute({
-      sql: "SELECT id, user_id, provider_id, smmnine_order_id, status, start_count, remains FROM orders WHERE id = ?",
+      sql: "SELECT id, user_id, service_id, service_name, public_service_id, provider_id, smmnine_order_id, status, start_count, remains FROM orders WHERE id = ?",
       args: [orderId],
     });
     const row = result.rows[0] as DbRow | undefined;
@@ -77,6 +77,9 @@ export async function POST(request: Request) {
       id: Number(row.id),
       user_id: Number(row.user_id),
       provider_id: row.provider_id,
+      service_id: row.service_id,
+      public_service_id: row.public_service_id,
+      service_name: row.service_name,
       smmnine_order_id: row.smmnine_order_id,
       status: row.status,
       start_count: row.start_count,
