@@ -3,6 +3,13 @@ import { requireAdmin } from "@/lib/auth";
 import { db, initDb } from "@/lib/db";
 import { invalidateServicesCache } from "@/lib/services-cache";
 import { invalidateServiceCatalogCache } from "@/lib/service-catalog";
+import {
+  buildFallbackDescription,
+  isOpaqueServiceText,
+  translateServiceDescription,
+  translateServiceName,
+  translationFingerprint,
+} from "@/lib/service-translation";
 
 const DEFAULT_MARKUP = 0; // لا يوجد هامش تلقائي؛ يفعّله الأدمن صراحةً فقط
 type JsonObject = Record<string, unknown>;
@@ -38,6 +45,34 @@ function resolveSellRate(rate: number, markup: number, pricingMode?: string, man
     return Number.isFinite(direct) && direct >= 0 ? roundRate(direct) : applyMarkup(rate, markup);
   }
   return applyMarkup(rate, markup);
+}
+
+function serviceTextFromProvider(raw: JsonObject, remoteId: string): {
+  name: string;
+  description: string;
+  nameAr: string;
+  descriptionAr: string;
+  sourceHash: string;
+} {
+  const category = String(raw.category ?? "").trim() || "عام";
+  const type = String(raw.type ?? "").trim() || "service";
+  const min = Number(raw.min) || 0;
+  const max = Number(raw.max) || 0;
+  const rawName = String(raw.name ?? raw.title ?? "").trim();
+  // بعض المزودين يرسلون service ID في name أو نصًا فارغًا؛ لا نعرض المعرّف opaque للمستخدم.
+  const name = isOpaqueServiceText(rawName)
+    ? (category !== "عام" ? category : `Service ${remoteId}`)
+    : rawName;
+  const description = String(
+    raw.description ?? raw.desc ?? raw.details ?? raw.service_description ?? "",
+  ).trim() || buildFallbackDescription(name, category, type, min, max);
+  return {
+    name,
+    description,
+    nameAr: translateServiceName(name),
+    descriptionAr: translateServiceDescription(description),
+    sourceHash: translationFingerprint(name, description),
+  };
 }
 
 function parsePricing(body: JsonObject, fallbackMarkup = DEFAULT_MARKUP, fallbackMode = "markup", fallbackManual: number | null = null) {
@@ -372,20 +407,21 @@ export async function POST(request: Request) {
         const remoteId = String(s.service);
         const current = existing.get(remoteId);
         const costRate = Number(s.rate) || 0;
+        const text = serviceTextFromProvider(s, remoteId);
         if (current) {
           const keepManual = String(current.pricing_mode || "markup") === "manual";
           const sellRate = keepManual ? Number(current.manual_price ?? current.sell_rate ?? costRate) : (pricingEnabled ? applyMarkup(costRate, markupPct) : roundRate(costRate));
           syncStatements.push({
-            sql: `UPDATE provider_services SET name=?, category=?, rate=?, min=?, max=?, type=?, sell_rate=?, is_new=0, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-            args: [String(s.name || current.name || ""), String(s.category || ""), costRate, Number(s.min) || 0, Number(s.max) || 0, String(s.type || ""), sellRate, Number(current.id)],
+            sql: `UPDATE provider_services SET name=?, description=?, name_ar=?, description_ar=?, translation_source_hash=?, category=?, rate=?, min=?, max=?, type=?, sell_rate=?, is_new=0, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+            args: [text.name, text.description, text.nameAr, text.descriptionAr, text.sourceHash, String(s.category || ""), costRate, Number(s.min) || 0, Number(s.max) || 0, String(s.type || ""), sellRate, Number(current.id)],
           });
           updated++;
         } else {
           const sellRate = pricingEnabled ? applyMarkup(costRate, markupPct) : roundRate(costRate);
           syncStatements.push({
-            sql: `INSERT INTO provider_services (provider_id, remote_service_id, name, category, rate, min, max, type, markup_percent, sell_rate, pricing_mode, manual_price, is_new)
-                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)`,
-            args: [Number(providerId), remoteId, String(s.name || ""), String(s.category || ""), costRate, Number(s.min) || 0, Number(s.max) || 0, String(s.type || ""), markupPct, sellRate, "markup", null],
+            sql: `INSERT INTO provider_services (provider_id, remote_service_id, name, description, name_ar, description_ar, translation_source_hash, category, rate, min, max, type, markup_percent, sell_rate, pricing_mode, manual_price, is_new)
+                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,
+            args: [Number(providerId), remoteId, text.name, text.description, text.nameAr, text.descriptionAr, text.sourceHash, String(s.category || ""), costRate, Number(s.min) || 0, Number(s.max) || 0, String(s.type || ""), markupPct, sellRate, "markup", null],
           });
           inserted++;
         }

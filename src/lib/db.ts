@@ -117,7 +117,9 @@ const schemaStatements = [
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     service_id INTEGER NOT NULL,
+    public_service_id TEXT,
     service_name TEXT,
+    service_name_ar TEXT,
     link TEXT NOT NULL,
     target_quantity INTEGER NOT NULL,
     interval_hours INTEGER DEFAULT 24,
@@ -227,6 +229,22 @@ const schemaStatements = [
     badge TEXT,
     badge_color TEXT DEFAULT 'gold',
     audience TEXT NOT NULL DEFAULT 'user',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS catalog_platform_buttons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL UNIQUE,
+    label_ar TEXT NOT NULL,
+    label_en TEXT,
+    description_ar TEXT,
+    description_en TEXT,
+    logo_url TEXT,
+    service_ids TEXT NOT NULL DEFAULT '[]',
     is_active INTEGER NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_by INTEGER,
@@ -389,12 +407,6 @@ const schemaStatements = [
   )`,
   `INSERT OR IGNORE INTO api_key_settings (api_key_id) SELECT id FROM api_keys`,
   `INSERT OR IGNORE INTO site_settings (id) VALUES ('default')`,
-  // Security Updates 2026-08-21
-  `ALTER TABLE users ADD COLUMN login_preference TEXT DEFAULT 'both'`,
-  `ALTER TABLE users ADD COLUMN security_code_hash TEXT`,
-  `ALTER TABLE users ADD COLUMN is_2fa_enabled INTEGER DEFAULT 0`,
-  `ALTER TABLE users ADD COLUMN two_fa_frequency TEXT DEFAULT 'always'`,
-  `ALTER TABLE users ADD COLUMN last_2fa_verified_at DATETIME`,
 ] as const;
 
 const indexStatements = [
@@ -410,6 +422,7 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS idx_api_key_settings_updated ON api_key_settings(updated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read, created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_admin_navigation_active ON admin_navigation_items(is_active, audience, sort_order, id)`,
+  `CREATE INDEX IF NOT EXISTS idx_catalog_platform_buttons_active ON catalog_platform_buttons(is_active, sort_order, id)`,
   `CREATE INDEX IF NOT EXISTS idx_auth_attempts_updated_at ON auth_attempts(updated_at)`,
   `CREATE INDEX IF NOT EXISTS idx_free_offers_active ON free_service_offers(is_active, updated_at DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_free_usages_user_offer ON free_service_usages(user_id, offer_id, created_at DESC)`,
@@ -417,6 +430,18 @@ const indexStatements = [
 ] as const;
 
 const schemaMigrations: SchemaMigration[] = [
+  {
+    table: "users",
+    columns: [
+      ["login_preference", "TEXT DEFAULT 'both'"],
+      ["security_code_hash", "TEXT"],
+      ["is_2fa_enabled", "INTEGER DEFAULT 0"],
+      ["two_fa_frequency", "TEXT DEFAULT 'always'"],
+      ["last_2fa_verified_at", "DATETIME"],
+      // libSQL لا يسمح بإضافة عمود قديم بقيمة افتراضية غير ثابتة عبر ALTER TABLE.
+      ["updated_at", "DATETIME"],
+    ],
+  },
   {
     table: "orders",
     columns: [
@@ -457,11 +482,22 @@ const schemaMigrations: SchemaMigration[] = [
     ],
   },
   {
+    table: "auto_refills",
+    columns: [
+      ["public_service_id", "TEXT"],
+      ["service_name_ar", "TEXT"],
+    ],
+  },
+  {
     table: "provider_services",
     columns: [
       ["is_new", "INTEGER DEFAULT 1"],
       ["pricing_mode", "TEXT DEFAULT 'markup'"],
       ["manual_price", "REAL"],
+      ["description", "TEXT"],
+      ["name_ar", "TEXT"],
+      ["description_ar", "TEXT"],
+      ["translation_source_hash", "TEXT"],
     ],
   },
   {
@@ -513,6 +549,12 @@ async function applySchemaMigrations() {
   });
   if (alterations.length > 0) {
     await db.batch(alterations.map((sql) => ({ sql })), "write");
+  }
+
+  // املأ الأعمدة الزمنية المضافة للصفوف القديمة بعد الترحيل، بدل استخدام
+  // CURRENT_TIMESTAMP في تعريف ALTER TABLE غير المدعوم من SQLite/libSQL.
+  if (alterations.some((sql) => sql.includes("ALTER TABLE users ADD COLUMN updated_at"))) {
+    await db.execute("UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL");
   }
 }
 

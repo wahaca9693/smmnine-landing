@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { db } from "@/lib/db";
 import { getServices } from "@/lib/follower";
+import {
+  buildFallbackDescription,
+  isOpaqueServiceText,
+  translateServiceDescription,
+  translateServiceName,
+  translationFingerprint,
+} from "@/lib/service-translation";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -8,6 +15,10 @@ type ProviderServiceRow = JsonRecord & {
   id?: unknown;
   remote_service_id?: unknown;
   name?: unknown;
+  description?: unknown;
+  name_ar?: unknown;
+  description_ar?: unknown;
+  translation_source_hash?: unknown;
   category?: unknown;
   type?: unknown;
   sell_rate?: unknown;
@@ -21,6 +32,9 @@ export type CatalogService = {
   serviceId: string;
   remoteServiceId: string;
   name: string;
+  nameAr: string;
+  description: string;
+  descriptionAr: string;
   category: string;
   type: string;
   rate: number;
@@ -32,13 +46,25 @@ export type CatalogService = {
 };
 
 const CATALOG_CACHE_MS = 60_000;
-const PROVIDER_CATALOG_TIMEOUT_MS = 2_500;
+const PROVIDER_CATALOG_TIMEOUT_MS = 45_000;
 let catalogCache: { at: number; payload: CatalogService[] } | null = null;
 let catalogGeneration = 0;
 let catalogInFlight: { generation: number; promise: Promise<CatalogService[]> } | null = null;
 
 export function getPublicServiceId(service: CatalogService): string {
-  const identity = `${service.source}:${service.providerId ?? 0}:${service.remoteServiceId}`;
+  return getPublicCatalogId(service.source, service.providerId, service.remoteServiceId);
+}
+
+export function getPublicProviderServiceId(providerId: number | null, remoteServiceId: string): string {
+  return getPublicCatalogId("provider", providerId, remoteServiceId);
+}
+
+export function getPublicFollowerServiceId(remoteServiceId: string): string {
+  return getPublicCatalogId("follower", null, remoteServiceId);
+}
+
+function getPublicCatalogId(source: CatalogService["source"], providerId: number | null, remoteServiceId: string): string {
+  const identity = `${source}:${providerId ?? 0}:${remoteServiceId}`;
   return `svc_${createHash("sha256").update(identity).digest("hex").slice(0, 20)}`;
 }
 
@@ -63,19 +89,53 @@ function numberValue(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function mapServiceText(nameValue: unknown, descriptionValue: unknown, categoryValue: unknown, typeValue: unknown, min: number, max: number): {
+  name: string;
+  nameAr: string;
+  description: string;
+  descriptionAr: string;
+  category: string;
+} {
+  const rawName = String(nameValue ?? "").trim();
+  const rawCategory = String(categoryValue ?? "").trim() || "عام";
+  const rawType = String(typeValue ?? "").trim() || "service";
+  const name = isOpaqueServiceText(rawName)
+    ? (rawCategory !== "عام" ? rawCategory : translateServiceName(rawType || "service"))
+    : rawName;
+  const description = String(descriptionValue ?? "").trim();
+  const safeDescription = description || buildFallbackDescription(name, rawCategory, rawType, min, max);
+  return {
+    name,
+    nameAr: translateServiceName(name),
+    description: safeDescription,
+    descriptionAr: translateServiceDescription(safeDescription),
+    category: rawCategory,
+  };
+}
+
 function mapProviderService(row: ProviderServiceRow): CatalogService | null {
   const localId = numberValue(row.id);
   const remoteId = String(row.remote_service_id ?? "").trim();
   if (!localId || !remoteId) return null;
+  const min = numberValue(row.min);
+  const max = numberValue(row.max);
+  const text = mapServiceText(row.name, row.description, row.category, row.type, min, max);
+  const storedNameAr = String(row.name_ar ?? "").trim();
+  const storedDescriptionAr = String(row.description_ar ?? "").trim();
+  const currentHash = translationFingerprint(text.name, text.description);
+  const storedHash = String(row.translation_source_hash ?? "").trim();
+  const storedTranslationIsCurrent = storedHash === currentHash;
   return {
     serviceId: `provider:${localId}`,
     remoteServiceId: remoteId,
-    name: String(row.name ?? `الخدمة #${remoteId}`),
-    category: String(row.category ?? "عام"),
+    ...text,
+    nameAr: storedTranslationIsCurrent && storedNameAr ? storedNameAr : text.nameAr,
+    descriptionAr: storedTranslationIsCurrent && storedDescriptionAr ? storedDescriptionAr : text.descriptionAr,
+    category: text.category,
     type: String(row.type ?? "service"),
     rate: numberValue(row.sell_rate, numberValue(row.rate)),
-    min: numberValue(row.min),
-    max: numberValue(row.max),
+    min,
+    max,
     source: "provider",
     providerId: numberValue(row.provider_id) || null,
     providerServiceId: localId,
@@ -84,7 +144,8 @@ function mapProviderService(row: ProviderServiceRow): CatalogService | null {
 
 async function loadProviderCatalog(serviceId?: number): Promise<CatalogService[]> {
   const query = db.execute({
-    sql: `SELECT ps.id, ps.remote_service_id, ps.name, ps.category, ps.type, ps.sell_rate, ps.rate,
+    sql: `SELECT ps.id, ps.remote_service_id, ps.name, ps.description, ps.name_ar, ps.description_ar,
+                 ps.translation_source_hash, ps.category, ps.type, ps.sell_rate, ps.rate,
                  ps.min, ps.max, p.id AS provider_id
           FROM provider_services ps
           JOIN providers p ON p.id = ps.provider_id
@@ -109,7 +170,7 @@ export async function loadServiceCatalog(): Promise<CatalogService[]> {
 
   const load = (async (): Promise<CatalogService[]> => {
     const [followerResult, providerResult] = await Promise.all([
-      getServices(2500).catch(() => [] as JsonRecord[]),
+      getServices(20_000).catch(() => [] as JsonRecord[]),
       loadProviderCatalog().catch(() => [] as CatalogService[]),
     ]);
 
@@ -122,8 +183,7 @@ export async function loadServiceCatalog(): Promise<CatalogService[]> {
     catalog.push({
       serviceId: id,
       remoteServiceId: id,
-      name: String(service.name ?? `الخدمة #${id}`),
-      category: String(service.category ?? "عام"),
+      ...mapServiceText(service.name, service.description, service.category, service.type, numberValue(service.min), numberValue(service.max)),
       type: String(service.type ?? "service"),
       rate: numberValue(service.rate),
       min: numberValue(service.min),
@@ -135,7 +195,7 @@ export async function loadServiceCatalog(): Promise<CatalogService[]> {
   }
 
     const payload = [...catalog, ...providerResult];
-    if (catalogGeneration === generation) {
+    if (catalogGeneration === generation && payload.length > 0) {
       catalogCache = { at: Date.now(), payload };
     }
     return payload;

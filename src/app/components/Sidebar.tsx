@@ -10,7 +10,6 @@ import {
   Boxes,
   ShoppingCart,
   Zap,
-  RefreshCw,
   Wallet,
   History,
   Bell,
@@ -63,7 +62,6 @@ const customIconMap: Record<string, React.ElementType> = {
   Bell,
   FileText,
   KeyRound,
-  RefreshCw,
   Star,
   Sparkles,
 };
@@ -133,19 +131,19 @@ export default function Sidebar({ open, onClose, user }: SidebarProps) {
   const customBadgeClass = (color: string) => color === "green" ? "bg-green-500/20 text-green-400" : color === "blue" ? "bg-blue-500/20 text-blue-300" : color === "red" ? "bg-red-500/20 text-red-300" : "badge-new";
   const sidebarDescriptions: Record<string, Record<string, string>> = {
     ar: {
-      dashboard: "العودة إلى لوحة الحساب", profile: "عرض بيانات الحساب والأدوات", language: "اختيار لغة المنصة واتجاهها", settings: "إدارة تفضيلات الحساب", security: "إدارة حماية الحساب ورمز الأمان", services: "تصفح الخدمات واختر المناسب", free: "استخدم العروض المجانية المتاحة", orders: "متابعة الطلبات وحالتها", actions: "إلغاء أو تسريع أو تعبئة الطلب", autoRefill: "تفعيل التعبئة التلقائية", deposit: "إضافة رصيد إلى المحفظة", api: "إدارة المفتاح وربط التطبيقات", transactions: "مراجعة حركات الرصيد", updates: "آخر أخبار وتحديثات المنصة", terms: "شروط الاستخدام والسياسات", createSite: "إنشاء موقع خدمات مجاني", siteManagement: "إدارة الموقع والخدمات", adminPanel: "نظرة عامة وتنبيهات التشغيل", adminOrders: "مراجعة الطلبات وحالاتها", adminUsers: "إدارة الحسابات والأرصدة", adminProviders: "ربط المزودين وإدارة الكتالوج", adminKeys: "تعطيل أو حذف مفاتيح المستخدمين", crypto: "مراجعة الإيداعات وحالتها", asiacell: "مراجعة طلبات الشحن المحلية", freeAdmin: "تخصيص الخدمات المجانية", giftCodes: "إنشاء وإدارة أكواد الرصيد", notifications: "إرسال تنبيهات موجهة", tickets: "الرد على طلبات المستخدمين", audit: "مراجعة الأحداث الإدارية", theme: "تغيير الاسم والشعار والألوان", navigation: "إضافة أو تعديل أو حذف روابط آمنة", adminSettings: "ضبط إعدادات التشغيل العامة"
+      dashboard: "العودة إلى لوحة الحساب", profile: "عرض بيانات الحساب والأدوات", language: "اختيار لغة المنصة واتجاهها", settings: "إدارة تفضيلات الحساب", security: "إدارة حماية الحساب ورمز الأمان", services: "تصفح الخدمات واختر المناسب", free: "استخدم العروض المجانية المتاحة", orders: "متابعة الطلبات وحالتها", actions: "إلغاء أو تسريع أو تعبئة الطلب", deposit: "إضافة رصيد إلى المحفظة", api: "إدارة المفتاح وربط التطبيقات", transactions: "مراجعة حركات الرصيد", updates: "آخر أخبار وتحديثات المنصة", terms: "شروط الاستخدام والسياسات", createSite: "إنشاء موقع خدمات مجاني", siteManagement: "إدارة الموقع والخدمات", adminPanel: "نظرة عامة وتنبيهات التشغيل", adminOrders: "مراجعة الطلبات وحالاتها", adminUsers: "إدارة الحسابات والأرصدة", adminProviders: "ربط المزودين وإدارة الكتالوج", adminKeys: "تعطيل أو حذف مفاتيح المستخدمين", crypto: "مراجعة الإيداعات وحالتها", asiacell: "مراجعة طلبات الشحن المحلية", freeAdmin: "تخصيص الخدمات المجانية", giftCodes: "إنشاء وإدارة أكواد الرصيد", notifications: "إرسال تنبيهات موجهة", tickets: "الرد على طلبات المستخدمين", audit: "مراجعة الأحداث الإدارية", theme: "تغيير الاسم والشعار والألوان", navigation: "إضافة أو تعديل أو حذف روابط آمنة", adminSettings: "ضبط إعدادات التشغيل العامة"
     },
     en: {
-      dashboard: "Return to your account dashboard", profile: "View account details and tools", language: "Choose language and direction", settings: "Manage account preferences", security: "Manage account protection and security code", services: "Browse services and choose what fits", free: "Use available free offers", orders: "Track orders and their status", actions: "Cancel, speed up, or refill orders", autoRefill: "Enable automatic refills", deposit: "Add funds to your wallet", api: "Manage keys and app integrations", transactions: "Review wallet activity", updates: "See the latest platform updates", terms: "Read usage terms and policies", createSite: "Create a free services site", siteManagement: "Manage your site and services", adminPanel: "Overview and operational alerts", adminOrders: "Review orders and statuses", adminUsers: "Manage accounts and balances", adminProviders: "Connect providers and manage catalog", adminKeys: "Disable or remove user API keys", crypto: "Review crypto deposits and status", asiacell: "Review local top-up requests", freeAdmin: "Configure free services", giftCodes: "Create and manage balance codes", notifications: "Send targeted notifications", tickets: "Reply to user requests", audit: "Review administrative events", theme: "Change name, logo, and colors", navigation: "Add, edit, or remove safe links", adminSettings: "Configure general operation settings"
+      dashboard: "Return to your account dashboard", profile: "View account details and tools", language: "Choose language and direction", settings: "Manage account preferences", security: "Manage account protection and security code", services: "Browse services and choose what fits", free: "Use available free offers", orders: "Track orders and their status", actions: "Cancel, speed up, or refill orders", deposit: "Add funds to your wallet", api: "Manage keys and app integrations", transactions: "Review wallet activity", updates: "See the latest platform updates", terms: "Read usage terms and policies", createSite: "Create a free services site", siteManagement: "Manage your site and services", adminPanel: "Overview and operational alerts", adminOrders: "Review orders and statuses", adminUsers: "Manage accounts and balances", adminProviders: "Connect providers and manage catalog", adminKeys: "Disable or remove user API keys", crypto: "Review crypto deposits and status", asiacell: "Review local top-up requests", freeAdmin: "Configure free services", giftCodes: "Create and manage balance codes", notifications: "Send targeted notifications", tickets: "Reply to user requests", audit: "Review administrative events", theme: "Change name, logo, and colors", navigation: "Add, edit, or remove safe links", adminSettings: "Configure general operation settings"
     },
     ru: {
-      dashboard: "Вернуться на панель аккаунта", profile: "Данные аккаунта и инструменты", language: "Выбор языка и направления", settings: "Настройки аккаунта", services: "Просмотр и выбор услуг", free: "Доступные бесплатные предложения", orders: "Статусы и отслеживание заказов", actions: "Отмена, ускорение или пополнение", autoRefill: "Автоматическое пополнение", deposit: "Пополнить кошелёк", api: "Ключи и интеграции приложений", transactions: "История операций кошелька", updates: "Последние обновления платформы", terms: "Условия использования", createSite: "Создать бесплатный сайт услуг", siteManagement: "Управление сайтом и услугами", adminPanel: "Обзор и операционные уведомления", adminOrders: "Заказы и их статусы", adminUsers: "Аккаунты и балансы", adminProviders: "Провайдеры и каталог", adminKeys: "Отключение или удаление API-ключей", crypto: "Криптодепозиты и статусы", asiacell: "Локальные заявки на пополнение", freeAdmin: "Настройка бесплатных услуг", giftCodes: "Коды пополнения", notifications: "Целевые уведомления", tickets: "Ответы на обращения", audit: "Административные события", theme: "Имя, логотип и цвета", navigation: "Безопасные ссылки", adminSettings: "Общие настройки работы"
+      dashboard: "Вернуться на панель аккаунта", profile: "Данные аккаунта и инструменты", language: "Выбор языка и направления", settings: "Настройки аккаунта", services: "Просмотр и выбор услуг", free: "Доступные бесплатные предложения", orders: "Статусы и отслеживание заказов", actions: "Отмена, ускорение или пополнение", deposit: "Пополнить кошелёк", api: "Ключи и интеграции приложений", transactions: "История операций кошелька", updates: "Последние обновления платформы", terms: "Условия использования", createSite: "Создать бесплатный сайт услуг", siteManagement: "Управление сайтом и услугами", adminPanel: "Обзор и операционные уведомления", adminOrders: "Заказы и их статусы", adminUsers: "Аккаунты и балансы", adminProviders: "Провайдеры и каталог", adminKeys: "Отключение или удаление API-ключей", crypto: "Криптодепозиты и статусы", asiacell: "Локальные заявки на пополнение", freeAdmin: "Настройка бесплатных услуг", giftCodes: "Коды пополнения", notifications: "Целевые уведомления", tickets: "Ответы на обращения", audit: "Административные события", theme: "Имя, логотип и цвета", navigation: "Безопасные ссылки", adminSettings: "Общие настройки работы"
     },
     zh: {
-      dashboard: "返回账户面板", profile: "查看账户资料和工具", language: "选择语言和界面方向", settings: "管理账户偏好", services: "浏览并选择合适的服务", free: "使用可用的免费优惠", orders: "查看订单状态和进度", actions: "取消、加速或补发订单", autoRefill: "启用自动补发", deposit: "为钱包充值", api: "管理密钥和应用集成", transactions: "查看钱包交易", updates: "查看平台最新更新", terms: "阅读使用条款和政策", createSite: "创建免费服务网站", siteManagement: "管理网站和服务", adminPanel: "概览与运营提醒", adminOrders: "查看订单和状态", adminUsers: "管理账户和余额", adminProviders: "连接供应商并管理目录", adminKeys: "停用或删除用户 API 密钥", crypto: "查看加密货币充值", asiacell: "查看本地充值请求", freeAdmin: "配置免费服务", giftCodes: "创建和管理余额码", notifications: "发送定向通知", tickets: "回复用户请求", audit: "查看管理事件", theme: "更改名称、标志和颜色", navigation: "添加、编辑或删除安全链接", adminSettings: "配置常规运行设置"
+      dashboard: "返回账户面板", profile: "查看账户资料和工具", language: "选择语言和界面方向", settings: "管理账户偏好", services: "浏览并选择合适的服务", free: "使用可用的免费优惠", orders: "查看订单状态和进度", actions: "取消、加速或补发订单", deposit: "为钱包充值", api: "管理密钥和应用集成", transactions: "查看钱包交易", updates: "查看平台最新更新", terms: "阅读使用条款和政策", createSite: "创建免费服务网站", siteManagement: "管理网站和服务", adminPanel: "概览与运营提醒", adminOrders: "查看订单和状态", adminUsers: "管理账户和余额", adminProviders: "连接供应商并管理目录", adminKeys: "停用或删除用户 API 密钥", crypto: "查看加密货币充值", asiacell: "查看本地充值请求", freeAdmin: "配置免费服务", giftCodes: "创建和管理余额码", notifications: "发送定向通知", tickets: "回复用户请求", audit: "查看管理事件", theme: "更改名称、标志和颜色", navigation: "添加、编辑或删除安全链接", adminSettings: "配置常规运行设置"
     },
     hi: {
-      dashboard: "खाते के डैशबोर्ड पर लौटें", profile: "खाते का विवरण और टूल देखें", language: "भाषा और दिशा चुनें", settings: "खाते की प्राथमिकताएँ प्रबंधित करें", services: "सेवाएँ देखें और चुनें", free: "उपलब्ध निःशुल्क ऑफ़र उपयोग करें", orders: "ऑर्डर की स्थिति देखें", actions: "ऑर्डर रद्द, तेज़ या रीफिल करें", autoRefill: "स्वचालित रीफिल चालू करें", deposit: "वॉलेट में राशि जोड़ें", api: "कुंजी और ऐप इंटीग्रेशन प्रबंधित करें", transactions: "वॉलेट गतिविधि देखें", updates: "प्लेटफ़ॉर्म के नए अपडेट देखें", terms: "उपयोग की शर्तें पढ़ें", createSite: "निःशुल्क सेवा साइट बनाएँ", siteManagement: "साइट और सेवाएँ प्रबंधित करें", adminPanel: "सारांश और संचालन अलर्ट", adminOrders: "ऑर्डर और स्थिति देखें", adminUsers: "खाते और बैलेंस प्रबंधित करें", adminProviders: "प्रदाता और कैटलॉग प्रबंधित करें", adminKeys: "उपयोगकर्ता API कुंजी बंद या हटाएँ", crypto: "क्रिप्टो जमा देखें", asiacell: "स्थानीय रिचार्ज अनुरोध देखें", freeAdmin: "निःशुल्क सेवाएँ सेट करें", giftCodes: "बैलेंस कोड बनाएँ और प्रबंधित करें", notifications: "लक्षित सूचनाएँ भेजें", tickets: "उपयोगकर्ता अनुरोधों का उत्तर दें", audit: "प्रशासनिक घटनाएँ देखें", theme: "नाम, लोगो और रंग बदलें", navigation: "सुरक्षित लिंक जोड़ें या संपादित करें", adminSettings: "सामान्य संचालन सेटिंग्स"
+      dashboard: "खाते के डैशबोर्ड पर लौटें", profile: "खाते का विवरण और टूल देखें", language: "भाषा और दिशा चुनें", settings: "खाते की प्राथमिकताएँ प्रबंधित करें", services: "सेवाएँ देखें और चुनें", free: "उपलब्ध निःशुल्क ऑफ़र उपयोग करें", orders: "ऑर्डर की स्थिति देखें", actions: "ऑर्डर रद्द, तेज़ या रीफिल करें", deposit: "वॉलेट में राशि जोड़ें", api: "कुंजी और ऐप इंटीग्रेशन प्रबंधित करें", transactions: "वॉलेट गतिविधि देखें", updates: "प्लेटफ़ॉर्म के नए अपडेट देखें", terms: "उपयोग की शर्तें पढ़ें", createSite: "निःशुल्क सेवा साइट बनाएँ", siteManagement: "साइट और सेवाएँ प्रबंधित करें", adminPanel: "सारांश और संचालन अलर्ट", adminOrders: "ऑर्डर और स्थिति देखें", adminUsers: "खाते और बैलेंस प्रबंधित करें", adminProviders: "प्रदाता और कैटलॉग प्रबंधित करें", adminKeys: "उपयोगकर्ता API कुंजी बंद या हटाएँ", crypto: "क्रिप्टो जमा देखें", asiacell: "स्थानीय रिचार्ज अनुरोध देखें", freeAdmin: "निःशुल्क सेवाएँ सेट करें", giftCodes: "बैलेंस कोड बनाएँ और प्रबंधित करें", notifications: "लक्षित सूचनाएँ भेजें", tickets: "उपयोगकर्ता अनुरोधों का उत्तर दें", audit: "प्रशासनिक घटनाएँ देखें", theme: "नाम, लोगो और रंग बदलें", navigation: "सुरक्षित लिंक जोड़ें या संपादित करें", adminSettings: "सामान्य संचालन सेटिंग्स"
     }
   };
   const getDescription = (key: string, fallback: string) => sidebarDescriptions[locale]?.[key] || sidebarDescriptions.en[key] || fallback;
@@ -165,7 +163,6 @@ export default function Sidebar({ open, onClose, user }: SidebarProps) {
     { type: "link", label: "المجاني والهدايا", description: getDescription("free", "استخدم العروض المجانية المتاحة"), href: "/free-services", icon: Gift, badge: "مجاني", badgeColor: "green" },
     { type: "link", label: t("sidebar.orders"), description: getDescription("orders", "متابعة الطلبات وحالتها"), href: "/orders", icon: ShoppingCart },
     { type: "link", label: t("sidebar.actions"), description: getDescription("actions", "إلغاء أو تسريع أو تعبئة الطلب"), href: "/orders?tab=actions", icon: Zap },
-    { type: "link", label: t("sidebar.autoRefill"), description: getDescription("autoRefill", "تفعيل التعبئة التلقائية"), href: "/auto-refill", icon: RefreshCw },
     { type: "link", label: t("sidebar.deposit"), description: getDescription("deposit", "إضافة رصيد إلى المحفظة"), href: "/deposit", icon: Wallet },
     { type: "link", label: "بوابة API", description: getDescription("api", "إدارة المفتاح وربط التطبيقات"), href: "/api-access", icon: KeyRound, badge: "جديد", badgeColor: "gold" },
     { type: "link", label: t("sidebar.transactions"), description: getDescription("transactions", "مراجعة حركات الرصيد"), href: "/transactions", icon: History },
@@ -268,6 +265,7 @@ export default function Sidebar({ open, onClose, user }: SidebarProps) {
                   { label: "تذاكر الدعم", description: getDescription("tickets", "الرد على طلبات المستخدمين"), href: "/admin/tickets", icon: FileText },
                   { label: "سجل التدقيق", description: getDescription("audit", "مراجعة الأحداث الإدارية"), href: "/admin/audit-log", icon: History },
                   { label: "هوية المنصة", description: getDescription("theme", "تغيير الاسم والشعار والألوان"), href: "/admin/theme", icon: SlidersHorizontal },
+                  { label: "منصات الكتالوج", description: "إنشاء أزرار باسم وشعار وخدمات تختارها أنت", href: "/admin/catalog-platforms", icon: Boxes },
                   { label: "الأزرار المخصصة", description: getDescription("navigation", "إضافة أو تعديل أو حذف روابط آمنة"), href: "/admin/navigation", icon: Sparkles },
                   { label: "إعدادات الإدارة", description: getDescription("adminSettings", "ضبط إعدادات التشغيل العامة"), href: "/admin/settings", icon: Settings },
                 ].map((item) => {
@@ -308,15 +306,17 @@ export default function Sidebar({ open, onClose, user }: SidebarProps) {
             )}
           </div>
 
-          <div className="border-t border-[var(--color-border)] p-3">
-            <button
-              onClick={logout}
-              className="flex w-full items-center justify-between rounded-xl px-3 py-3 text-red-400 transition hover:bg-red-500/10"
-            >
-              <span className="font-bold">{t("sidebar.logout")}</span>
-              <LogOut size={18} />
-            </button>
-          </div>
+          {user && (
+            <div className="border-t border-[var(--color-border)] p-3">
+              <button
+                onClick={logout}
+                className="flex w-full items-center justify-between rounded-xl px-3 py-3 text-red-400 transition hover:bg-red-500/10"
+              >
+                <span className="font-bold">{t("sidebar.logout")}</span>
+                <LogOut size={18} />
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 

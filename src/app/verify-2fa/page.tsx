@@ -6,6 +6,18 @@ import Image from "next/image";
 import { Shield, Lock, ArrowRight, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useLanguage } from "@/app/components/LanguageProvider";
 
+type VerifyResponse = { error?: string };
+
+async function readVerifyResponse(response: Response): Promise<VerifyResponse> {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as VerifyResponse;
+  } catch {
+    return { error: "تعذر قراءة استجابة التحقق. أعد المحاولة." };
+  }
+}
+
 export default function Verify2FAPage() {
   const { t } = useLanguage();
   const [code, setCode] = useState("");
@@ -16,22 +28,26 @@ export default function Verify2FAPage() {
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (code.length < 4) return;
-    
-    setLoading(true); setError("");
+    if (!/^\d{6}$/.test(code)) {
+      setError("أدخل رمز الأمان المكون من 6 أرقام.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
     try {
       const res = await fetch("/api/auth/verify-2fa", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code })
       });
-      const data = await res.json();
+      const data = await readVerifyResponse(res);
       if (!res.ok) throw new Error(data.error || "رمز الأمان غير صحيح");
-      
+
       setSuccess(true);
-      setTimeout(() => {
-        router.push("/dashboard");
-      }, 1000);
+      window.setTimeout(() => {
+        router.replace("/services");
+      }, 700);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "رمز الأمان غير صحيح");
       setLoading(false);
@@ -64,9 +80,14 @@ export default function Verify2FAPage() {
               </label>
               <input
                 type="text"
+                inputMode="numeric"
+                pattern="[0-9]{6}"
                 maxLength={6}
                 value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                onChange={(e) => {
+                  setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                  setError("");
+                }}
                 placeholder="000000"
                 className="input-premium w-full text-center text-2xl tracking-[0.5em] font-black py-4 placeholder:tracking-normal placeholder:font-normal"
                 required
@@ -75,7 +96,7 @@ export default function Verify2FAPage() {
             </div>
 
             {error && (
-              <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs font-bold animate-shake">
+              <div role="alert" aria-live="assertive" className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs font-bold animate-shake">
                 <AlertCircle size={14} /> {error}
               </div>
             )}
@@ -88,8 +109,8 @@ export default function Verify2FAPage() {
 
             <button
               type="submit"
-              disabled={loading || success || code.length < 4}
-              className="btn-primary w-full py-4 flex items-center justify-center gap-3 text-lg group"
+              disabled={loading || success || code.length !== 6}
+              className="btn-gold w-full py-4 flex items-center justify-center gap-3 text-lg group"
             >
               {loading ? (
                 <div className="h-5 w-5 animate-spin rounded-full border-2 border-black/20 border-t-black" />

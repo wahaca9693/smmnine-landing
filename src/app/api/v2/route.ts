@@ -231,7 +231,11 @@ export async function GET(request: Request) {
   const services = pageItems.map((service) => ({
     service: getPublicServiceId(service),
     name: service.name,
+    name_ar: service.nameAr,
+    description: service.description,
+    description_ar: service.descriptionAr,
     category: service.category,
+    category_ar: service.category,
     type: service.type,
     rate: service.rate,
     min: service.min,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db, initDb } from "@/lib/db";
+import { findCatalogService, findCatalogServiceByPublicId, getPublicServiceId } from "@/lib/service-catalog";
 
 type AutoRefillRow = Record<string, unknown>;
 
@@ -21,7 +22,9 @@ function serialize(row: AutoRefillRow) {
     ...row,
     id: Number(row.id),
     user_id: Number(row.user_id),
-    service_id: Number(row.service_id),
+    service_id: row.public_service_id ? String(row.public_service_id) : String(row.service_id ?? ""),
+    public_service_id: row.public_service_id == null ? null : String(row.public_service_id),
+    service_name_ar: row.service_name_ar == null ? null : String(row.service_name_ar),
     target_quantity: Number(row.target_quantity),
     interval_hours: Number(row.interval_hours),
     is_active: Number(row.is_active),
@@ -44,17 +47,36 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const session = await requireAuth();
+    await initDb();
     const body: AutoRefillBody = await request.json();
-    const { service_id, service_name, link, target_quantity, interval_hours } = body;
+    const requestedServiceId = String(body.service_id ?? "").trim();
+    const { link, target_quantity, interval_hours } = body;
 
-    if (!service_id || typeof link !== "string" || !link || !target_quantity) {
+    if (!requestedServiceId || typeof link !== "string" || !link || !target_quantity) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
+    const catalogService = requestedServiceId.startsWith("svc_")
+      ? await findCatalogServiceByPublicId(requestedServiceId)
+      : await findCatalogService(requestedServiceId);
+    if (!catalogService) {
+      return NextResponse.json({ error: "الخدمة غير موجودة أو لم تعد متاحة" }, { status: 400 });
+    }
+
+    const publicServiceId = getPublicServiceId(catalogService);
     const result = await db.execute({
-      sql: `INSERT INTO auto_refills (user_id, service_id, service_name, link, target_quantity, interval_hours)
-            VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
-      args: [session.userId!, Number(service_id), typeof service_name === "string" ? service_name : "", link, Number(target_quantity), Number(interval_hours) || 24],
+      sql: `INSERT INTO auto_refills (user_id, service_id, public_service_id, service_name, service_name_ar, link, target_quantity, interval_hours)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      args: [
+        session.userId!,
+        Number(catalogService.remoteServiceId) || 0,
+        publicServiceId,
+        catalogService.name,
+        catalogService.nameAr,
+        link,
+        Number(target_quantity),
+        Number(interval_hours) || 24,
+      ],
     });
 
     return NextResponse.json({ refill: result.rows.map(serialize)[0] });

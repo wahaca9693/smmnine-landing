@@ -62,6 +62,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           router.replace("/login");
           return;
         }
+
+        if (res.status === 403) {
+          const data = await res.json();
+          if (data.requires2fa && pathname !== "/verify-2fa") {
+            router.replace("/verify-2fa");
+          }
+          return;
+        }
+
         if (!res.ok) return;
 
         const data = await res.json();

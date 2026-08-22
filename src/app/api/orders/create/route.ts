@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import { db, initDb } from "@/lib/db";
 import { cancelOrder, createOrder } from "@/lib/follower";
 import { executeProviderOrder } from "@/lib/providers";
-import { findCatalogService } from "@/lib/service-catalog";
+import { findCatalogService, findCatalogServiceByPublicId } from "@/lib/service-catalog";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -73,7 +73,9 @@ export async function POST(request: Request) {
     }
 
     const requestedServiceId = String(serviceId);
-    const catalogService = await findCatalogService(requestedServiceId);
+    const catalogService = requestedServiceId.startsWith("svc_")
+      ? await findCatalogServiceByPublicId(requestedServiceId)
+      : await findCatalogService(requestedServiceId);
     const providerService: JsonRecord | undefined = catalogService?.source === "provider"
       ? {
         id: catalogService.providerServiceId,

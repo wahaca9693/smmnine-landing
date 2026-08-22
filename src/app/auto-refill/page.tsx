@@ -5,14 +5,17 @@ import DashboardLayout from "../components/DashboardLayout";
 import { RefreshCw, Plus, Trash2, AlertCircle, Check } from "lucide-react";
 
 interface AutoRefillService {
-  service: number | string;
+  service: string;
   name: string;
+  nameAr?: string;
 }
 
 interface AutoRefillRule {
   id: number;
-  service_id: number;
+  service_id: string;
+  public_service_id?: string | null;
   service_name: string | null;
+  service_name_ar?: string | null;
   link: string;
   target_quantity: number;
   interval_hours: number;
@@ -66,8 +69,9 @@ export default function AutoRefillPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        service_id: Number(selectedService),
+        service_id: selectedService,
         service_name: service?.name || "",
+        service_name_ar: service?.nameAr || service?.name || "",
         link,
         target_quantity: Number(targetQuantity),
         interval_hours: Number(intervalHours),
@@ -118,7 +122,7 @@ export default function AutoRefillPage() {
                 <option value="">اختر خدمة...</option>
                 {services.map((s) => (
                   <option key={s.service} value={String(s.service)}>
-                    #{s.service} — {s.name}
+                    {s.nameAr || s.name}
                   </option>
                 ))}
               </select>
@@ -190,8 +194,7 @@ export default function AutoRefillPage() {
                 <div key={r.id} className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-card)] p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="font-bold text-white">#{r.service_id}</div>
-                      <div className="mt-1 line-clamp-1 text-sm text-zinc-400">{r.service_name || "خدمة بدون اسم"}</div>
+                      <div className="font-bold text-white">{r.service_name_ar || r.service_name || "خدمة بدون اسم"}</div>
                     </div>
                     <span className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${r.is_active ? "bg-green-500/10 text-green-400" : "bg-zinc-500/10 text-zinc-400"}`}>
                       {r.is_active ? <Check size={12} /> : <AlertCircle size={12} />}

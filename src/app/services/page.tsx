@@ -1,17 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import DashboardLayout from "../components/DashboardLayout";
 import { Modal } from "../components/Modal";
 import { Search, Layers, ChevronDown, ChevronUp, ShoppingCart, ShieldCheck, Sparkles, Zap, Infinity, RefreshCw, type LucideIcon } from "lucide-react";
 import { PlatformIcon } from "../components/Icons";
 import Link from "next/link";
 import { useLiveRefresh } from "../components/useLiveRefresh";
 import { useLanguage, translatePlatform, translateServiceName, translateServiceType } from "../components/LanguageProvider";
+import Header from "../components/Header";
+import Sidebar from "../components/Sidebar";
+import BottomNav from "../components/BottomNav";
+import { defaultPlatformOptions, normalizePlatformId, platformOption, type PlatformOption } from "@/lib/platform-mapping";
 
 type ServiceRecord = {
   service?: string | number;
   name?: unknown;
+  nameAr?: unknown;
+  description?: unknown;
+  descriptionAr?: unknown;
+  categoryAr?: unknown;
   serviceType?: string;
   platform?: string;
   category?: string;
@@ -31,6 +38,7 @@ type ServicesSnapshot = {
   services: ServiceRecord[];
   categories: string[];
   at: number;
+  platforms: PlatformOption[];
 };
 
 function isTruthyFlag(value: unknown): boolean {
@@ -39,29 +47,34 @@ function isTruthyFlag(value: unknown): boolean {
 
 let servicesSnapshot: ServicesSnapshot | null = null;
 
-const platformOrder = [
-  { id: "facebook" },
-  { id: "tiktok" },
-  { id: "instagram" },
-  { id: "whatsapp" },
-  { id: "twitter" },
-  { id: "youtube" },
-  { id: "telegram" },
-  { id: "discord" },
-  { id: "snapchat" },
-  { id: "threads" },
-  { id: "twitch" },
-  { id: "kuaishou" },
-  { id: "likee" },
-  { id: "spotify" },
-  { id: "other" },
-  { id: "all" },
-];
-
 const serviceTypeIds = ["followers", "likes", "views", "comments", "shares", "saves", "votes", "stories", "reels", "live", "other"];
 
 function safeServiceText(value: unknown): string {
   return typeof value === "string" ? value : String(value ?? "");
+}
+
+function displayServiceName(service: ServiceRecord, locale: string): string {
+  const arabic = safeServiceText(service.nameAr).trim();
+  const original = safeServiceText(service.name).trim();
+  if (locale === "ar" && arabic) return arabic;
+  return translateServiceName(original, locale as Parameters<typeof translateServiceName>[1]);
+}
+
+function displayServiceDescription(service: ServiceRecord, locale: string): string {
+  const arabic = safeServiceText(service.descriptionAr).trim();
+  const original = safeServiceText(service.description).trim();
+  if (locale === "ar" && arabic) return arabic;
+  return original;
+}
+
+function serviceBelongsToPlatform(service: ServiceRecord, platformId: string, options: PlatformOption[]): boolean {
+  if (platformId === "all") return true;
+  const platform = options.find((option) => option.id === platformId);
+  if (!platform) return false;
+  if (Array.isArray(platform.serviceIds) && platform.serviceIds.length > 0) {
+    return platform.serviceIds.includes(safeServiceText(service.service));
+  }
+  return normalizePlatformId(safeServiceText(service.platform)) === normalizePlatformId(platformId);
 }
 
 function formatServiceRate(value: unknown): string {
@@ -88,16 +101,13 @@ function detectGuarantees(name: string, t: (key: string) => string): { isGuarant
   if (/فوري|فورية|instant|fast|quick|سريع|سريعة/.test(lower)) {
     badges.push({ label: t("service.badge.instant"), icon: Zap, color: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" });
   }
-  if (/تعويض|refill|auto refill|إعادة تعبئة/.test(lower)) {
-    badges.push({ label: t("service.badge.refill"), icon: RefreshCw, color: "bg-blue-500/10 text-blue-400 border-blue-500/20" });
-  }
-
   return { isGuaranteed: badges.length > 0, badges };
 }
 
 export default function ServicesPage() {
   const { locale, t } = useLanguage();
   const [services, setServices] = useState<ServiceRecord[]>(servicesSnapshot?.services || []);
+  const [platforms, setPlatforms] = useState<PlatformOption[]>(servicesSnapshot?.platforms || defaultPlatformOptions);
   const [selectedPlatform, setSelectedPlatform] = useState<string>("all");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -106,6 +116,7 @@ export default function ServicesPage() {
   const [fetchError, setFetchError] = useState("");
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [showGuaranteed, setShowGuaranteed] = useState(false);
   const [guaranteedStep, setGuaranteedStep] = useState<"platform" | "services">("platform");
@@ -128,10 +139,12 @@ export default function ServicesPage() {
       const nextSnapshot: ServicesSnapshot = {
         services: Array.isArray(data.services) ? data.services as ServiceRecord[] : [],
         categories: Array.isArray(data.categories) ? data.categories as string[] : [],
+        platforms: Array.isArray(data.platforms) ? data.platforms as PlatformOption[] : [],
         at: Date.now(),
       };
       servicesSnapshot = nextSnapshot;
       setServices(nextSnapshot.services);
+      setPlatforms(nextSnapshot.platforms);
       setExpandedCategories((previous) => {
         if (Object.keys(previous).length > 0) return previous;
         return Object.fromEntries(nextSnapshot.categories.slice(0, 2).map((category) => [category, true]));
@@ -151,7 +164,37 @@ export default function ServicesPage() {
     return () => window.clearTimeout(timer);
   }, [loadServices]);
 
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/catalog-platforms", { cache: "no-store" })
+      .then((res) => res.ok ? res.json() : { platforms: [] })
+      .then((data) => {
+        if (!active || !Array.isArray(data.platforms)) return;
+        setPlatforms((current) => {
+          const custom = data.platforms as PlatformOption[];
+          const byId = new Map(current.map((platform) => [platform.id, platform]));
+          custom.forEach((platform) => byId.set(platform.id, platform));
+          return [...byId.values()];
+        });
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
   useLiveRefresh(() => loadServices(true), { intervalMs: 120000 });
+
+  const platformOptions = useMemo<PlatformOption[]>(() => {
+    // الأزرار الافتراضية ثابتة وتظهر فورًا؛ الأزرار المخصصة تُدمج عند وصولها من الإدارة.
+    const byId = new Map(defaultPlatformOptions.map((platform) => [platform.id, platform]));
+    platforms.forEach((platform) => byId.set(platform.id, platform));
+    const all = byId.get("all") || { ...platformOption("all"), color: "var(--color-primary)" };
+    byId.set("all", { ...all, color: "var(--color-primary)" });
+    return [...byId.values()];
+  }, [platforms]);
+
+  const activePlatform = platformOptions.some((platform) => platform.id === selectedPlatform)
+    ? selectedPlatform
+    : "all";
 
   const filteredServices = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase(locale);
@@ -160,10 +203,14 @@ export default function ServicesPage() {
       const serviceType = safeServiceText(s.serviceType || "other").toLowerCase();
       const serviceCategory = safeServiceText(s.category || "عام");
       const rawName = safeServiceText(s.name);
-      const translatedName = translateServiceName(rawName, locale);
-      const searchableText = [
-        rawName,
-        translatedName,
+        const translatedName = displayServiceName(s, locale);
+        const translatedDescription = displayServiceDescription(s, locale);
+        const searchableText = [
+          rawName,
+          translatedName,
+          safeServiceText(s.nameAr),
+          safeServiceText(s.description),
+          translatedDescription,
         safeServiceText(s.service),
         servicePlatform,
         translatePlatform(servicePlatform, locale),
@@ -172,7 +219,7 @@ export default function ServicesPage() {
         serviceCategory,
         translateServiceName(serviceCategory === "عام" ? "other" : serviceCategory, locale),
       ].join(" ").toLocaleLowerCase(locale);
-      const matchesPlatform = selectedPlatform === "all" ? true : servicePlatform === selectedPlatform;
+      const matchesPlatform = serviceBelongsToPlatform(s, activePlatform, platformOptions);
       const matchesType = selectedType === "all" ? true : serviceType === selectedType;
       const matchesSearch = !normalizedSearch || searchableText.includes(normalizedSearch);
       return matchesPlatform && matchesType && matchesSearch;
@@ -186,7 +233,7 @@ export default function ServicesPage() {
       if (aType !== bType) return (aType === -1 ? serviceTypeIds.length : aType) - (bType === -1 ? serviceTypeIds.length : bType);
       return safeServiceText(a.service).localeCompare(safeServiceText(b.service), locale, { numeric: true });
     });
-  }, [services, selectedPlatform, selectedType, search, locale]);
+  }, [services, activePlatform, selectedType, search, locale, platformOptions]);
 
   const servicesByCategory = useMemo(() => {
     const map: Record<string, ServiceRecord[]> = {};
@@ -201,22 +248,22 @@ export default function ServicesPage() {
   const availableTypes = useMemo(() => {
     const types = new Set<string>();
     services
-      .filter((s) => selectedPlatform === "all" || s.platform === selectedPlatform)
+      .filter((s) => serviceBelongsToPlatform(s, activePlatform, platformOptions))
       .forEach((s) => types.add(s.serviceType || "other"));
     return ["all", ...Array.from(types).sort((a, b) => {
       const ia = serviceTypeIds.indexOf(a);
       const ib = serviceTypeIds.indexOf(b);
       return (ia === -1 ? serviceTypeIds.length : ia) - (ib === -1 ? serviceTypeIds.length : ib);
     })];
-  }, [services, selectedPlatform]);
+  }, [services, activePlatform, platformOptions]);
 
   const guaranteedServices = useMemo(() => {
     return services.filter((s) => {
-      const matchesPlatform = !guaranteedPlatform || guaranteedPlatform === "all" ? true : s.platform === guaranteedPlatform;
+      const matchesPlatform = !guaranteedPlatform || serviceBelongsToPlatform(s, guaranteedPlatform, platformOptions);
       const { isGuaranteed } = detectGuarantees(safeServiceText(s.name), t);
       return matchesPlatform && isGuaranteed;
     });
-  }, [services, guaranteedPlatform, t]);
+  }, [services, guaranteedPlatform, platformOptions, t]);
 
   const guaranteedServicesByType = useMemo(() => {
     const map: Record<string, ServiceRecord[]> = {};
@@ -263,10 +310,14 @@ export default function ServicesPage() {
     setGuaranteedStep("services");
   };
 
-  const platformList = platformOrder.filter((p) => p.id !== "all");
+  const platformList = platformOptions.filter((p) => p.id !== "all");
 
   return (
-    <DashboardLayout>
+    <div className="relative flex min-h-screen flex-col bg-[var(--color-bg)]">
+      <Header onMenuClick={() => setSidebarOpen(true)} user={null} unreadNotifications={0} />
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} user={null} />
+      <main className="flex-1 px-4 pb-28 pt-4 animate-fadeIn">
+      <div className="mx-auto max-w-5xl">
       <div className="relative space-y-5">
         {/* رأس الصفحة بتدرج متوهج */}
         <div className="relative overflow-hidden rounded-3xl border border-[var(--color-primary)]/20 bg-gradient-to-br from-[var(--color-card)] via-[var(--color-surface)] to-[var(--color-card)] p-5 shadow-[0_0_60px_-20px_var(--color-primary)]">
@@ -327,8 +378,8 @@ export default function ServicesPage() {
         <div className="relative">
           <div className="pointer-events-none absolute -top-6 inset-x-0 h-24 bg-[var(--color-primary)]/8 blur-2xl" />
           <div className="grid grid-cols-4 gap-2 sm:gap-3">
-            {platformOrder.map((p) => {
-              const active = selectedPlatform === p.id;
+            {platformOptions.map((p) => {
+              const active = activePlatform === p.id;
               return (
                 <button
                   key={p.id}
@@ -340,12 +391,19 @@ export default function ServicesPage() {
                   }`}
                 >
                   {active && <div className="pointer-events-none absolute top-1.5 left-1.5 h-2 w-2 rounded-full bg-[var(--color-primary)] shadow-[0_0_8px_2px_var(--color-primary)] sparkle-star" />}
-                <PlatformIcon
-                  name={p.id}
-                  className={`h-8 w-8 ${active ? "platform-icon-animated-active" : "text-white"}`}
-                  animated={!active}
-                />
-                <span className="mt-2 text-[10px] font-bold text-zinc-300">{p.id === "all" ? t("service.all") : translatePlatform(p.id, locale)}</span>
+                                  {p.logoUrl ? (
+                    <img src={p.logoUrl} alt="" className="h-9 w-9 rounded-xl object-cover" loading="lazy" />
+                  ) : (
+                    <PlatformIcon
+                      name={p.id}
+                      className={`h-8 w-8 ${active ? "platform-icon-animated-active" : "text-white"}`}
+                      animated={!active}
+                    />
+                  )}
+                  <span className="mt-2 line-clamp-2 text-center text-[10px] font-bold text-zinc-300">
+                    {p.id === "all" ? t("service.all") : (locale === "ar" ? p.nameAr || p.name : p.nameEn || p.nameAr || p.name)}
+                  </span>
+
               </button>
             );
           })}
@@ -419,7 +477,9 @@ export default function ServicesPage() {
               {Object.entries(servicesByCategory).map(([category, items], categoryIndex) => {
                 const categoryElementId = `service-category-${categoryIndex}-${category.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
                 const expanded = expandedCategories[category];
-                const translatedCategory = translateServiceName(category === "عام" ? "other" : category, locale);
+                const translatedCategory = locale === "ar"
+                  ? safeServiceText(items[0]?.categoryAr) || translateServiceName(category === "عام" ? "other" : category, locale)
+                  : translateServiceName(category === "عام" ? "other" : category, locale);
                 return (
                   <div key={category} className="card-luxe rounded-2xl border overflow-hidden">
                     <button
@@ -442,14 +502,17 @@ export default function ServicesPage() {
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex-1">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-gradient-luxe text-sm font-black">#{s.service}</span>
+                                  <span className="text-gradient-luxe text-xs font-black">{translateServiceType(safeServiceText(s.serviceType || "other"), locale)}</span>
                                   {isTruthyFlag(s.is_new) && (
                                     <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-2 py-0.5 text-[9px] font-black text-black shadow-[0_0_12px_-2px_#f59e0b]">
                                       <Sparkles size={9} /> {t("service.new")}
                                     </span>
                                   )}
                                 </div>
-                                <div className="mt-1 text-sm text-zinc-400 leading-relaxed">{translateServiceName(safeServiceText(s.name), locale)}</div>
+                                <div className="mt-1 text-sm text-zinc-200 leading-relaxed">{displayServiceName(s, locale)}</div>
+                                {displayServiceDescription(s, locale) && (
+                                  <p className="mt-1 text-xs leading-5 text-zinc-500 line-clamp-2">{displayServiceDescription(s, locale)}</p>
+                                )}
                                 <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-zinc-500">
                                   <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">min: {formatServiceQuantity(s.min, locale)}</span>
                                   <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5">max: {formatServiceQuantity(s.max, locale)}</span>
@@ -564,8 +627,11 @@ export default function ServicesPage() {
                                   <div key={s.service} className="rounded-2xl border border-[var(--color-success)]/20 bg-[var(--color-success)]/5 p-4">
                                     <div className="flex items-start justify-between gap-3">
                                       <div className="flex-1">
-                                        <div className="font-bold text-white">#{s.service}</div>
-                                        <div className="mt-1 text-sm text-zinc-300 leading-relaxed">{translateServiceName(safeServiceText(s.name), locale)}</div>
+                                        <div className="font-bold text-[var(--color-primary-light)]">{translateServiceType(safeServiceText(s.serviceType || "other"), locale)}</div>
+                                        <div className="mt-1 text-sm text-zinc-200 leading-relaxed">{displayServiceName(s, locale)}</div>
+                                        {displayServiceDescription(s, locale) && (
+                                          <p className="mt-1 text-xs leading-5 text-zinc-500 line-clamp-2">{displayServiceDescription(s, locale)}</p>
+                                        )}
                                         <div className="mt-2 flex flex-wrap gap-1.5">
                                           {badges.map((badge, idx) => {
                                             const Icon = badge.icon;
@@ -607,6 +673,9 @@ export default function ServicesPage() {
               )}
         </Modal>
       </div>
-    </DashboardLayout>
+      </div>
+      </main>
+      <BottomNav />
+    </div>
   );
 }

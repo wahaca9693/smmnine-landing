@@ -8,6 +8,26 @@ import TurnstileWidget from "@/app/components/TurnstileWidget";
 import { useLanguage } from "@/app/components/LanguageProvider";
 import BrandMark from "@/app/components/BrandMark";
 
+type AuthResponse = {
+  error?: string;
+  securityCode?: string;
+  requires2fa?: boolean;
+};
+
+async function readAuthResponse(response: Response): Promise<AuthResponse> {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as AuthResponse;
+  } catch {
+    return {
+      error: response.ok
+        ? "وصلت استجابة غير صالحة من الخادم. أعد المحاولة."
+        : "تعذر الاتصال بخادم المصادقة حاليًا. أعد المحاولة بعد لحظات.",
+    };
+  }
+}
+
 export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
   const { t } = useLanguage();
@@ -27,16 +47,60 @@ export default function LoginPage() {
   const [serviceStatus, setServiceStatus] = useState<"checking" | "online" | "offline">("checking");
   const router = useRouter();
 
+  const setAuthMode = (nextIsLogin: boolean) => {
+    setIsLogin(nextIsLogin);
+    setTurnstileToken("");
+    setTurnstileError("");
+    setWebsite("");
+    setFormStartedAt(Date.now());
+    setError("");
+    setSuccess("");
+    setSecurityCode(null);
+    setPassword("");
+    if (nextIsLogin) setEmail("");
+    window.history.replaceState(null, "", nextIsLogin ? "/login" : "/login#register");
+  };
+
   useEffect(() => {
+    const syncModeFromHash = () => setIsLogin(window.location.hash !== "#register");
+    syncModeFromHash();
+    window.addEventListener("hashchange", syncModeFromHash);
+
+    // Check for deleted account message
+    const params = new URLSearchParams(window.location.search);
+    let deletedMessageTimer: number | undefined;
+    if (params.get("deleted") === "true") {
+      deletedMessageTimer = window.setTimeout(() => {
+        setSuccess("تم حذف الحساب بنجاح. نتمنى رؤيتك مرة أخرى.");
+      }, 0);
+      // Clean up the URL
+      window.history.replaceState(null, "", "/login");
+    }
+
+    return () => {
+      window.removeEventListener("hashchange", syncModeFromHash);
+      if (deletedMessageTimer !== undefined) window.clearTimeout(deletedMessageTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
     const checkHealth = async () => {
       try {
-        const res = await fetch("/api/health", { cache: "no-store" });
+        const res = await fetch("/api/health", { cache: "no-store", signal: controller.signal });
         setServiceStatus(res.ok ? "online" : "offline");
       } catch {
         setServiceStatus("offline");
+      } finally {
+        window.clearTimeout(timeout);
       }
     };
     void checkHealth();
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, []);
 
   const validatePassword = (pass: string) => {
@@ -108,7 +172,7 @@ export default function LoginPage() {
         window.clearTimeout(requestTimeout);
       }
 
-      const data = await res.json();
+      const data = await readAuthResponse(res);
 
       if (!res.ok) {
         setError(data.error || "حدث خطأ");
@@ -147,9 +211,9 @@ export default function LoginPage() {
           href="#register"
           onClick={(e) => {
             e.preventDefault();
-            setIsLogin(false);
+            setAuthMode(false);
           }}
-          className="gradient-luxe rounded-xl px-5 py-2.5 text-sm font-black text-[#111] shadow-[0_4px_24px_-4px_rgba(212,175,55,0.5)]"
+          className="gradient-luxe rounded-xl px-5 py-2.5 text-sm font-black text-[#111] shadow-[0_4px_24px_-4px_rgba(212,175,55,0.5)] transition duration-200 hover:-translate-y-0.5 hover:brightness-110 active:scale-95"
         >
           {t("auth.createAccount")}
         </Link>
@@ -190,7 +254,7 @@ export default function LoginPage() {
         </div>
 
         {/* بطاقة الحقول */}
-        <div className="glass-card w-full max-w-sm mx-auto p-6 shadow-[0_24px_80px_-20px_rgba(212,175,55,0.35)]">
+        <div key={isLogin ? "login-form" : "register-form"} className="glass-card animate-slideUp w-full max-w-sm mx-auto p-6 shadow-[0_24px_80px_-20px_rgba(212,175,55,0.35)]">
           {error && (
             <div role="alert" aria-live="assertive" className="mb-4 rounded-xl bg-red-500/10 border border-red-500/30 p-3 text-center text-sm font-bold text-red-400">
               {error}
@@ -220,7 +284,7 @@ export default function LoginPage() {
               </div>
               <button
                 type="button"
-                onClick={() => router.push('/verify-2fa')}
+                onClick={() => router.push("/verify-2fa")}
                 className="w-full rounded-xl gradient-luxe py-3.5 text-sm font-black text-[#111] shadow-[0_8px_24px_-8px_rgba(212,175,55,0.5)] transition hover:brightness-110"
               >
                 {t('auth.continueToVerify') || 'متابعة للتحقق والدخول'}
@@ -350,15 +414,9 @@ export default function LoginPage() {
           </form>
 
           <button
-            onClick={() => {
-              setIsLogin(!isLogin);
-              setTurnstileToken("");
-              setTurnstileError("");
-              setWebsite("");
-              setFormStartedAt(Date.now());
-              setError("");
-            }}
-            className="mt-5 flex w-full items-center justify-center gap-2 text-center text-sm font-black text-[var(--color-primary)]"
+            type="button"
+            onClick={() => setAuthMode(!isLogin)}
+            className="mt-5 flex w-full items-center justify-center gap-2 text-center text-sm font-black text-[var(--color-primary)] transition duration-200 hover:-translate-y-0.5 hover:text-[var(--color-gold-bright)] active:scale-95"
           >
             <ArrowLeft size={16} />
             {isLogin ? t("auth.noAccount") : t("auth.hasAccount")}

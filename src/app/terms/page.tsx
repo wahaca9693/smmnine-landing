@@ -90,10 +90,10 @@ export default function TermsPage() {
         </div>
 
         <Link
-          href="/login"
+          href="/dashboard"
           className="mt-8 block w-full rounded-xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-dark)] py-3.5 text-center font-black text-white"
         >
-          العودة إلى التسجيل
+          العودة إلى المنصة
         </Link>
       </div>
     </div>

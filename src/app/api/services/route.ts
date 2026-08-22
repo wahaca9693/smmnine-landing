@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
-import { getServices } from "@/lib/follower";
-import { detectPlatform, detectServiceType } from "@/lib/platform-mapping";
+import { defaultPlatformOptions, detectPlatform, detectServiceType, normalizePlatformId, platformOption } from "@/lib/platform-mapping";
 import { db } from "@/lib/db";
 import { readServicesCache, writeServicesCache } from "@/lib/services-cache";
+import { getPublicServiceId, loadServiceCatalog } from "@/lib/service-catalog";
+import { translateCategory } from "@/lib/service-translation";
+import { publicCatalogPlatform, type CatalogPlatform } from "@/lib/catalog-platform";
 
 type ServiceRecord = Record<string, unknown>;
 type ServicesPayload = {
   services: ServiceRecord[];
   categories: string[];
-  platforms: typeof platforms;
+  platforms: ReturnType<typeof buildPlatformOptions>;
   count: number;
 };
 
-const SERVICES_READ_TIMEOUT_MS = 2_200;
+const CATALOG_READ_TIMEOUT_MS = 30_000;
 let servicesLoadInFlight: Promise<ServicesPayload> | null = null;
 
 async function withTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs: number): Promise<T> {
@@ -29,24 +31,6 @@ async function withTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs: numbe
   }
 }
 
-async function getProviderServices(): Promise<ServiceRecord[]> {
-  try {
-    const rows = await db.execute({
-      sql: `SELECT ps.remote_service_id AS service, ps.name, ps.type, ps.sell_rate AS rate, ps.min, ps.max,
-                   CASE WHEN ps.category <> '' THEN ps.category ELSE COALESCE(p.notes, 'عام') END AS category, 0 AS refill,
-                   p.id AS provider_id, p.name AS provider_name, ps.is_new AS is_new, ps.id AS local_id
-            FROM provider_services ps
-            JOIN providers p ON p.id = ps.provider_id
-            WHERE p.is_active = 1 AND ps.is_active = 1
-            ORDER BY p.id, ps.remote_service_id`,
-      args: [],
-    });
-    return rows.rows as ServiceRecord[];
-  } catch {
-    return [];
-  }
-}
-
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -60,62 +44,81 @@ function json(data: unknown, init?: ResponseInit) {
   });
 }
 
-const platforms = [
-  { id: "facebook", name: "فيسبوك", color: "#1877F2" },
-  { id: "tiktok", name: "تيك توك", color: "#000000" },
-  { id: "instagram", name: "إنستغرام", color: "#E4405F" },
-  { id: "whatsapp", name: "واتساب", color: "#25D366" },
-  { id: "twitter", name: "تويتر / X", color: "#1DA1F2" },
-  { id: "youtube", name: "يوتيوب", color: "#FF0000" },
-  { id: "telegram", name: "تيليجرام", color: "#229ED9" },
-  { id: "discord", name: "ديسكورد", color: "#5865F2" },
-  { id: "snapchat", name: "سناب جات", color: "#FFFC00" },
-  { id: "threads", name: "ثريدز", color: "#000000" },
-  { id: "twitch", name: "تويتش", color: "#9146FF" },
-  { id: "kuaishou", name: "كواي", color: "#FF6600" },
-  { id: "likee", name: "كيك", color: "#FF0050" },
-  { id: "spotify", name: "سبوتيفاي", color: "#1DB954" },
-  { id: "other", name: "أخرى", color: "#6B7280" },
-  { id: "all", name: "الكل", color: "var(--color-primary)" },
-];
+function buildPlatformOptions(customPlatforms: CatalogPlatform[]) {
+  const legacyPlatforms = defaultPlatformOptions.filter((platform) => platform.id !== "all");
+  const customIds = new Set(customPlatforms.map((platform) => platform.id));
+  return [
+    { ...platformOption("all"), color: "var(--color-primary)" },
+    ...legacyPlatforms.filter((platform) => !customIds.has(platform.id)),
+    ...customPlatforms.map((platform) => ({
+      id: platform.id,
+      name: platform.label_ar,
+      nameAr: platform.label_ar,
+      nameEn: platform.label_en,
+      descriptionAr: platform.description_ar,
+      descriptionEn: platform.description_en,
+      logoUrl: platform.logo_url,
+      serviceIds: platform.service_ids,
+      color: "var(--color-primary)",
+      count: platform.service_ids.length,
+    })),
+  ];
+}
+
+async function getCustomPlatforms(): Promise<CatalogPlatform[]> {
+  const result = await db.execute(`
+    SELECT id, label_ar, label_en, description_ar, description_en, logo_url,
+           service_ids, is_active, sort_order
+    FROM catalog_platform_buttons
+    WHERE is_active = 1
+    ORDER BY sort_order, id
+  `);
+  return result.rows.map((row) => publicCatalogPlatform(row as Record<string, unknown>));
+}
 
 async function buildServicesPayload(): Promise<ServicesPayload> {
-  const [servicesResult, providerServices] = await Promise.all([
-    // القراءة الخارجية للكتالوج فقط؛ لا تنفذ أي إنشاء أو تعديل طلب.
-    withTimeout(getServices(SERVICES_READ_TIMEOUT_MS).catch(() => [] as ServiceRecord[]), [], SERVICES_READ_TIMEOUT_MS),
-    withTimeout(getProviderServices(), [], SERVICES_READ_TIMEOUT_MS),
+  const [catalog, customPlatforms] = await Promise.all([
+    withTimeout(loadServiceCatalog(), [], CATALOG_READ_TIMEOUT_MS),
+    getCustomPlatforms().catch(() => [] as CatalogPlatform[]),
   ]);
-  const services = Array.isArray(servicesResult) ? servicesResult : [];
-
-  // دمج خدمات المزودين الخارجيين مع الخدمات المحلية
-  const providerMapped = providerServices.map((s: ServiceRecord) => ({
-    ...s,
-    service: s.local_id != null ? `provider:${String(s.local_id)}` : String(s.service),
-    remote_service_id: String(s.service),
-    rate: String(s.rate),
-    min: String(s.min),
-    max: String(s.max),
+  const merged: ServiceRecord[] = catalog.map((service) => ({
+    service: getPublicServiceId(service),
+    remote_service_id: service.remoteServiceId,
+    name: service.name,
+    nameAr: service.nameAr,
+    description: service.description,
+    descriptionAr: service.descriptionAr,
+    category: service.category || "عام",
+    categoryAr: translateCategory(service.category || "عام"),
+    type: service.type,
+    rate: String(service.rate),
+    min: String(service.min),
+    max: String(service.max),
     refill: false,
-    source: "provider",
-    provider_id: s.provider_id,
-    provider_name: s.provider_name,
-    is_new: Number(s.is_new) === 1,
+    is_new: false,
   }));
-  const merged = [...services, ...providerMapped];
 
   const enrichedServices = merged.map((s: ServiceRecord) => ({
     ...s,
-    platform: s.platform || detectPlatform(String(s.category || ""), String(s.name || "")),
+    platform: normalizePlatformId(String(s.platform || detectPlatform(String(s.category || ""), String(s.name || "")))),
     serviceType: s.serviceType || detectServiceType(String(s.name || "")),
-    name: s.provider_name ? `${String(s.name || "")} [مزود: ${String(s.provider_name)}]` : s.name,
+    name: String(s.name || "الخدمة"),
+    nameAr: String(s.nameAr || s.name || "الخدمة"),
+    description: String(s.description || ""),
+    descriptionAr: String(s.descriptionAr || s.description || ""),
+    categoryAr: String(s.categoryAr || s.category || "عام"),
     is_new: Boolean(s.is_new),
   }));
+
+  if (merged.length === 0) {
+    throw new Error("تعذر قراءة كتالوج الخدمات من قاعدة البيانات حاليًا");
+  }
 
   const categories = [...new Set(merged.map((s: ServiceRecord) => String(s.category || "عام")))].sort();
   const payload: ServicesPayload = {
     services: enrichedServices,
     categories,
-    platforms,
+    platforms: buildPlatformOptions(customPlatforms),
     count: merged.length,
   };
   // لا نحول تعثر المزود إلى كاش فارغ لمدة دقيقة كاملة.
@@ -123,18 +126,31 @@ async function buildServicesPayload(): Promise<ServicesPayload> {
   return payload;
 }
 
+async function refreshServicesPayload(): Promise<ServicesPayload> {
+  const load = servicesLoadInFlight ?? buildServicesPayload();
+  servicesLoadInFlight = load;
+  try {
+    return await load;
+  } finally {
+    if (servicesLoadInFlight === load) servicesLoadInFlight = null;
+  }
+}
+
 export async function GET() {
   const cached = readServicesCache();
   if (cached) return json(cached);
 
-  const load = servicesLoadInFlight ?? buildServicesPayload();
-  servicesLoadInFlight = load;
+  // عند انتهاء الكاش، اعرض آخر كتالوج غير فارغ فورًا وحدثه دون حجب الواجهة.
+  const stale = readServicesCache({ allowStale: true });
+  if (stale) {
+    void refreshServicesPayload().catch(() => undefined);
+    return json(stale, { headers: { "X-Services-Cache": "stale" } });
+  }
+
   try {
-    return json(await load);
+    return json(await refreshServicesPayload());
   } catch (error) {
     const message = error instanceof Error ? error.message : "تعذر تحميل الخدمات";
     return json({ error: message }, { status: 500 });
-  } finally {
-    if (servicesLoadInFlight === load) servicesLoadInFlight = null;
   }
 }

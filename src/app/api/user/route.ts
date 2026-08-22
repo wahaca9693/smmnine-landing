@@ -17,7 +17,16 @@ function errorMessage(error: unknown): string {
 
 export async function GET() {
   try {
-    const session = await requireAuth();
+    let session;
+    try {
+      session = await requireAuth();
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === "2FA_REQUIRED") {
+        // Return a special status or flag so the UI knows to redirect to /verify-2fa instead of /login
+        return NextResponse.json({ error: "2FA_REQUIRED", requires2fa: true }, { status: 403 });
+      }
+      throw error;
+    }
     const userId = session.userId!;
 
     const [result, notifCount] = await Promise.all([

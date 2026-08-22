@@ -194,6 +194,7 @@ export async function POST(request: Request) {
     session.username = username;
     session.role = "user";
     session.isLoggedIn = true;
+    session.is2faVerified = false;
     await session.save();
 
     return NextResponse.json({
