@@ -75,9 +75,35 @@ export async function POST(request: Request) {
     const offerId = numberValue(body.offerId);
     const link = String(body.link ?? "").trim();
     const quantity = numberValue(body.quantity);
+    const rawIdempotencyKey = request.headers.get("Idempotency-Key") || (typeof body.idempotencyKey === "string" ? body.idempotencyKey : "");
+    const idempotencyKey = rawIdempotencyKey.trim();
 
     if (!offerId || !link || link.length > 2048 || !Number.isInteger(quantity) || quantity <= 0) {
       throw new FreeOrderError("بيانات الهدية غير صالحة", { status: 400 });
+    }
+    if (idempotencyKey && (idempotencyKey.length < 16 || idempotencyKey.length > 128)) {
+      throw new FreeOrderError("مفتاح الطلب غير صالح", { status: 400 });
+    }
+    if (idempotencyKey) {
+      const existingResult = await db.execute({
+        sql: "SELECT id, smmnine_order_id, service_name, quantity, status FROM orders WHERE user_id = ? AND idempotency_key = ? LIMIT 1",
+        args: [userId, idempotencyKey],
+      });
+      const existing = existingResult.rows[0] as unknown as JsonRecord | undefined;
+      if (existing) {
+        return json({
+          ok: true,
+          replayed: true,
+          order: {
+            id: Number(existing.id),
+            smmnine_order_id: existing.smmnine_order_id ?? null,
+            service_name: String(existing.service_name || "خدمة مجانية"),
+            quantity: Number(existing.quantity || quantity),
+            charge: 0,
+            status: String(existing.status || "processing"),
+          },
+        });
+      }
     }
 
     const offerServiceResult = await db.execute({
@@ -156,9 +182,9 @@ export async function POST(request: Request) {
     let localOrderId = 0;
     try {
       const orderResult = await db.execute({
-        sql: `INSERT INTO orders (user_id, smmnine_order_id, service_id, service_name, link, quantity, charge, status, provider_id)
-              VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-        args: [userId, remoteOrderId, Number(service.providerServiceId ?? service.serviceId), `مجاني — ${service.name}`, link, quantity, service.source === "provider" ? "processing" : "Pending", service.providerId],
+        sql: `INSERT INTO orders (user_id, smmnine_order_id, service_id, service_name, link, quantity, charge, status, provider_id, idempotency_key)
+              VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+        args: [userId, remoteOrderId, Number(service.providerServiceId ?? service.serviceId), `مجاني — ${service.name}`, link, quantity, service.source === "provider" ? "processing" : "Pending", service.providerId, idempotencyKey || null],
       });
       localOrderId = Number(orderResult.lastInsertRowid);
       if (service.source === "provider" && service.providerId) {
@@ -175,12 +201,16 @@ export async function POST(request: Request) {
         sql: "UPDATE free_service_usages SET order_id = ?, status = 'submitted', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         args: [localOrderId, reservationId],
       });
-    } catch (error) {
+        } catch (error) {
       await markReservationFailed(reservationId);
       if (remoteOrderId) await cancelRemoteOrder(service, remoteOrderId);
+      if (idempotencyKey && error instanceof Error && /UNIQUE constraint failed.*idempotency|orders\.user_id/.test(error.message)) {
+        const replay = await db.execute({ sql: "SELECT id, smmnine_order_id, service_name, quantity, status FROM orders WHERE user_id = ? AND idempotency_key = ? LIMIT 1", args: [userId, idempotencyKey] });
+        const existing = replay.rows[0] as unknown as JsonRecord | undefined;
+        if (existing) return json({ ok: true, replayed: true, order: { id: Number(existing.id), smmnine_order_id: existing.smmnine_order_id ?? null, service_name: String(existing.service_name || "خدمة مجانية"), quantity: Number(existing.quantity || quantity), charge: 0, status: String(existing.status || "processing") } });
+      }
       throw error;
     }
-
     return json({
       ok: true,
       order: { id: localOrderId, smmnine_order_id: remoteOrderId, service_name: `مجاني — ${service.name}`, quantity, charge: 0 },

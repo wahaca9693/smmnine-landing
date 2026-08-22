@@ -22,6 +22,13 @@ function authError(error: unknown) {
   return json({ error: message }, { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 });
 }
 
+async function recordAdminAction(adminUserId: number, action: string, details: Record<string, unknown>) {
+  await db.execute({
+    sql: "INSERT INTO admin_audit_logs (admin_user_id, action, details) VALUES (?, ?, ?)",
+    args: [adminUserId, action, JSON.stringify(details)],
+  }).catch((error) => console.error("free-service admin audit failed", { action, errorName: error instanceof Error ? error.name : "UnknownError" }));
+}
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -54,14 +61,17 @@ export async function POST(request: Request) {
       const current = await db.execute({ sql: "SELECT is_active FROM free_service_offers WHERE id = ?", args: [offerId] });
       if (!current.rows[0]) return json({ error: "العرض غير موجود" }, { status: 404 });
       const isActive = Number((current.rows[0] as unknown as JsonRecord).is_active) === 1;
-      await db.execute({ sql: "UPDATE free_service_offers SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", args: [isActive ? 0 : 1, offerId] });
-      return json({ ok: true, is_active: isActive ? 0 : 1 });
+      const nextActive = isActive ? 0 : 1;
+      await db.execute({ sql: "UPDATE free_service_offers SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", args: [nextActive, offerId] });
+      await recordAdminAction(adminUserId, nextActive ? "free_service_activate" : "free_service_pause", { offerId });
+      return json({ ok: true, is_active: nextActive });
     }
 
     if (action === "delete") {
       if (!offerId) return json({ error: "معرّف العرض غير صالح" }, { status: 400 });
-      const deleted = await db.execute({ sql: "DELETE FROM free_service_offers WHERE id = ?", args: [offerId] });
-      if (Number(deleted.rowsAffected || 0) !== 1) return json({ error: "العرض غير موجود" }, { status: 404 });
+      const removed = await db.execute({ sql: "UPDATE free_service_offers SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", args: [offerId] });
+      if (Number(removed.rowsAffected || 0) !== 1) return json({ error: "العرض غير موجود" }, { status: 404 });
+      await recordAdminAction(adminUserId, "free_service_remove", { offerId });
       return json({ ok: true });
     }
 
@@ -93,7 +103,24 @@ export async function POST(request: Request) {
         args: [catalogService.serviceId, catalogService.name, catalogService.source, catalogService.providerId, catalogService.providerServiceId, minQuantity, maxQuantity, cooldownHours, offerId],
       });
       if (Number(updated.rowsAffected || 0) !== 1) return json({ error: "العرض غير موجود" }, { status: 404 });
+      await recordAdminAction(adminUserId, "free_service_update", { offerId, serviceId: catalogService.serviceId, minQuantity, maxQuantity, cooldownHours });
       return json({ ok: true });
+    }
+
+    const existing = await db.execute({ sql: "SELECT id, is_active FROM free_service_offers WHERE service_id = ? LIMIT 1", args: [catalogService.serviceId] });
+    const existingOffer = existing.rows[0] as unknown as JsonRecord | undefined;
+    if (existingOffer) {
+      if (Number(existingOffer.is_active) === 1) return json({ error: "هذه الخدمة مضافة إلى قسم المجاني مسبقًا" }, { status: 409 });
+      const restoredId = Number(existingOffer.id);
+      await db.execute({
+        sql: `UPDATE free_service_offers
+              SET service_name = ?, source = ?, provider_id = ?, provider_service_id = ?,
+                  min_quantity = ?, max_quantity = ?, cooldown_hours = ?, is_active = 1, created_by = ?, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?`,
+        args: [catalogService.name, catalogService.source, catalogService.providerId, catalogService.providerServiceId, minQuantity, maxQuantity, cooldownHours, adminUserId, restoredId],
+      });
+      await recordAdminAction(adminUserId, "free_service_restore", { offerId: restoredId, serviceId: catalogService.serviceId, minQuantity, maxQuantity, cooldownHours });
+      return json({ ok: true, id: restoredId, restored: true });
     }
 
     const inserted = await db.execute({
@@ -102,7 +129,9 @@ export async function POST(request: Request) {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [catalogService.serviceId, catalogService.name, catalogService.source, catalogService.providerId, catalogService.providerServiceId, minQuantity, maxQuantity, cooldownHours, adminUserId],
     });
-    return json({ ok: true, id: Number(inserted.lastInsertRowid) });
+    const createdId = Number(inserted.lastInsertRowid);
+    await recordAdminAction(adminUserId, "free_service_create", { offerId: createdId, serviceId: catalogService.serviceId, minQuantity, maxQuantity, cooldownHours });
+    return json({ ok: true, id: createdId });
   } catch (error) {
     const message = error instanceof Error ? error.message : "حدث خطأ";
     if (message.includes("UNIQUE constraint failed")) return json({ error: "هذه الخدمة مضافة إلى قسم المجاني مسبقًا" }, { status: 409 });
