@@ -1,16 +1,22 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Mail, User, Lock, Loader2, Rocket, Zap, ArrowLeft, Crown, Sparkles } from "lucide-react";
+import { Eye, EyeOff, Mail, User, Lock, Loader2, Rocket, Zap, ArrowLeft, Crown, Sparkles, ShieldCheck, MailCheck, KeyRound } from "lucide-react";
 import Link from "next/link";
 import TurnstileWidget from "@/app/components/TurnstileWidget";
 import { useLanguage } from "@/app/components/LanguageProvider";
 import BrandMark from "@/app/components/BrandMark";
 import { announceAuthChange } from "@/app/components/auth-client";
+import { ensureFirebasePersistence, getFirebaseAuth } from "@/lib/firebase-client";
+import { RecaptchaVerifier, signInWithPhoneNumber, type ConfirmationResult } from "firebase/auth";
 
 type AuthResponse = {
   error?: string;
+  registrationId?: string;
+  verified?: boolean;
+  expiresAt?: string;
+  codeLifetime?: number;
   securityCode?: string;
   requires2fa?: boolean;
   requiresEmailVerification?: boolean;
@@ -53,6 +59,16 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [securityCode, setSecurityCode] = useState<string | null>(null);
+  const [registerStep, setRegisterStep] = useState<"details" | "code" | "password">("details");
+  const [registrationMethod, setRegistrationMethod] = useState<"email" | "phone">("email");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [phoneCode, setPhoneCode] = useState("");
+  const [phoneConfirmation, setPhoneConfirmation] = useState<ConfirmationResult | null>(null);
+  const [firebaseIdToken, setFirebaseIdToken] = useState("");
+  const recaptchaRef = useRef<RecaptchaVerifier | null>(null);
+  const [registrationId, setRegistrationId] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [resendingCode, setResendingCode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [serviceStatus, setServiceStatus] = useState<"checking" | "online" | "offline">("checking");
   const router = useRouter();
@@ -67,6 +83,17 @@ export default function LoginPage() {
     setError("");
     setSuccess("");
     setSecurityCode(null);
+    setRegisterStep("details");
+    setRegistrationMethod("email");
+    setPhoneNumber("");
+    setPhoneCode("");
+    setPhoneConfirmation(null);
+    setFirebaseIdToken("");
+    recaptchaRef.current?.clear();
+    recaptchaRef.current = null;
+    setRegistrationId("");
+    setVerificationCode("");
+    setResendingCode(false);
     setPassword("");
     if (nextIsLogin) setEmail("");
     const nextQuery = returnPath !== "/services" ? `?next=${encodeURIComponent(returnPath)}` : "";
@@ -122,23 +149,116 @@ export default function LoginPage() {
     return "";
   };
 
+  const firebaseErrorMessage = (error: unknown) => {
+    const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
+    const messages: Record<string, string> = {
+      "auth/invalid-phone-number": "رقم الهاتف غير صالح. استخدم الصيغة الدولية مثل +964...",
+      "auth/too-many-requests": "تم تجاوز عدد المحاولات. أعد المحاولة لاحقًا.",
+      "auth/quota-exceeded": "تم تجاوز حصة رسائل SMS مؤقتًا. أعد المحاولة لاحقًا.",
+      "auth/invalid-verification-code": "رمز الهاتف غير صحيح. راجعه وحاول مرة أخرى.",
+      "auth/code-expired": "انتهت صلاحية رمز الهاتف. أرسل رمزًا جديدًا.",
+      "auth/operation-not-allowed": "تسجيل الهاتف غير مفعّل في إعدادات Firebase.",
+      "auth/captcha-check-failed": "تعذر إكمال اختبار reCAPTCHA. أعد المحاولة.",
+      "auth/unauthorized-domain": "نطاق الموقع غير مضاف إلى Authorized domains في Firebase.",
+    };
+    return messages[code] || "تعذر إكمال تسجيل الهاتف. تحقق من الرقم وإعدادات Firebase ثم حاول مرة أخرى.";
+  };
+
+  const resetPhoneRecaptcha = () => {
+    recaptchaRef.current?.clear();
+    recaptchaRef.current = null;
+  };
+
+  const handlePhoneSubmit = async () => {
+    if (registerStep === "details") {
+      if (!username.trim()) { setError("اسم المستخدم مطلوب"); return; }
+      if (!/^\+[1-9]\d{7,14}$/.test(phoneNumber.trim())) { setError("أدخل رقم الهاتف بالصيغة الدولية، مثل +9647500000000"); return; }
+      if (!termsAccepted) { setError("يجب الموافقة على شروط الاستخدام"); return; }
+      setLoading(true);
+      try {
+        await ensureFirebasePersistence();
+        const auth = getFirebaseAuth();
+        auth.languageCode = "ar";
+        if (!recaptchaRef.current) {
+          recaptchaRef.current = new RecaptchaVerifier(auth, "firebase-phone-submit", {
+            size: "invisible",
+            "expired-callback": () => setError("انتهت صلاحية اختبار الأمان. اضغط إرسال الرمز مرة أخرى."),
+          });
+        }
+        const confirmation = await signInWithPhoneNumber(auth, phoneNumber.trim(), recaptchaRef.current);
+        setPhoneConfirmation(confirmation);
+        setRegisterStep("code");
+        setSuccess("أرسلنا رمز تحقق إلى هاتفك. أدخله للمتابعة.");
+      } catch (error: unknown) {
+        resetPhoneRecaptcha();
+        setError(error instanceof Error && error.message === "FIREBASE_NOT_CONFIGURED" ? "تسجيل الهاتف غير مهيأ حاليًا. أضف إعدادات Firebase العامة للموقع." : firebaseErrorMessage(error));
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    if (registerStep === "code") {
+      if (!phoneConfirmation) { setError("انتهت جلسة الهاتف. ابدأ التسجيل من جديد."); return; }
+      if (!/^\d{6}$/.test(phoneCode.trim())) { setError("أدخل رمز الهاتف المكوّن من 6 أرقام."); return; }
+      setLoading(true);
+      try {
+        const credential = await phoneConfirmation.confirm(phoneCode.trim());
+        const idToken = await credential.user.getIdToken(true);
+        setFirebaseIdToken(idToken);
+        setRegisterStep("password");
+        setSuccess("تم تأكيد رقم الهاتف بنجاح. أنشئ الآن كلمة مرور لحسابك.");
+        resetPhoneRecaptcha();
+      } catch (error: unknown) {
+        setError(firebaseErrorMessage(error));
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
-    if (!isLogin) {
-      if (!email) {
-        setError("البريد الإلكتروني مطلوب");
+    if (!isLogin && registrationMethod === "phone" && registerStep !== "password") {
+      await handlePhoneSubmit();
+      return;
+    }
+
+    if (!isLogin && registerStep === "code") {
+      if (!/^[0-9]{4,12}$/.test(verificationCode.trim())) {
+        setError("أدخل رمز التحقق المكوّن من الأرقام الموجودة في الرسالة.");
         return;
       }
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        setError("البريد الإلكتروني غير صالح");
-        return;
-      }
+    }
+
+    if (!isLogin && registerStep === "password") {
       const passError = validatePassword(password);
       if (passError) {
         setError(passError);
+        return;
+      }
+    }
+
+    if (!isLogin && registerStep === "details") {
+      if (!username.trim()) {
+        setError("اسم المستخدم مطلوب");
+        return;
+      }
+      if (registrationMethod === "email") {
+        if (!email) {
+          setError("البريد الإلكتروني مطلوب");
+          return;
+        }
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+          setError("البريد الإلكتروني غير صالح");
+          return;
+        }
+      }
+      if (registrationMethod === "phone" && !/^\+[1-9]\d{7,14}$/.test(phoneNumber.trim())) {
+        setError("أدخل رقم الهاتف بالصيغة الدولية، مثل +9647500000000");
         return;
       }
       if (!termsAccepted) {
@@ -149,29 +269,32 @@ export default function LoginPage() {
 
     const turnstileTesting = process.env.NEXT_PUBLIC_TURNSTILE_MODE === "testing";
     const turnstileRequired = !turnstileTesting && (process.env.NEXT_PUBLIC_TURNSTILE_REQUIRED === "1" || Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY));
-    if (turnstileRequired && !turnstileToken) {
-      setError(turnstileError || "يرجى إكمال التحقق الأمني أولًا");
-      return;
+    if (isLogin || registerStep === "details") {
+      if (turnstileRequired && !turnstileToken) {
+        setError(turnstileError || "يرجى إكمال التحقق الأمني أولًا");
+        return;
+      }
     }
 
     setLoading(true);
-
     try {
-      const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
-      const body = isLogin
-        ? { username, password, cfTurnstileToken: turnstileToken }
-        : {
-            username,
-            email,
-            password,
-            termsAccepted,
-            cfTurnstileToken: turnstileToken,
-            website,
-            formStartedAt,
-          };
+      let endpoint = "/api/auth/login";
+      let body: Record<string, unknown> = { username, password, cfTurnstileToken: turnstileToken };
+      if (!isLogin && registerStep === "details") {
+        endpoint = "/api/auth/register/start";
+        body = { username, email, termsAccepted, cfTurnstileToken: turnstileToken, website, formStartedAt };
+      } else if (!isLogin && registerStep === "code") {
+        endpoint = "/api/auth/register/verify-code";
+        body = { registrationId, code: verificationCode.trim() };
+      } else if (!isLogin && registerStep === "password") {
+        endpoint = registrationMethod === "phone" ? "/api/auth/firebase/phone/complete" : "/api/auth/register/complete";
+        body = registrationMethod === "phone"
+          ? { idToken: firebaseIdToken, username, password, termsAccepted }
+          : { registrationId, password };
+      }
 
       const controller = new AbortController();
-      const requestTimeout = window.setTimeout(() => controller.abort(), 15000);
+      const requestTimeout = window.setTimeout(() => controller.abort(), 20000);
       let res: Response;
       try {
         res = await fetch(endpoint, {
@@ -185,16 +308,29 @@ export default function LoginPage() {
       }
 
       const data = await readAuthResponse(res);
-
       if (!res.ok) {
         setError(data.error || "حدث خطأ");
         setLoading(false);
         return;
       }
 
-      // If registration success with security code
+      if (!isLogin && registerStep === "details") {
+        if (!data.registrationId) throw new Error("تعذر بدء جلسة التسجيل");
+        setRegistrationId(data.registrationId);
+        setRegisterStep("code");
+        setSuccess("أرسلنا رمز تحقق إلى بريدك. أدخله هنا للانتقال إلى إنشاء كلمة المرور.");
+        setLoading(false);
+        return;
+      }
+      if (!isLogin && registerStep === "code") {
+        setRegisterStep("password");
+        setSuccess("تم تأكيد البريد بنجاح. أنشئ الآن كلمة مرور قوية لحسابك.");
+        setLoading(false);
+        return;
+      }
+
       if (!isLogin && data.securityCode) {
-        setSuccess(data.requiresEmailVerification ? "تم إنشاء الحساب. راجع بريدك لتأكيد الحساب، ثم أكمل التحقق الأمني." : "تم إنشاء حسابك بنجاح!");
+        setSuccess("تم إنشاء حسابك بعد تأكيد البريد بنجاح. احفظ رمز الأمان الظاهر مرة واحدة.");
         setSecurityCode(data.securityCode);
         setLoading(false);
         return;
@@ -211,7 +347,6 @@ export default function LoginPage() {
         });
       }
 
-      // Keep the visitor's requested destination after authentication.
       const destination = getSafeReturnPath();
       if (data.requiresEmailVerification) {
         router.push(`/verify-email?next=${encodeURIComponent(destination)}`);
@@ -225,6 +360,35 @@ export default function LoginPage() {
       const isTimeout = err instanceof DOMException && err.name === "AbortError";
       setError(isTimeout ? "استغرق الاتصال وقتًا أطول من المتوقع. تحقق من الاتصال وحاول مرة أخرى." : errorMessage);
       setLoading(false);
+    }
+  };
+
+  const restartPhoneCode = () => {
+    resetPhoneRecaptcha();
+    setPhoneConfirmation(null);
+    setPhoneCode("");
+    setRegisterStep("details");
+    setError("");
+    setSuccess("اضغط إرسال رمز التحقق لإرسال رسالة SMS جديدة.");
+  };
+
+  const resendRegistrationCode = async () => {
+    if (!registrationId || resendingCode) return;
+    setResendingCode(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth/register/resend-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ registrationId }),
+      });
+      const data = await readAuthResponse(res);
+      if (!res.ok) throw new Error(data.error || "تعذر إعادة إرسال الرمز");
+      setSuccess("تم إرسال رمز جديد إلى بريدك الإلكتروني.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "تعذر إعادة إرسال الرمز");
+    } finally {
+      setResendingCode(false);
     }
   };
 
@@ -281,14 +445,26 @@ export default function LoginPage() {
 
         {/* بطاقة الحقول */}
         <div key={isLogin ? "login-form" : "register-form"} className="glass-card animate-slideUp w-full max-w-sm mx-auto p-6 shadow-[0_24px_80px_-20px_rgba(212,175,55,0.35)]">
+          {!isLogin && (
+            <div className="mb-5 grid grid-cols-3 gap-2" aria-label="مراحل التسجيل">
+              {[{ key: "details", label: "البيانات", icon: User }, { key: "code", label: registrationMethod === "phone" ? "رمز الهاتف" : "رمز البريد", icon: MailCheck }, { key: "password", label: "كلمة المرور", icon: KeyRound }].map((step, index) => {
+                const StepIcon = step.icon;
+                const active = registerStep === step.key;
+                const complete = (registerStep === "code" && index === 0) || (registerStep === "password" && index < 2);
+                return <div key={step.key} className={`flex flex-col items-center gap-1 rounded-xl border px-2 py-2 text-[10px] font-black transition-all duration-300 ${active ? "border-[var(--color-gold)]/60 bg-[var(--color-gold)]/10 text-[var(--color-gold-bright)] shadow-[0_0_20px_-10px_rgba(212,175,55,0.7)]" : complete ? "border-emerald-400/30 bg-emerald-400/5 text-emerald-300" : "border-white/10 bg-black/10 text-zinc-500"}`}><StepIcon size={15} /><span>{complete ? "تم" : step.label}</span></div>;
+              })}
+            </div>
+          )}
+
           {error && (
-            <div role="alert" aria-live="assertive" className="mb-4 rounded-xl bg-red-500/10 border border-red-500/30 p-3 text-center text-sm font-bold text-red-400">
+            <div role="alert" aria-live="assertive" className="animate-shake mb-4 rounded-xl bg-red-500/10 border border-red-500/30 p-3 text-center text-sm font-bold text-red-400">
               {error}
             </div>
           )}
 
           {success && (
-            <div className="mb-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-3 text-center text-sm font-bold text-emerald-400">
+            <div className="animate-fadeIn mb-4 flex items-start gap-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-3 text-right text-sm font-bold text-emerald-400">
+              <ShieldCheck className="mt-0.5 shrink-0" size={18} />
               {success}
             </div>
           )}
@@ -319,6 +495,7 @@ export default function LoginPage() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {(isLogin || registerStep === "details") && (
             <div>
               <label className="mb-2 block text-sm font-black text-white">
                 {isLogin ? "اسم المستخدم أو البريد الإلكتروني" : t("auth.username")}
@@ -340,8 +517,16 @@ export default function LoginPage() {
                 />
               </div>
             </div>
+            )}
 
-            {!isLogin && (
+            {!isLogin && registerStep === "details" && (
+              <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/10 p-1">
+                <button type="button" onClick={() => { setRegistrationMethod("email"); setError(""); }} className={`rounded-lg px-3 py-2 text-xs font-black transition ${registrationMethod === "email" ? "bg-[var(--color-gold)] text-[#171107]" : "text-zinc-400 hover:text-white"}`}><Mail size={14} className="mx-auto mb-1" />البريد الإلكتروني</button>
+                <button type="button" onClick={() => { setRegistrationMethod("phone"); setError(""); }} className={`rounded-lg px-3 py-2 text-xs font-black transition ${registrationMethod === "phone" ? "bg-[var(--color-gold)] text-[#171107]" : "text-zinc-400 hover:text-white"}`}><span className="mx-auto mb-1 block text-sm">+964</span>رقم الهاتف</button>
+              </div>
+            )}
+
+            {!isLogin && registerStep === "details" && registrationMethod === "email" && (
               <div>
                 <label className="mb-2 block text-sm font-black text-white">{t("auth.email")}</label>
                 <div className="relative">
@@ -359,6 +544,37 @@ export default function LoginPage() {
               </div>
             )}
 
+            {!isLogin && registerStep === "details" && registrationMethod === "phone" && (
+              <div className="animate-fadeIn">
+                <label className="mb-2 block text-sm font-black text-white">رقم الهاتف</label>
+                <div className="relative">
+                  <input type="tel" dir="ltr" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value.replace(/[^0-9+]/g, "").slice(0, 16))} className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5 text-left text-white placeholder:text-zinc-500 outline-none focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-gold)]/40" placeholder="+9647500000000" autoComplete="tel" required />
+                </div>
+                <p className="mt-1.5 text-xs text-zinc-500">اكتب الرقم بالصيغة الدولية. سيُرسل Firebase رمزًا عبر SMS بعد اختبار الأمان.</p>
+              </div>
+            )}
+
+            {!isLogin && registerStep === "code" && (
+              <div className="animate-fadeIn rounded-2xl border border-[var(--color-gold)]/25 bg-[var(--color-gold)]/5 p-4 text-center">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-gold)]/10 text-[var(--color-gold)] ring-1 ring-[var(--color-gold)]/30">
+                  <MailCheck size={24} />
+                </div>
+                <h3 className="text-base font-black text-white">{registrationMethod === "phone" ? "تأكيد رقم الهاتف" : "تأكيد البريد الإلكتروني"}</h3>
+                <p className="mt-1 text-xs leading-relaxed text-zinc-400">أدخل الرمز الذي أرسلناه إلى <span className="font-bold text-[var(--color-gold-bright)]">{registrationMethod === "phone" ? phoneNumber : email}</span>. لا نطلب كلمة المرور قبل نجاح التحقق.</p>
+                <input
+                  value={registrationMethod === "phone" ? phoneCode : verificationCode}
+                  onChange={(e) => registrationMethod === "phone" ? setPhoneCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6)) : setVerificationCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 12))}
+                  className="mt-4 w-full rounded-xl border border-[var(--color-gold)]/30 bg-[#1a1204] px-4 py-4 text-center text-2xl font-black tracking-[0.45em] text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold-bright)] focus:ring-2 focus:ring-[var(--color-gold)]/20"
+                  placeholder="••••••"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  required
+                />
+                {registrationMethod === "phone" ? <button type="button" onClick={restartPhoneCode} className="mt-3 inline-flex items-center gap-2 text-xs font-black text-[var(--color-gold-bright)] hover:underline"><MailCheck size={14} />إرسال رمز جديد</button> : <button type="button" onClick={() => void resendRegistrationCode()} disabled={resendingCode} className="mt-3 inline-flex items-center gap-2 text-xs font-black text-[var(--color-gold-bright)] hover:underline disabled:opacity-50">{resendingCode ? <Loader2 size={14} className="animate-spin" /> : <MailCheck size={14} />}إعادة إرسال الرمز</button>}
+              </div>
+            )}
+
+            {(isLogin || registerStep === "password") && (
             <div>
               <label className="mb-2 block text-sm font-black text-white">{t("auth.password")}</label>
               <div className="relative">
@@ -383,8 +599,9 @@ export default function LoginPage() {
               </div>
               {!isLogin && <p className="mt-1.5 text-xs text-zinc-500">{t("auth.passwordHint")}</p>}
             </div>
+            )}
 
-            {!isLogin && (
+            {!isLogin && registerStep === "details" && (
               <label className="flex items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5 cursor-pointer">
                 <input
                   type="checkbox"
@@ -413,6 +630,7 @@ export default function LoginPage() {
               className="absolute -left-[9999px] h-px w-px opacity-0"
             />
 
+            {(isLogin || registerStep === "details") && (
             <TurnstileWidget
               onToken={(token) => {
                 setTurnstileToken(token);
@@ -428,14 +646,18 @@ export default function LoginPage() {
                 }
               }}
             />
+            )}
 
             <button
+              id="firebase-phone-submit"
               type="submit"
               disabled={loading}
               className="btn-glow-pulse flex w-full items-center justify-center gap-2.5 rounded-xl gradient-luxe py-4 text-base font-black text-[#111] shadow-[0_8px_32px_-8px_rgba(212,175,55,0.6)] transition hover:brightness-110 disabled:opacity-50"
             >
-              {loading ? <Loader2 className="animate-spin" size={20} /> : <Crown size={20} />}
-              {loading ? (isLogin ? t("auth.loggingIn") : t("auth.creating")) : isLogin ? t("auth.login") : t("auth.createAccount")}
+              {loading ? <Loader2 className="animate-spin" size={20} /> : registerStep === "code" ? <ShieldCheck size={20} /> : registerStep === "password" ? <KeyRound size={20} /> : <Crown size={20} />}
+              {loading
+                ? (isLogin ? t("auth.loggingIn") : registerStep === "details" ? "إرسال رمز التحقق..." : registerStep === "code" ? "جارٍ التحقق..." : "جارٍ إنشاء الحساب...")
+                : isLogin ? t("auth.login") : registerStep === "details" ? "إرسال رمز التحقق" : registerStep === "code" ? "تأكيد الرمز والمتابعة" : "إنشاء الحساب"}
             </button>
           </form>
 

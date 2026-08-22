@@ -1,4 +1,6 @@
 allowBuilds:
+  '@firebase/util': false
   bcrypt: true
   esbuild: true
+  protobufjs: false
   unrs-resolver: true
