@@ -35,9 +35,6 @@ const schemaStatements = [
     email_verified INTEGER DEFAULT 1,
     email_verification_token_hash TEXT,
     email_verification_expires_at DATETIME,
-    firebase_uid TEXT,
-    phone_number TEXT,
-    auth_provider TEXT DEFAULT 'password',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
   `CREATE TABLE IF NOT EXISTS pending_registrations (
@@ -434,8 +431,6 @@ const indexStatements = [
   `CREATE INDEX IF NOT EXISTS idx_provider_services_provider_remote ON provider_services(provider_id, remote_service_id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_services_provider_remote_unique ON provider_services(provider_id, remote_service_id)`,
   `CREATE INDEX IF NOT EXISTS idx_provider_services_active ON provider_services(is_active, provider_id)`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid) WHERE firebase_uid IS NOT NULL`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_number ON users(phone_number) WHERE phone_number IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS idx_pending_registrations_email ON pending_registrations(email)`,
   `CREATE INDEX IF NOT EXISTS idx_pending_registrations_expires ON pending_registrations(expires_at)`,
   `CREATE INDEX IF NOT EXISTS idx_orders_user_created ON orders(user_id, created_at DESC)`,
@@ -464,9 +459,6 @@ const schemaMigrations: SchemaMigration[] = [
       ["email_verified", "INTEGER DEFAULT 1"],
       ["email_verification_token_hash", "TEXT"],
       ["email_verification_expires_at", "DATETIME"],
-      ["firebase_uid", "TEXT"],
-      ["phone_number", "TEXT"],
-      ["auth_provider", "TEXT DEFAULT 'password'"],
       // libSQL لا يسمح بإضافة عمود قديم بقيمة افتراضية غير ثابتة عبر ALTER TABLE.
       ["updated_at", "DATETIME"],
     ],

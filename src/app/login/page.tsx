@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Mail, User, Lock, Loader2, Rocket, Zap, ArrowLeft, Crown, Sparkles, ShieldCheck, MailCheck, KeyRound } from "lucide-react";
 import Link from "next/link";
@@ -8,8 +8,6 @@ import TurnstileWidget from "@/app/components/TurnstileWidget";
 import { useLanguage } from "@/app/components/LanguageProvider";
 import BrandMark from "@/app/components/BrandMark";
 import { announceAuthChange } from "@/app/components/auth-client";
-import { ensureFirebasePersistence, getFirebaseAuth } from "@/lib/firebase-client";
-import { RecaptchaVerifier, signInWithPhoneNumber, type ConfirmationResult } from "firebase/auth";
 
 type AuthResponse = {
   error?: string;
@@ -60,12 +58,6 @@ export default function LoginPage() {
   const [success, setSuccess] = useState("");
   const [securityCode, setSecurityCode] = useState<string | null>(null);
   const [registerStep, setRegisterStep] = useState<"details" | "code" | "password">("details");
-  const [registrationMethod, setRegistrationMethod] = useState<"email" | "phone">("email");
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [phoneCode, setPhoneCode] = useState("");
-  const [phoneConfirmation, setPhoneConfirmation] = useState<ConfirmationResult | null>(null);
-  const [firebaseIdToken, setFirebaseIdToken] = useState("");
-  const recaptchaRef = useRef<RecaptchaVerifier | null>(null);
   const [registrationId, setRegistrationId] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
   const [resendingCode, setResendingCode] = useState(false);
@@ -84,13 +76,6 @@ export default function LoginPage() {
     setSuccess("");
     setSecurityCode(null);
     setRegisterStep("details");
-    setRegistrationMethod("email");
-    setPhoneNumber("");
-    setPhoneCode("");
-    setPhoneConfirmation(null);
-    setFirebaseIdToken("");
-    recaptchaRef.current?.clear();
-    recaptchaRef.current = null;
     setRegistrationId("");
     setVerificationCode("");
     setResendingCode(false);
@@ -149,82 +134,11 @@ export default function LoginPage() {
     return "";
   };
 
-  const firebaseErrorMessage = (error: unknown) => {
-    const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
-    const messages: Record<string, string> = {
-      "auth/invalid-phone-number": "رقم الهاتف غير صالح. استخدم الصيغة الدولية مثل +964...",
-      "auth/too-many-requests": "تم تجاوز عدد المحاولات. أعد المحاولة لاحقًا.",
-      "auth/quota-exceeded": "تم تجاوز حصة رسائل SMS مؤقتًا. أعد المحاولة لاحقًا.",
-      "auth/invalid-verification-code": "رمز الهاتف غير صحيح. راجعه وحاول مرة أخرى.",
-      "auth/code-expired": "انتهت صلاحية رمز الهاتف. أرسل رمزًا جديدًا.",
-      "auth/operation-not-allowed": "تسجيل الهاتف غير مفعّل في إعدادات Firebase.",
-      "auth/captcha-check-failed": "تعذر إكمال اختبار reCAPTCHA. أعد المحاولة.",
-      "auth/unauthorized-domain": "نطاق الموقع غير مضاف إلى Authorized domains في Firebase.",
-    };
-    return messages[code] || "تعذر إكمال تسجيل الهاتف. تحقق من الرقم وإعدادات Firebase ثم حاول مرة أخرى.";
-  };
-
-  const resetPhoneRecaptcha = () => {
-    recaptchaRef.current?.clear();
-    recaptchaRef.current = null;
-  };
-
-  const handlePhoneSubmit = async () => {
-    if (registerStep === "details") {
-      if (!username.trim()) { setError("اسم المستخدم مطلوب"); return; }
-      if (!/^\+[1-9]\d{7,14}$/.test(phoneNumber.trim())) { setError("أدخل رقم الهاتف بالصيغة الدولية، مثل +9647500000000"); return; }
-      if (!termsAccepted) { setError("يجب الموافقة على شروط الاستخدام"); return; }
-      setLoading(true);
-      try {
-        await ensureFirebasePersistence();
-        const auth = getFirebaseAuth();
-        auth.languageCode = "ar";
-        if (!recaptchaRef.current) {
-          recaptchaRef.current = new RecaptchaVerifier(auth, "firebase-phone-submit", {
-            size: "invisible",
-            "expired-callback": () => setError("انتهت صلاحية اختبار الأمان. اضغط إرسال الرمز مرة أخرى."),
-          });
-        }
-        const confirmation = await signInWithPhoneNumber(auth, phoneNumber.trim(), recaptchaRef.current);
-        setPhoneConfirmation(confirmation);
-        setRegisterStep("code");
-        setSuccess("أرسلنا رمز تحقق إلى هاتفك. أدخله للمتابعة.");
-      } catch (error: unknown) {
-        resetPhoneRecaptcha();
-        setError(error instanceof Error && error.message === "FIREBASE_NOT_CONFIGURED" ? "تسجيل الهاتف غير مهيأ حاليًا. أضف إعدادات Firebase العامة للموقع." : firebaseErrorMessage(error));
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
-
-    if (registerStep === "code") {
-      if (!phoneConfirmation) { setError("انتهت جلسة الهاتف. ابدأ التسجيل من جديد."); return; }
-      if (!/^\d{6}$/.test(phoneCode.trim())) { setError("أدخل رمز الهاتف المكوّن من 6 أرقام."); return; }
-      setLoading(true);
-      try {
-        const credential = await phoneConfirmation.confirm(phoneCode.trim());
-        const idToken = await credential.user.getIdToken(true);
-        setFirebaseIdToken(idToken);
-        setRegisterStep("password");
-        setSuccess("تم تأكيد رقم الهاتف بنجاح. أنشئ الآن كلمة مرور لحسابك.");
-        resetPhoneRecaptcha();
-      } catch (error: unknown) {
-        setError(firebaseErrorMessage(error));
-      } finally {
-        setLoading(false);
-      }
-    }
-  };
-
+  /* التسجيل بالبريد فقط: يبدأ بالبيانات ثم رمز OTP ثم كلمة المرور. */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
-    if (!isLogin && registrationMethod === "phone" && registerStep !== "password") {
-      await handlePhoneSubmit();
-      return;
-    }
 
     if (!isLogin && registerStep === "code") {
       if (!/^[0-9]{4,12}$/.test(verificationCode.trim())) {
@@ -246,19 +160,13 @@ export default function LoginPage() {
         setError("اسم المستخدم مطلوب");
         return;
       }
-      if (registrationMethod === "email") {
-        if (!email) {
-          setError("البريد الإلكتروني مطلوب");
-          return;
-        }
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-          setError("البريد الإلكتروني غير صالح");
-          return;
-        }
+      if (!email) {
+        setError("البريد الإلكتروني مطلوب");
+        return;
       }
-      if (registrationMethod === "phone" && !/^\+[1-9]\d{7,14}$/.test(phoneNumber.trim())) {
-        setError("أدخل رقم الهاتف بالصيغة الدولية، مثل +9647500000000");
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        setError("البريد الإلكتروني غير صالح");
         return;
       }
       if (!termsAccepted) {
@@ -287,10 +195,8 @@ export default function LoginPage() {
         endpoint = "/api/auth/register/verify-code";
         body = { registrationId, code: verificationCode.trim() };
       } else if (!isLogin && registerStep === "password") {
-        endpoint = registrationMethod === "phone" ? "/api/auth/firebase/phone/complete" : "/api/auth/register/complete";
-        body = registrationMethod === "phone"
-          ? { idToken: firebaseIdToken, username, password, termsAccepted }
-          : { registrationId, password };
+        endpoint = "/api/auth/register/complete";
+        body = { registrationId, password };
       }
 
       const controller = new AbortController();
@@ -363,14 +269,6 @@ export default function LoginPage() {
     }
   };
 
-  const restartPhoneCode = () => {
-    resetPhoneRecaptcha();
-    setPhoneConfirmation(null);
-    setPhoneCode("");
-    setRegisterStep("details");
-    setError("");
-    setSuccess("اضغط إرسال رمز التحقق لإرسال رسالة SMS جديدة.");
-  };
 
   const resendRegistrationCode = async () => {
     if (!registrationId || resendingCode) return;
@@ -447,7 +345,7 @@ export default function LoginPage() {
         <div key={isLogin ? "login-form" : "register-form"} className="glass-card animate-slideUp w-full max-w-sm mx-auto p-6 shadow-[0_24px_80px_-20px_rgba(212,175,55,0.35)]">
           {!isLogin && (
             <div className="mb-5 grid grid-cols-3 gap-2" aria-label="مراحل التسجيل">
-              {[{ key: "details", label: "البيانات", icon: User }, { key: "code", label: registrationMethod === "phone" ? "رمز الهاتف" : "رمز البريد", icon: MailCheck }, { key: "password", label: "كلمة المرور", icon: KeyRound }].map((step, index) => {
+              {[{ key: "details", label: "البيانات", icon: User }, { key: "code", label: "رمز البريد", icon: MailCheck }, { key: "password", label: "كلمة المرور", icon: KeyRound }].map((step, index) => {
                 const StepIcon = step.icon;
                 const active = registerStep === step.key;
                 const complete = (registerStep === "code" && index === 0) || (registerStep === "password" && index < 2);
@@ -520,13 +418,6 @@ export default function LoginPage() {
             )}
 
             {!isLogin && registerStep === "details" && (
-              <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-black/10 p-1">
-                <button type="button" onClick={() => { setRegistrationMethod("email"); setError(""); }} className={`rounded-lg px-3 py-2 text-xs font-black transition ${registrationMethod === "email" ? "bg-[var(--color-gold)] text-[#171107]" : "text-zinc-400 hover:text-white"}`}><Mail size={14} className="mx-auto mb-1" />البريد الإلكتروني</button>
-                <button type="button" onClick={() => { setRegistrationMethod("phone"); setError(""); }} className={`rounded-lg px-3 py-2 text-xs font-black transition ${registrationMethod === "phone" ? "bg-[var(--color-gold)] text-[#171107]" : "text-zinc-400 hover:text-white"}`}><span className="mx-auto mb-1 block text-sm">+964</span>رقم الهاتف</button>
-              </div>
-            )}
-
-            {!isLogin && registerStep === "details" && registrationMethod === "email" && (
               <div>
                 <label className="mb-2 block text-sm font-black text-white">{t("auth.email")}</label>
                 <div className="relative">
@@ -544,33 +435,23 @@ export default function LoginPage() {
               </div>
             )}
 
-            {!isLogin && registerStep === "details" && registrationMethod === "phone" && (
-              <div className="animate-fadeIn">
-                <label className="mb-2 block text-sm font-black text-white">رقم الهاتف</label>
-                <div className="relative">
-                  <input type="tel" dir="ltr" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value.replace(/[^0-9+]/g, "").slice(0, 16))} className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5 text-left text-white placeholder:text-zinc-500 outline-none focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-gold)]/40" placeholder="+9647500000000" autoComplete="tel" required />
-                </div>
-                <p className="mt-1.5 text-xs text-zinc-500">اكتب الرقم بالصيغة الدولية. سيُرسل Firebase رمزًا عبر SMS بعد اختبار الأمان.</p>
-              </div>
-            )}
-
             {!isLogin && registerStep === "code" && (
               <div className="animate-fadeIn rounded-2xl border border-[var(--color-gold)]/25 bg-[var(--color-gold)]/5 p-4 text-center">
                 <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-gold)]/10 text-[var(--color-gold)] ring-1 ring-[var(--color-gold)]/30">
                   <MailCheck size={24} />
                 </div>
-                <h3 className="text-base font-black text-white">{registrationMethod === "phone" ? "تأكيد رقم الهاتف" : "تأكيد البريد الإلكتروني"}</h3>
-                <p className="mt-1 text-xs leading-relaxed text-zinc-400">أدخل الرمز الذي أرسلناه إلى <span className="font-bold text-[var(--color-gold-bright)]">{registrationMethod === "phone" ? phoneNumber : email}</span>. لا نطلب كلمة المرور قبل نجاح التحقق.</p>
+                <h3 className="text-base font-black text-white">تأكيد البريد الإلكتروني</h3>
+                <p className="mt-1 text-xs leading-relaxed text-zinc-400">أدخل الرمز الذي أرسلناه إلى <span className="font-bold text-[var(--color-gold-bright)]">{email}</span>. لا نطلب كلمة المرور قبل نجاح التحقق.</p>
                 <input
-                  value={registrationMethod === "phone" ? phoneCode : verificationCode}
-                  onChange={(e) => registrationMethod === "phone" ? setPhoneCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6)) : setVerificationCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 12))}
+                  value={verificationCode}
+                  onChange={(e) => setVerificationCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 12))}
                   className="mt-4 w-full rounded-xl border border-[var(--color-gold)]/30 bg-[#1a1204] px-4 py-4 text-center text-2xl font-black tracking-[0.45em] text-[var(--color-gold-bright)] outline-none focus:border-[var(--color-gold-bright)] focus:ring-2 focus:ring-[var(--color-gold)]/20"
                   placeholder="••••••"
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   required
                 />
-                {registrationMethod === "phone" ? <button type="button" onClick={restartPhoneCode} className="mt-3 inline-flex items-center gap-2 text-xs font-black text-[var(--color-gold-bright)] hover:underline"><MailCheck size={14} />إرسال رمز جديد</button> : <button type="button" onClick={() => void resendRegistrationCode()} disabled={resendingCode} className="mt-3 inline-flex items-center gap-2 text-xs font-black text-[var(--color-gold-bright)] hover:underline disabled:opacity-50">{resendingCode ? <Loader2 size={14} className="animate-spin" /> : <MailCheck size={14} />}إعادة إرسال الرمز</button>}
+                <button type="button" onClick={() => void resendRegistrationCode()} disabled={resendingCode} className="mt-3 inline-flex items-center gap-2 text-xs font-black text-[var(--color-gold-bright)] hover:underline disabled:opacity-50">{resendingCode ? <Loader2 size={14} className="animate-spin" /> : <MailCheck size={14} />}إعادة إرسال الرمز</button>
               </div>
             )}
 
@@ -649,7 +530,6 @@ export default function LoginPage() {
             )}
 
             <button
-              id="firebase-phone-submit"
               type="submit"
               disabled={loading}
               className="btn-glow-pulse flex w-full items-center justify-center gap-2.5 rounded-xl gradient-luxe py-4 text-base font-black text-[#111] shadow-[0_8px_32px_-8px_rgba(212,175,55,0.6)] transition hover:brightness-110 disabled:opacity-50"
