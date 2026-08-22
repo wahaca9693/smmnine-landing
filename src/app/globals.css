@@ -430,7 +430,13 @@ input:focus, textarea:focus, select:focus {
   overflow: hidden;
   border: 1px solid rgba(240, 210, 122, 0.2);
   border-radius: 0.95rem;
-  background: rgba(255, 255, 255, 0.045);
+}
+.platform-logo-frame-dark {
+  background: linear-gradient(145deg, rgba(255, 252, 0, 0.2), rgba(12, 12, 10, 0.94));
+}
+.platform-logo-frame-light {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(220, 220, 216, 0.92));
+  border-color: rgba(255, 255, 255, 0.58);
 }
 .platform-tile .platform-icon-shell {
   padding: 0;

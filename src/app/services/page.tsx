@@ -51,6 +51,11 @@ let servicesSnapshot: ServicesSnapshot | null = null;
 
 const serviceTypeIds = ["followers", "likes", "views", "comments", "shares", "saves", "votes", "stories", "reels", "live", "other"];
 
+const curatedPlatformLogos: Record<string, string> = {
+  snapchat: "/platform-logos/snapchat-user.png",
+  threads: "/platform-logos/threads-user.png",
+};
+
 function safeServiceText(value: unknown): string {
   return typeof value === "string" ? value : String(value ?? "");
 }
@@ -483,6 +488,7 @@ export default function ServicesPage() {
           <div className="grid grid-cols-4 gap-2 sm:gap-3">
             {platformOptions.map((p) => {
               const active = activePlatform === p.id;
+              const platformLogoUrl = p.logoUrl || curatedPlatformLogos[normalizePlatformId(p.id)];
               return (
                 <button
                   key={p.id}
@@ -493,9 +499,9 @@ export default function ServicesPage() {
                     active ? "platform-tile-active" : ""
                   }`}
                 >
-                  {p.logoUrl ? (
-                    <span className="platform-logo-frame h-11 w-11 sm:h-12 sm:w-12">
-                      <img src={p.logoUrl} alt="" className="h-full w-full rounded-[0.8rem] object-cover" loading="lazy" />
+                  {platformLogoUrl ? (
+                    <span className={`platform-logo-frame h-11 w-11 sm:h-12 sm:w-12 ${normalizePlatformId(p.id) === "threads" ? "platform-logo-frame-light" : "platform-logo-frame-dark"}`}>
+                      <img src={platformLogoUrl} alt={displayPlatformLabel(p)} className="h-full w-full rounded-[0.8rem] object-contain p-1" loading="lazy" />
                     </span>
                   ) : (
                     <PlatformIcon
