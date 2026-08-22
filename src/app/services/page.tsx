@@ -404,21 +404,34 @@ export default function ServicesPage() {
 
         {/* Guaranteed services button */}
         <button
+          type="button"
           onClick={openGuaranteed}
-          className="card-luxe card-lift group relative w-full overflow-hidden rounded-2xl p-4 text-white"
+          aria-label={t("service.guaranteed")}
+          className="group relative w-full overflow-hidden rounded-[1.35rem] border border-emerald-300/20 bg-gradient-to-br from-[#1b1d16] via-[#15130d] to-[#0d0b08] p-3.5 text-white shadow-[0_16px_42px_-22px_rgba(212,175,55,0.75)] transition duration-200 hover:border-emerald-300/45 hover:shadow-[0_18px_48px_-18px_rgba(212,175,55,0.55)] active:scale-[0.99]"
         >
-          <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjIiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4xKSIvPjwvc3ZnPg==')] opacity-30" />
-          <div className="relative flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm">
-                <ShieldCheck size={26} />
+          <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-emerald-300/70 to-transparent" />
+          <div className="pointer-events-none absolute -left-10 -top-12 h-28 w-28 rounded-full bg-emerald-400/10 blur-3xl transition duration-300 group-hover:bg-emerald-300/20" />
+          <div className="relative flex items-center gap-3">
+            <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-[1rem] border border-emerald-200/25 bg-gradient-to-br from-emerald-300/20 via-emerald-500/10 to-transparent text-emerald-100 shadow-[inset_0_0_18px_rgba(52,211,153,0.12)] transition duration-200 group-hover:scale-105">
+              <ShieldCheck size={25} strokeWidth={1.9} />
+              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#15130d] bg-emerald-300 shadow-[0_0_10px_2px_rgba(110,231,183,0.6)]" />
+            </span>
+            <span className="min-w-0 flex-1 text-right">
+              <span className="flex items-center justify-end gap-2">
+                <span className="truncate text-base font-black tracking-tight text-white">{t("service.guaranteed")}</span>
+                <span className="shrink-0 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-2 py-0.5 text-[9px] font-black text-emerald-200">PRO</span>
               </span>
-              <div className="text-right">
-                <div className="text-lg font-black">{t("service.guaranteed")}</div>
-                <div className="text-xs opacity-90">{t("service.guaranteedDesc")}</div>
-              </div>
-            </div>
-            <Sparkles size={24} className="opacity-80 group-hover:animate-pulse" />
+              <span className="mt-2 flex flex-wrap justify-end gap-1.5">
+                {t("service.guaranteedDesc").split("•").map((highlight) => (
+                  <span key={highlight.trim()} className="rounded-full border border-white/10 bg-white/[0.045] px-2 py-1 text-[10px] font-semibold text-zinc-300">
+                    {highlight.trim()}
+                  </span>
+                ))}
+              </span>
+            </span>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--color-primary)]/25 bg-[var(--color-primary)]/10 text-[var(--color-primary-light)] transition duration-200 group-hover:-translate-x-0.5">
+              <ChevronDown size={16} className="-rotate-90" />
+            </span>
           </div>
         </button>
 
