@@ -457,7 +457,7 @@ export default function ServicesPage() {
                   ) : (
                     <PlatformIcon
                       name={p.id}
-                      className={`h-8 w-8 ${active ? "platform-icon-animated-active" : "text-white"}`}
+                      className={`h-11 w-11 ${active ? "platform-icon-animated-active" : "text-white"}`}
                       animated={!active}
                     />
                   )}

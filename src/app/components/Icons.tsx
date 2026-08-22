@@ -51,6 +51,25 @@ export const platformIcons: Record<string, React.ReactNode> = {
   ),
 };
 
+const platformIconThemes: Record<string, string> = {
+  whatsapp: "text-[#25D366] border-[#25D366]/35 bg-[#25D366]/10 shadow-[0_0_22px_-10px_#25D366]",
+  instagram: "text-[#F77737] border-[#E1306C]/35 bg-gradient-to-br from-[#FCAF45]/15 via-[#E1306C]/10 to-[#833AB4]/15 shadow-[0_0_22px_-10px_#E1306C]",
+  tiktok: "text-[#f5f5f5] border-cyan-300/30 bg-gradient-to-br from-cyan-300/10 via-white/[0.04] to-pink-400/10 shadow-[0_0_22px_-10px_#22d3ee]",
+  facebook: "text-[#60A5FA] border-[#1877F2]/35 bg-[#1877F2]/12 shadow-[0_0_22px_-10px_#1877F2]",
+  telegram: "text-[#67C7F5] border-[#229ED9]/35 bg-[#229ED9]/12 shadow-[0_0_22px_-10px_#229ED9]",
+  youtube: "text-[#FF6B6B] border-[#FF0000]/35 bg-[#FF0000]/10 shadow-[0_0_22px_-10px_#FF0000]",
+  twitter: "text-white border-white/25 bg-white/[0.08] shadow-[0_0_22px_-10px_#ffffff]",
+  discord: "text-[#A5B4FC] border-[#5865F2]/35 bg-[#5865F2]/12 shadow-[0_0_22px_-10px_#5865F2]",
+  snapchat: "text-[#FFE047] border-[#FFFC00]/30 bg-[#FFFC00]/10 shadow-[0_0_22px_-10px_#FFFC00]",
+  threads: "text-white border-white/25 bg-white/[0.08] shadow-[0_0_22px_-10px_#ffffff]",
+  twitch: "text-[#C4B5FD] border-[#9146FF]/35 bg-[#9146FF]/12 shadow-[0_0_22px_-10px_#9146FF]",
+  kuaishou: "text-[#FF8A65] border-[#FF4D4D]/30 bg-[#FF4D4D]/10 shadow-[0_0_22px_-10px_#FF4D4D]",
+  likee: "text-[#FF7BA8] border-[#FF5C93]/30 bg-[#FF5C93]/10 shadow-[0_0_22px_-10px_#FF5C93]",
+  spotify: "text-[#6EE7B7] border-[#1DB954]/35 bg-[#1DB954]/10 shadow-[0_0_22px_-10px_#1DB954]",
+  all: "text-[var(--color-primary-light)] border-[var(--color-primary)]/35 bg-[var(--color-primary)]/10 shadow-[0_0_22px_-10px_var(--color-primary)]",
+  other: "text-zinc-200 border-white/15 bg-white/[0.06] shadow-[0_0_22px_-10px_#ffffff]",
+};
+
 export const PlatformIcon = ({
   name,
   className = "h-8 w-8",
@@ -61,6 +80,11 @@ export const PlatformIcon = ({
   animated?: boolean;
 }) => {
   const icon = platformIcons[name] || platformIcons.other;
+  const theme = platformIconThemes[name] || platformIconThemes.other;
   const animatedClass = animated ? "platform-icon-animated" : "";
-  return <span className={`${className} ${animatedClass}`}>{icon}</span>;
+  return (
+    <span className={`platform-icon-shell ${className} ${theme} ${animatedClass}`} aria-hidden="true">
+      <span className="platform-icon-glyph">{icon}</span>
+    </span>
+  );
 };
