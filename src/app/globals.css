@@ -395,6 +395,56 @@ input:focus, textarea:focus, select:focus {
   filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.7));
 }
 
+/* Services platform tiles */
+.platform-tile {
+  box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(240, 210, 122, 0.16);
+  border-radius: 1.25rem;
+  background: linear-gradient(155deg, rgba(31, 26, 18, 0.78), rgba(16, 13, 10, 0.9));
+  transition: transform 180ms cubic-bezier(0.23, 1, 0.32, 1), border-color 180ms cubic-bezier(0.23, 1, 0.32, 1), background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 180ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.platform-tile:hover {
+  transform: translateY(-1px);
+  border-color: rgba(240, 210, 122, 0.42);
+  background: linear-gradient(155deg, rgba(40, 32, 20, 0.84), rgba(19, 15, 10, 0.94));
+}
+.platform-tile:active {
+  transform: scale(0.985);
+}
+.platform-tile:focus-visible {
+  outline: 2px solid rgba(240, 210, 122, 0.9);
+  outline-offset: 2px;
+}
+.platform-tile-active {
+  border-color: rgba(240, 210, 122, 0.72);
+  background: linear-gradient(155deg, rgba(70, 52, 20, 0.45), rgba(22, 17, 10, 0.94));
+  box-shadow: 0 8px 24px -18px rgba(240, 210, 122, 0.9), inset 0 1px 0 rgba(255, 235, 170, 0.12);
+}
+.platform-logo-frame {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(240, 210, 122, 0.2);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.045);
+}
+.platform-tile .platform-icon-shell {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.platform-tile .platform-icon-shell:hover,
+.platform-tile .platform-icon-shell:active {
+  transform: none;
+  box-shadow: none;
+}
+
 /* Platform brand icon shells */
 .platform-icon-shell {
   display: inline-flex;

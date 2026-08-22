@@ -480,36 +480,35 @@ export default function ServicesPage() {
 
         {/* Platform grid — بطاقات منصات فاخرة */}
         <div className="relative">
-          <div className="pointer-events-none absolute -top-6 inset-x-0 h-24 bg-[var(--color-primary)]/8 blur-2xl" />
           <div className="grid grid-cols-4 gap-2 sm:gap-3">
             {platformOptions.map((p) => {
               const active = activePlatform === p.id;
               return (
                 <button
                   key={p.id}
+                  type="button"
+                  aria-pressed={active}
                   onClick={() => { setSelectedPlatform(p.id); setSelectedType("all"); }}
-                  className={`card-luxe group relative flex flex-col items-center justify-center rounded-2xl border p-3 aspect-square ${
-                    active
-                      ? "border-[var(--color-primary)]/70 bg-[var(--color-primary)]/10 shadow-[0_0_32px_-6px_var(--color-primary)]"
-                      : ""
+                  className={`platform-tile group relative flex min-h-[6.5rem] flex-col items-center justify-center gap-2 px-1.5 py-3 sm:min-h-[7.25rem] sm:px-2.5 ${
+                    active ? "platform-tile-active" : ""
                   }`}
                 >
-                  {active && <div className="pointer-events-none absolute top-1.5 left-1.5 h-2 w-2 rounded-full bg-[var(--color-primary)] shadow-[0_0_8px_2px_var(--color-primary)] sparkle-star" />}
-                                  {p.logoUrl ? (
-                    <img src={p.logoUrl} alt="" className="h-9 w-9 rounded-xl object-cover" loading="lazy" />
+                  {p.logoUrl ? (
+                    <span className="platform-logo-frame h-11 w-11 sm:h-12 sm:w-12">
+                      <img src={p.logoUrl} alt="" className="h-full w-full rounded-[0.8rem] object-cover" loading="lazy" />
+                    </span>
                   ) : (
                     <PlatformIcon
                       name={p.id}
-                      className={`h-11 w-11 ${active ? "platform-icon-animated-active" : "text-white"}`}
-                      animated={!active}
+                      className="platform-icon-tile h-11 w-11 sm:h-12 sm:w-12"
+                      animated={false}
                     />
                   )}
-                  <span className="mt-2 flex min-h-[2.35rem] flex-col items-center justify-center text-center leading-tight">
-                    <span className="line-clamp-2 text-[10px] font-black text-zinc-200">{displayPlatformLabel(p)}</span>
-                    {displayPlatformBrand(p) && <span dir="ltr" className="mt-0.5 truncate text-[8px] font-semibold tracking-wide text-zinc-500">{displayPlatformBrand(p)}</span>}
+                  <span className="flex min-h-[2.2rem] max-w-full flex-col items-center justify-center text-center leading-tight">
+                    <span className="line-clamp-1 max-w-full text-[11px] font-bold text-zinc-100 sm:text-xs">{displayPlatformLabel(p)}</span>
+                    {displayPlatformBrand(p) && <span dir="ltr" className="mt-0.5 max-w-full truncate text-[8px] font-medium tracking-wide text-zinc-500 sm:text-[9px]">{displayPlatformBrand(p)}</span>}
                   </span>
-
-              </button>
+                </button>
             );
           })}
           </div>
