@@ -1,17 +1,53 @@
-import { createClient } from "@libsql/client";
+import { createClient, type Client, type Config } from "@libsql/client";
 
-let url = process.env.TURSO_DATABASE_URL;
-const authToken = process.env.TURSO_AUTH_TOKEN;
+function getDbConfig(): Config {
+  let url = process.env.TURSO_DATABASE_URL;
 
-if (process.env.USE_LOCAL_DB === "1") {
-  url = `file:${process.env.LOCAL_DB_PATH || "/tmp/follower-local.db"}`;
+  if (process.env.USE_LOCAL_DB === "1") {
+    url = `file:${process.env.LOCAL_DB_PATH || "/tmp/follower-local.db"}`;
+  }
+
+  if (!url) {
+    throw new Error("TURSO_DATABASE_URL must be set (or set USE_LOCAL_DB=1)");
+  }
+  const authToken = process.env.TURSO_AUTH_TOKEN;
+  if (!authToken && process.env.USE_LOCAL_DB !== "1") {
+    throw new Error("TURSO_AUTH_TOKEN must be set when not using local DB");
+  }
+
+  return { url, authToken: authToken ?? undefined };
 }
 
-if (!url || (!authToken && process.env.USE_LOCAL_DB !== "1")) {
-  throw new Error("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set");
+// Lazily create the client so static analysis / build-time imports do not
+// throw when environment variables are missing (e.g., during `next build`
+// analysis before server-only code is actually executed).
+let _db: Client | null = null;
+function getDb(): Client {
+  if (!_db) {
+    _db = createClient(getDbConfig());
+  }
+  return _db;
 }
 
-export const db = createClient({ url, authToken });
+// A transparent lazy proxy that forwards every property access / method call
+// to the real client. This keeps existing imports like `import { db } from "@/lib/db"`
+// and calls like `db.execute(...)` working unchanged.
+export const db = new Proxy({} as Client, {
+  get(_target, prop, receiver) {
+    const client = getDb();
+    const value = Reflect.get(client, prop, client);
+    if (typeof value === "function") {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+      return (value as Function).bind(client);
+    }
+    return value;
+  },
+  set(_target, prop, value) {
+    const client = getDb();
+    Reflect.set(client, prop, value, client);
+    return true;
+  },
+});
 
 export async function initDb() {
   await db.execute(`
