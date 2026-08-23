@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Tajawal } from "next/font/google";
 import { cookies } from "next/headers";
-import { db } from "@/lib/db";
+import { db, initDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import type { ClientAuthUser } from "./components/auth-client";
 import "./globals.css";
@@ -23,6 +23,7 @@ type BrandingRow = { siteName?: unknown; siteDescription?: unknown; brandMediaUr
 
 async function getInitialUser(): Promise<ClientAuthUser | null> {
   try {
+    await initDb();
     const session = await getSession();
     if (!session.isLoggedIn || typeof session.userId !== "number" || !session.username || !session.role) return null;
 

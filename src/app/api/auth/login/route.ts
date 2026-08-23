@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, initDb } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { getSession } from "@/lib/auth";
 import { emailVerificationRequired } from "@/lib/email-verification";
@@ -12,6 +12,7 @@ import {
 
 export async function POST(request: Request) {
   try {
+    await initDb();
     const body = await request.json() as {
       username?: unknown;
       password?: unknown;

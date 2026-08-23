@@ -1,6 +1,6 @@
 import { getIronSession, SessionOptions } from "iron-session";
 import { cookies } from "next/headers";
-import { db } from "./db";
+import { db, initDb } from "./db";
 import { emailVerificationRequired } from "./email-verification";
 
 export interface SessionData {
@@ -65,6 +65,8 @@ export async function requireAuth() {
     throw new Error("Unauthorized");
   }
 
+  // طبّق ترحيلات المصادقة قبل قراءة حالة المستخدم في أي مسار.
+  await initDb();
   // Fail closed instead of allowing a stalled database read to hang every authenticated route.
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, initDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { checkAuthRateLimit, clearAuthRateLimit, SecurityServiceUnavailable } from "@/lib/security";
 import { verifyFirebaseEmailIdToken } from "@/lib/firebase-server";
@@ -13,6 +13,7 @@ function json(data: unknown, init?: ResponseInit) {
 
 export async function POST(request: Request) {
   try {
+    await initDb();
     const body = await request.json() as { idToken?: unknown };
     const idToken = typeof body.idToken === "string" ? body.idToken.trim() : "";
     if (!idToken) return json({ error: "جلسة Firebase غير موجودة." }, { status: 400 });

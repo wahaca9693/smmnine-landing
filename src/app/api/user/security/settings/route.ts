@@ -1,5 +1,5 @@
 import { getSession } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db, initDb } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
 
@@ -17,6 +17,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "غير مصرح به" }, { status: 401 });
     }
 
+    await initDb();
     const body = await req.json() as {
       loginPreference?: unknown;
       is2faEnabled?: unknown;

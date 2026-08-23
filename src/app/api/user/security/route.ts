@@ -1,5 +1,5 @@
 import { getSession } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db, initDb } from "@/lib/db";
 import { NextResponse } from "next/server";
 
 export async function GET() {
@@ -9,6 +9,7 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    await initDb();
     const user = await db.execute({
       sql: "SELECT login_preference, is_2fa_enabled, two_fa_user_configured, two_fa_frequency, security_code_hash FROM users WHERE id = ?",
       args: [session.userId]

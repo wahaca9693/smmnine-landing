@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { db } from "@/lib/db";
+import { db, initDb } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { createEmailVerificationToken, emailVerificationConfigured, emailVerificationExpiry, emailVerificationRequired, hashEmailVerificationToken, sendEmailVerification } from "@/lib/email-verification";
 
@@ -9,6 +9,7 @@ export async function PATCH(request: Request) {
     const session = await getSession();
     if (!session.isLoggedIn || typeof session.userId !== "number") return NextResponse.json({ error: "يجب تسجيل الدخول أولًا" }, { status: 401 });
 
+    await initDb();
     const body = await request.json().catch(() => ({})) as { username?: unknown; email?: unknown; currentPassword?: unknown; securityCode?: unknown };
     const username = typeof body.username === "string" ? body.username.trim() : "";
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
