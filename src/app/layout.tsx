@@ -30,16 +30,16 @@ async function getInitialUser(): Promise<ClientAuthUser | null> {
     try {
       const result = await Promise.race([
         db.execute({
-          sql: "SELECT balance, role, is_2fa_enabled, email_verified FROM users WHERE id = ? LIMIT 1",
+          sql: "SELECT balance, role, is_2fa_enabled, two_fa_user_configured, email_verified FROM users WHERE id = ? LIMIT 1",
           args: [session.userId],
         }),
         new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => reject(new Error("Initial user lookup timeout")), 1500);
         }),
       ]);
-      const row = result.rows[0] as { balance?: unknown; role?: unknown; is_2fa_enabled?: unknown; email_verified?: unknown } | undefined;
+      const row = result.rows[0] as { balance?: unknown; role?: unknown; is_2fa_enabled?: unknown; two_fa_user_configured?: unknown; email_verified?: unknown } | undefined;
       if (!row) return null;
-      const is2faEnabled = Boolean(Number(row.is_2fa_enabled || 0));
+      const is2faEnabled = Number(row.is_2fa_enabled || 0) === 1 && Number(row.two_fa_user_configured || 0) === 1;
       return {
         username: session.username,
         balance: Number(row.balance || 0),

@@ -18,11 +18,11 @@ export async function PATCH(request: Request) {
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return NextResponse.json({ error: "البريد الإلكتروني غير صالح" }, { status: 400 });
     if (!currentPassword) return NextResponse.json({ error: "أدخل كلمة المرور الحالية لتأكيد التعديل" }, { status: 400 });
 
-    const currentResult = await db.execute({ sql: "SELECT username, email, password_hash, security_code_hash, is_2fa_enabled, email_verified FROM users WHERE id = ? LIMIT 1", args: [session.userId] });
-    const current = currentResult.rows[0] as { username?: unknown; email?: unknown; password_hash?: unknown; security_code_hash?: unknown; is_2fa_enabled?: unknown; email_verified?: unknown } | undefined;
+    const currentResult = await db.execute({ sql: "SELECT username, email, password_hash, security_code_hash, is_2fa_enabled, two_fa_user_configured, email_verified FROM users WHERE id = ? LIMIT 1", args: [session.userId] });
+    const current = currentResult.rows[0] as { username?: unknown; email?: unknown; password_hash?: unknown; security_code_hash?: unknown; is_2fa_enabled?: unknown; two_fa_user_configured?: unknown; email_verified?: unknown } | undefined;
     if (!current) return NextResponse.json({ error: "لم يتم العثور على الحساب" }, { status: 404 });
     if (!await bcrypt.compare(currentPassword, String(current.password_hash || ""))) return NextResponse.json({ error: "كلمة المرور الحالية غير صحيحة" }, { status: 401 });
-    if (Number(current.is_2fa_enabled)) {
+    if (Number(current.is_2fa_enabled) === 1 && Number(current.two_fa_user_configured || 0) === 1) {
       if (!/^\d{6}$/.test(securityCode) || !await bcrypt.compare(securityCode, String(current.security_code_hash || ""))) return NextResponse.json({ error: "رمز الأمان غير صحيح" }, { status: 401 });
     }
 

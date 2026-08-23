@@ -16,7 +16,7 @@ export async function POST(req: Request) {
 
     // 1. Fetch user data
     const result = await db.execute({
-      sql: "SELECT password_hash, security_code_hash, is_2fa_enabled FROM users WHERE id = ?",
+      sql: "SELECT password_hash, security_code_hash, is_2fa_enabled, two_fa_user_configured FROM users WHERE id = ?",
       args: [userId],
     });
     
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     }
 
     // 2. Verify 2FA if enabled
-    if (Number(user.is_2fa_enabled)) {
+    if (Number(user.is_2fa_enabled) === 1 && Number(user.two_fa_user_configured || 0) === 1) {
       if (!securityCode) {
         return NextResponse.json({ error: "SECURITY_CODE_REQUIRED" }, { status: 400 });
       }

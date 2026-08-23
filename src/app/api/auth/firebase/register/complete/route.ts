@@ -1,4 +1,4 @@
-import { randomBytes, randomInt } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { db, initDb } from "@/lib/db";
@@ -53,12 +53,10 @@ export async function POST(request: Request) {
       }
 
       const unusableLocalPassword = await bcrypt.hash(`firebase:${randomBytes(32).toString("hex")}`, 12);
-      const securityCode = String(randomInt(100000, 1000000));
-      const securityCodeHash = await bcrypt.hash(securityCode, 10);
       const inserted = await transaction.execute({
         sql: `INSERT INTO users (username, email, password_hash, security_code_hash, login_preference, balance, role, terms_accepted, is_2fa_enabled, two_fa_frequency, email_verified, firebase_uid, auth_provider, email_verification_token_hash, email_verification_expires_at)
-              VALUES (?, ?, ?, ?, 'both', 0, 'user', ?, 1, 'always', 1, ?, 'firebase-email', NULL, NULL)`,
-        args: [String(pending.username), identity.email, unusableLocalPassword, securityCodeHash, Number(pending.terms_accepted || 1), identity.uid],
+              VALUES (?, ?, ?, NULL, 'both', 0, 'user', ?, 0, 'always', 1, ?, 'firebase-email', NULL, NULL)`,
+        args: [String(pending.username), identity.email, unusableLocalPassword, Number(pending.terms_accepted || 1), identity.uid],
       });
       const userId = Number(inserted.lastInsertRowid);
       await transaction.execute({
@@ -73,11 +71,11 @@ export async function POST(request: Request) {
       session.role = "user";
       session.isLoggedIn = true;
       session.balance = 0;
-      session.is2faEnabled = true;
-      session.is2faVerified = false;
+      session.is2faEnabled = false;
+      session.is2faVerified = true;
       session.emailVerified = true;
       await session.save();
-      return json({ user: { id: userId, username: String(pending.username), role: "user", balance: 0 }, securityCode, requires2fa: true, emailVerified: true });
+      return json({ user: { id: userId, username: String(pending.username), role: "user", balance: 0 }, requires2fa: false, emailVerified: true });
     } catch (error) {
       await transaction.rollback().catch(() => undefined);
       throw error;

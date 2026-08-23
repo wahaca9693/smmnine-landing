@@ -33,7 +33,7 @@ export async function GET() {
 
     const [result, notifCount] = await Promise.all([
       db.execute({
-        sql: "SELECT id, username, email, balance, role, is_2fa_enabled, email_verified FROM users WHERE id = ?",
+        sql: "SELECT id, username, email, balance, role, is_2fa_enabled, two_fa_user_configured, email_verified FROM users WHERE id = ?",
         args: [userId],
       }),
       db.execute({
@@ -42,7 +42,7 @@ export async function GET() {
       }),
     ]);
 
-    const user = result.rows[0] as unknown as (UserRow & { is_2fa_enabled: number; email_verified?: number | string | boolean }) | undefined;
+    const user = result.rows[0] as unknown as (UserRow & { is_2fa_enabled: number; two_fa_user_configured?: number | string | boolean; email_verified?: number | string | boolean }) | undefined;
     if (!user) {
       const s = await getSession();
       s.destroy();
@@ -58,7 +58,7 @@ export async function GET() {
         email: user.email,
         balance: Number(user.balance),
         role: user.role,
-        is2faEnabled: Boolean(user.is_2fa_enabled),
+        is2faEnabled: Number(user.is_2fa_enabled) === 1 && Number(user.two_fa_user_configured || 0) === 1,
         is2faVerified: Boolean(currentSession.is2faVerified),
         emailVerified: Number(user.email_verified) === 1,
       },

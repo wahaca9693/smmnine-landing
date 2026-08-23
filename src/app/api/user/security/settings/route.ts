@@ -81,6 +81,7 @@ export async function POST(req: Request) {
       sql: `UPDATE users SET
             login_preference = ?,
             is_2fa_enabled = ?,
+            two_fa_user_configured = 1,
             two_fa_frequency = ?,
             updated_at = CURRENT_TIMESTAMP
             WHERE id = ?`,

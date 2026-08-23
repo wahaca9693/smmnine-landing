@@ -27,7 +27,10 @@ export async function POST(request: Request) {
       balance?: number | string;
       is_2fa_enabled?: number | boolean | string;
     } | undefined;
-    if (!user || !user.security_code_hash) {
+    if (!user || Number(user.is_2fa_enabled || 0) !== 1) {
+      return NextResponse.json({ error: "التحقق الثنائي غير مفعّل لهذا الحساب" }, { status: 400 });
+    }
+    if (!user.security_code_hash) {
       return NextResponse.json({ error: "لم يتم إعداد رمز أمان لهذا الحساب" }, { status: 400 });
     }
 

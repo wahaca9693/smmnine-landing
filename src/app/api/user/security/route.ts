@@ -10,7 +10,7 @@ export async function GET() {
     }
 
     const user = await db.execute({
-      sql: "SELECT login_preference, is_2fa_enabled, two_fa_frequency, security_code_hash FROM users WHERE id = ?",
+      sql: "SELECT login_preference, is_2fa_enabled, two_fa_user_configured, two_fa_frequency, security_code_hash FROM users WHERE id = ?",
       args: [session.userId]
     });
 
@@ -21,13 +21,14 @@ export async function GET() {
     const row = user.rows[0] as {
       login_preference?: unknown;
       is_2fa_enabled?: unknown;
+      two_fa_user_configured?: unknown;
       two_fa_frequency?: unknown;
       security_code_hash?: unknown;
     };
     return NextResponse.json({
       settings: {
         loginPreference: row.login_preference || "both",
-        is2faEnabled: Boolean(Number(row.is_2fa_enabled)),
+        is2faEnabled: Number(row.is_2fa_enabled) === 1 && Number(row.two_fa_user_configured || 0) === 1,
         twoFaFrequency: row.two_fa_frequency || "always",
         hasSecurityCode: Boolean(row.security_code_hash)
       }

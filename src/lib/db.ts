@@ -463,6 +463,7 @@ const schemaMigrations: SchemaMigration[] = [
       ["login_preference", "TEXT DEFAULT 'both'"],
       ["security_code_hash", "TEXT"],
       ["is_2fa_enabled", "INTEGER DEFAULT 0"],
+      ["two_fa_user_configured", "INTEGER DEFAULT 0"],
       ["two_fa_frequency", "TEXT DEFAULT 'always'"],
       ["last_2fa_verified_at", "DATETIME"],
       ["email_verified", "INTEGER DEFAULT 1"],
@@ -588,6 +589,18 @@ async function applySchemaMigrations() {
   if (alterations.some((sql) => sql.includes("ALTER TABLE users ADD COLUMN updated_at"))) {
     await db.execute("UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL");
   }
+
+  // الحسابات القديمة التي أنشأها تدفق Firebase السابق حصلت على رمز تلقائيًا.
+  // نعيدها إلى الوضع الاختياري مرة واحدة، مع إبقاء 2FA للحسابات المحلية التي كانت مفعّلة.
+  if (alterations.some((sql) => sql.includes("ALTER TABLE users ADD COLUMN two_fa_user_configured"))) {
+    await db.execute(`UPDATE users SET two_fa_user_configured = CASE
+      WHEN LOWER(COALESCE(auth_provider, '')) LIKE 'firebase-email%' THEN 0
+      WHEN COALESCE(is_2fa_enabled, 0) = 1 THEN 1
+      ELSE 0
+    END`);
+    await db.execute(`UPDATE users SET is_2fa_enabled = 0, security_code_hash = NULL, last_2fa_verified_at = NULL
+      WHERE LOWER(COALESCE(auth_provider, '')) LIKE 'firebase-email%' AND COALESCE(two_fa_user_configured, 0) = 0`);
+  }
 }
 
 async function createIndexes() {
@@ -597,7 +610,7 @@ async function createIndexes() {
 let initPromise: Promise<void> | null = null;
 
 export function initDb(): Promise<void> {
-  if (process.env.SMMNINE_DB_SCHEMA_READY === "1") return Promise.resolve();
+  // لا نتجاوز التهيئة عند وجود SMMNINE_DB_SCHEMA_READY؛ قد تحتوي النسخة الجديدة على ترحيلات لازمة.
   if (initPromise) return initPromise;
   initPromise = (async () => {
     await executeSchemaBatch();

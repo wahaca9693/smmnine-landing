@@ -69,12 +69,12 @@ export async function requireAuth() {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     const result = await Promise.race([
-      db.execute({ sql: "SELECT is_banned, is_2fa_enabled, two_fa_frequency, last_2fa_verified_at, email_verified FROM users WHERE id = ?", args: [session.userId] }),
+      db.execute({ sql: "SELECT is_banned, is_2fa_enabled, two_fa_user_configured, two_fa_frequency, last_2fa_verified_at, email_verified FROM users WHERE id = ?", args: [session.userId] }),
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => reject(new Error("Auth state lookup timeout")), 3000);
       }),
     ]);
-    const user = result.rows[0] as { is_banned?: unknown, is_2fa_enabled?: unknown, two_fa_frequency?: unknown, last_2fa_verified_at?: unknown, email_verified?: unknown } | undefined;
+    const user = result.rows[0] as { is_banned?: unknown, is_2fa_enabled?: unknown, two_fa_user_configured?: unknown, two_fa_frequency?: unknown, last_2fa_verified_at?: unknown, email_verified?: unknown } | undefined;
     if (!user) {
       throw new Error("Unauthorized");
     }
@@ -86,8 +86,11 @@ export async function requireAuth() {
       throw new Error("EMAIL_VERIFICATION_REQUIRED");
     }
 
+    // لا يُفرض 2FA إلا إذا فعّله المستخدم من إعدادات الأمان صراحةً.
+    const twoFaEnabled = Number(user.is_2fa_enabled) === 1 && Number(user.two_fa_user_configured ?? 0) === 1;
+    session.is2faEnabled = twoFaEnabled;
     // If 2FA is enabled but not verified in session, block access except for specific routes
-    if (Number(user.is_2fa_enabled) && (!session.is2faVerified || twoFaVerificationExpired(user.two_fa_frequency, user.last_2fa_verified_at))) {
+    if (twoFaEnabled && (!session.is2faVerified || twoFaVerificationExpired(user.two_fa_frequency, user.last_2fa_verified_at))) {
       if (session.is2faVerified) {
         session.is2faVerified = false;
         await session.save();

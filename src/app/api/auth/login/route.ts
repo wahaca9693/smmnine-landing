@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     }
 
     const result = await db.execute({
-      sql: "SELECT id, username, email, password_hash, role, balance, is_banned, login_preference, is_2fa_enabled, security_code_hash, email_verified FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE",
+      sql: "SELECT id, username, email, password_hash, role, balance, is_banned, login_preference, is_2fa_enabled, two_fa_user_configured, security_code_hash, email_verified FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE",
       args: [username, username],
     });
 
@@ -99,8 +99,8 @@ export async function POST(request: Request) {
     session.isLoggedIn = true;
     session.balance = Number(user.balance || 0);
 
-    // If 2FA is enabled, don't set is2faVerified yet
-    const is2faEnabled = Boolean(Number(user.is_2fa_enabled));
+    // 2FA اختياري ولا يصبح فعالًا إلا بعد حفظه من إعدادات الأمان.
+    const is2faEnabled = Number(user.is_2fa_enabled) === 1 && Number(user.two_fa_user_configured || 0) === 1;
     session.is2faEnabled = is2faEnabled;
     session.is2faVerified = !is2faEnabled;
     const isEmailVerified = !emailVerificationRequired() || Number(user.email_verified) === 1;

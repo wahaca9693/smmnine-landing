@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     if (!rate.allowed) return json({ error: "تم إيقاف محاولات الدخول مؤقتًا. أعد المحاولة لاحقًا." }, { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds || 900) } });
 
     const result = await db.execute({
-      sql: "SELECT id, username, email, role, balance, is_banned, is_2fa_enabled FROM users WHERE firebase_uid = ? LIMIT 1",
+      sql: "SELECT id, username, email, role, balance, is_banned, is_2fa_enabled, two_fa_user_configured FROM users WHERE firebase_uid = ? LIMIT 1",
       args: [identity.uid],
     });
     const user = result.rows[0] as Record<string, unknown> | undefined;
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     session.role = String(user.role);
     session.isLoggedIn = true;
     session.balance = Number(user.balance || 0);
-    session.is2faEnabled = Boolean(Number(user.is_2fa_enabled));
+    session.is2faEnabled = Number(user.is_2fa_enabled) === 1 && Number(user.two_fa_user_configured || 0) === 1;
     session.is2faVerified = !session.is2faEnabled;
     session.emailVerified = true;
     await session.save();
