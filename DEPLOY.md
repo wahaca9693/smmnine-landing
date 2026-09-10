@@ -33,6 +33,27 @@ SMMNINE_API_KEY=your-smmnine-api-key
 # ASIACELL_PROXIES=...
 ```
 
+## ✅ فحص صحة النشر
+
+بعد أي نشر، افتح:
+
+```
+https://smmnine-landing.vercel.app/api/health
+```
+
+يُرجع مثلًا:
+
+```json
+{ "status": "ok", "db": "connected", "smmnineKeyConfigured": true, "counts": { "users": 12, "orders": 40, "tickets": 3, "crypto_deposits": 0 } }
+```
+
+- `status: "ok"` + `db: "connected"` ← قاعدة البيانات شغّالة ومتغيّرات Turso مضبوطة.
+- `db: "error"` ← `TURSO_DATABASE_URL` أو `TURSO_AUTH_TOKEN` ناقصة/غلط على فيرسل.
+- `smmnineKeyConfigured: false` ← ما حطيت `SMMNINE_API_KEY` في Environment Variables.
+- النقطة تنفّذ أيضًا `CREATE TABLE IF NOT EXISTS crypto_deposits` فتُصلح البنية الناقصة تلقائيًا على القواعد القديمة.
+
+> لا يُنشَر أي سر من هذه النقطة — حالة الاتصال والعدّادات فقط.
+
 ## أمر النشر اليدوي (إذا احتجت)
 
 ```bash

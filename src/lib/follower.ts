@@ -1,6 +1,10 @@
 const API_URL = process.env.SMMNINE_API_URL || "https://smmnine.com/api/v2";
 const API_KEY = process.env.SMMNINE_API_KEY;
 
+// مهلة قصوى للاتصال بلوحة smmnine حتى لا تبقى الطلبات معلّقة بلا نهاية
+// (function timeout على فيرسل = خطأ غامض للمستخدم).
+export const SMMNINE_TIMEOUT_MS = Number(process.env.SMMNINE_TIMEOUT_MS || 20000);
+
 export async function smmnineRequest(params: Record<string, string>) {
   if (!API_KEY) throw new Error("SMMNINE_API_KEY not set");
 
@@ -10,6 +14,7 @@ export async function smmnineRequest(params: Record<string, string>) {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
     cache: "no-store",
+    signal: AbortSignal.timeout(SMMNINE_TIMEOUT_MS),
   });
 
   const data = await res.json();

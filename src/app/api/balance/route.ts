@@ -17,6 +17,7 @@ export async function GET() {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ key: API_KEY, action: "balance" }),
       cache: "no-store",
+      signal: AbortSignal.timeout(Number(process.env.SMMNINE_TIMEOUT_MS || 20000)),
     });
 
     const data = await res.json();
