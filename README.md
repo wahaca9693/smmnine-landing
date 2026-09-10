@@ -56,9 +56,12 @@
 
 ```bash
 npm install
-npx dotenv-cli -e .env.local -- npm run db:init
-npx dotenv-cli -e .env.local -- npm run seed
+npm run db:init
+npm run seed
 ```
+
+> سكربتات `db:init` و `seed` تقرأ `.env.local` تلقائيًا (عبر `tsx --env-file-if-exists`)، ولا حاجة لحزمة `dotenv-cli`.
+> بنية الجداول تُنشأ تلقائيًا عند أول طلب (`initDb`) فلا يلزم تشغيل الـ migration يدويًا على فيرسل.
 
 ## متغيرات البيئة
 
@@ -68,9 +71,26 @@ SMMNINE_API_KEY=...
 
 TURSO_DATABASE_URL=libsql://...
 TURSO_AUTH_TOKEN=...
+USE_LOCAL_DB=0
 
 SESSION_SECRET=your-super-secret-key-32charslong
 ```
+
+متغيرات اختيارية:
+
+```env
+# للدفع عبر Asiacell (سيرفر الوسيط في proxy-server.js)
+ASIACELL_PROXY_URL=http://your-proxy-server:3000
+# ASIACELL_PROXIES=host1:3128,host2:3128   # قائمة تدور بينها بدل السابق
+
+# مهلة الاتصال بلوحة smmnine بالمللي ثانية (الافتراضي 20000)
+SMMNINE_TIMEOUT_MS=20000
+
+# أصول إضافية مسموح لها بأصول dev (للتجربة عبر رابط بروكسي)
+DEV_ALLOWED_ORIGINS=*.e2b.app
+```
+
+للتجربة السريعة بدون Turso: `USE_LOCAL_DB=1` (مع `LOCAL_DB_PATH` اختياريًا).
 
 ## التشغيل محليًا
 

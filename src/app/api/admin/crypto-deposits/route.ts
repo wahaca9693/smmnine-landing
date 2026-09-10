@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db, ensureCryptoDepositsTable } from "@/lib/db";
 
 export async function GET() {
   try {
     await requireAdmin();
+    await ensureCryptoDepositsTable();
     const res = await db.execute(`
       SELECT cd.*, u.username
       FROM crypto_deposits cd

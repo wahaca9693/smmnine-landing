@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db, ensureCryptoDepositsTable } from "@/lib/db";
 
 export async function GET() {
   try {
@@ -54,6 +54,8 @@ export async function POST(request: Request) {
 
     // تسجيل طلب الكريبتو في جدول crypto_deposits للتتبع التلقائي
     if (cryptoInfo) {
+      // يضمن وجود الجدول على القواعد القديمة قبل التسجيل
+      await ensureCryptoDepositsTable();
       await db.execute({
         sql: `INSERT INTO crypto_deposits (user_id, coin, network, amount, address, status, note)
               VALUES (?, ?, ?, ?, ?, 'pending', ?)`,

@@ -53,6 +53,7 @@ export async function POST(request: Request) {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params,
       cache: "no-store",
+      signal: AbortSignal.timeout(Number(process.env.SMMNINE_TIMEOUT_MS || 20000)),
     });
 
     const data = await res.json();

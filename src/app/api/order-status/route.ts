@@ -49,6 +49,7 @@ export async function POST(request: Request) {
         order: String(orderId),
       }),
       cache: "no-store",
+      signal: AbortSignal.timeout(Number(process.env.SMMNINE_TIMEOUT_MS || 20000)),
     });
 
     const data = await res.json();

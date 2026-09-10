@@ -49,6 +49,29 @@ export const db = new Proxy({} as Client, {
   },
 });
 
+// جدول إيداعات الكريبتو — يُنشأ عند الطلب (on-demand) لأن مسارات الشحن كانت
+// تكتب فيه دون أن يكون أي مكان ينشئه، فيفشل الشحن الكريبتو على قواعد البيانات
+// القديمة بـ "no such table: crypto_deposits".
+const CRYPTO_DEPOSITS_SCHEMA = `
+    CREATE TABLE IF NOT EXISTS crypto_deposits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      coin TEXT NOT NULL,
+      network TEXT,
+      amount REAL NOT NULL,
+      address TEXT,
+      tx_hash TEXT,
+      status TEXT DEFAULT 'pending',
+      note TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      completed_at DATETIME
+    )
+  `;
+
+export async function ensureCryptoDepositsTable() {
+  await db.execute(CRYPTO_DEPOSITS_SCHEMA);
+}
+
 export async function initDb() {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
@@ -95,6 +118,8 @@ export async function initDb() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
+
+  await ensureCryptoDepositsTable();
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS payment_methods (
